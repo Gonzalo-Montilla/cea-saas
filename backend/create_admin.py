@@ -11,7 +11,7 @@ def create_admin():
     
     try:
         # Verificar si ya existe
-        existing_admin = db.query(Usuario).filter(Usuario.email == "admin@ceaeducar.com").first()
+        existing_admin = db.query(Usuario).filter(Usuario.email == "admin@siaec.com").first()
         
         if existing_admin:
             print("⚠️  Usuario admin ya existe")
@@ -20,9 +20,9 @@ def create_admin():
         
         # Crear admin
         admin = Usuario(
-            email="admin@ceaeducar.com",
+            email="admin@siaec.com",
             password_hash=get_password_hash("admin123"),
-            nombre_completo="Administrador CEA EDUCAR",
+            nombre_completo="Administrador SIAEC",
             cedula="1000000000",
             telefono="3000000000",
             rol=RolUsuario.ADMIN,

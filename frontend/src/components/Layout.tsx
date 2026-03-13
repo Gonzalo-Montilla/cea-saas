@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { 
@@ -20,7 +20,8 @@ import {
   Wallet
 } from 'lucide-react';
 import { RolUsuario } from '../types';
-import logo from '../assets/cea_educar_final.png';
+import { BRAND_LOGO_URL, BRAND_NAME } from '../config/branding';
+import { tenantsAPI } from '../services/api';
 import '../styles/Layout.css';
 
 interface LayoutProps {
@@ -31,6 +32,23 @@ export const Layout = ({ children }: LayoutProps) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const [tenantDisplayName, setTenantDisplayName] = useState(BRAND_NAME);
+  const [tenantLogoUrl, setTenantLogoUrl] = useState(BRAND_LOGO_URL);
+
+  useEffect(() => {
+    const loadTenantBranding = async () => {
+      try {
+        const tenantSlug = (localStorage.getItem('tenant_slug') || '').trim();
+        const ctx = await tenantsAPI.getContext(tenantSlug || undefined);
+        setTenantDisplayName(ctx.display_name || ctx.nombre || BRAND_NAME);
+        setTenantLogoUrl(ctx.logo_url || BRAND_LOGO_URL);
+      } catch {
+        setTenantDisplayName(BRAND_NAME);
+        setTenantLogoUrl(BRAND_LOGO_URL);
+      }
+    };
+    void loadTenantBranding();
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -71,7 +89,7 @@ export const Layout = ({ children }: LayoutProps) => {
     <div className="layout-container">
       <aside className={`sidebar ${sidebarExpanded ? 'expanded' : 'collapsed'}`}>
         <div className="sidebar-logo">
-          <img src={logo} alt="CEA EDUCAR" className="sidebar-logo-img" />
+          <img src={tenantLogoUrl} alt={tenantDisplayName} className="sidebar-logo-img" />
         </div>
         
         <nav className="nav-menu">
@@ -109,7 +127,7 @@ export const Layout = ({ children }: LayoutProps) => {
                 <Menu size={18} />
               </button>
               <div className="header-brand">
-                <h1>CEA EDUCAR</h1>
+                <h1>{tenantDisplayName}</h1>
                 <span>Panel administrativo</span>
               </div>
             </div>

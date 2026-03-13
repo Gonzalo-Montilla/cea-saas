@@ -23,12 +23,15 @@
 }
 
 .login-logo {
-  width: 380px;
+  width: 340px;
   height: auto;
-  margin-bottom: -45px;
+  margin-bottom: 10px;
   display: block;
   margin-left: auto;
   margin-right: auto;
+  border-radius: 18px;
+  background: transparent;
+  object-fit: contain;
 }
 
 .login-header p {
@@ -147,4 +150,15 @@
 .login-footer p {
   color: var(--text-secondary);
   font-size: 13px;
+}
+
+.login-links {
+  margin-top: 16px;
+  text-align: center;
+}
+
+.login-links a {
+  color: var(--primary);
+  text-decoration: none;
+  font-size: 14px;
 }

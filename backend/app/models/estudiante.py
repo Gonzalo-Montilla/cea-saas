@@ -58,6 +58,7 @@ class Estudiante(Base):
     __tablename__ = "estudiantes"
     
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True, index=True)
     usuario_id = Column(Integer, ForeignKey("usuarios.id"), unique=True, nullable=False)
     
     # Datos personales adicionales

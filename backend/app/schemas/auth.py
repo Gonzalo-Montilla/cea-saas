@@ -31,6 +31,8 @@ class Token(BaseModel):
 class TokenData(BaseModel):
     """Schema para datos del token decodificado"""
     user_id: int
+    tenant_id: Optional[int] = None
+    tenant_slug: Optional[str] = None
 
 
 class UserResponse(BaseModel):

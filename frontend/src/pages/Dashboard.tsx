@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { reportesAPI } from '../services/api';
+import { BRAND_NAME } from '../config/branding';
 import '../styles/Dashboard.css';
 
 export const Dashboard = () => {
@@ -69,7 +70,7 @@ export const Dashboard = () => {
     <>
       <PageHeader
         title={`Bienvenido, ${user?.nombre_completo || ''}`}
-        subtitle="Panel de control - CEA EDUCAR"
+        subtitle={`Panel de control - ${BRAND_NAME}`}
         icon={<Home size={20} />}
       />
 

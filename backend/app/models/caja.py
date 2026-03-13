@@ -24,6 +24,7 @@ class Caja(Base):
     __tablename__ = "cajas"
     
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True, index=True)
     
     # Control de apertura/cierre
     fecha_apertura = Column(DateTime, default=datetime.utcnow, nullable=False)

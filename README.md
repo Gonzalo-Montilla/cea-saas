@@ -1,6 +1,6 @@
-# CEA SaaS - Safe Start
+# SIAEC SaaS - Safe Start
 
-This repository is the isolated SaaS base for CEA EDUCAR.
+This repository is the isolated SaaS base for SIAEC.
 
 ## Safety Rules
 

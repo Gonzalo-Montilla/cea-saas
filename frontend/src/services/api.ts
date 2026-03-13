@@ -2,10 +2,21 @@ import axios from 'axios';
 import type { LoginRequest, RegisterRequest, TokenResponse, Usuario, Estudiante } from '../types';
 
 const RAW_API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v1';
+const TENANT_HEADER_NAME = 'X-Tenant-Slug';
+const ONBOARDING_HEADER_NAME = 'X-Onboarding-Key';
+const TENANT_SLUG_STORAGE_KEY = 'tenant_slug';
+const ENV_TENANT_SLUG = import.meta.env.VITE_TENANT_SLUG?.trim() || '';
 const API_URL = RAW_API_URL.endsWith('/api/v1')
   ? RAW_API_URL
   : `${RAW_API_URL.replace(/\/$/, '')}/api/v1`;
 const HEALTH_URL = API_URL.replace(/\/api\/v1$/, '') + '/health';
+
+const resolveTenantSlug = (): string | null => {
+  const savedSlug = localStorage.getItem(TENANT_SLUG_STORAGE_KEY);
+  if (savedSlug?.trim()) return savedSlug.trim();
+  if (ENV_TENANT_SLUG) return ENV_TENANT_SLUG;
+  return null;
+};
 
 const api = axios.create({
   baseURL: API_URL,
@@ -18,8 +29,12 @@ const api = axios.create({
 // Interceptor para agregar token a las peticiones
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('access_token');
+  const tenantSlug = resolveTenantSlug();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+  }
+  if (tenantSlug) {
+    (config.headers as any)[TENANT_HEADER_NAME] = tenantSlug;
   }
   return config;
 });
@@ -33,8 +48,11 @@ api.interceptors.response.use(
       const refreshToken = localStorage.getItem('refresh_token');
       if (refreshToken) {
         try {
+          const tenantSlug = resolveTenantSlug();
           const response = await axios.post(`${API_URL}/auth/refresh`, {
             refresh_token: refreshToken,
+          }, {
+            headers: tenantSlug ? { [TENANT_HEADER_NAME]: tenantSlug } : undefined
           });
           const { access_token } = response.data;
           localStorage.setItem('access_token', access_token);
@@ -82,6 +100,76 @@ export const authAPI = {
   logout: () => {
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
+  },
+};
+
+export interface SchoolOnboardingPayload {
+  nombre_escuela: string;
+  slug?: string;
+  display_name?: string;
+  plan: 'FREE' | 'BASIC' | 'PRO' | 'ENTERPRISE';
+  contacto_email: string;
+  contacto_telefono?: string;
+  nit?: string;
+  logo_url?: string;
+  admin_email: string;
+  admin_password: string;
+  admin_nombre_completo: string;
+  admin_cedula: string;
+  admin_telefono?: string;
+  send_welcome_email: boolean;
+  activate_tenant: boolean;
+}
+
+export interface SchoolOnboardingResponse {
+  tenant_id: number;
+  tenant_slug: string;
+  tenant_nombre: string;
+  tenant_display_name: string;
+  tenant_plan: string;
+  tenant_activo: boolean;
+  admin_user_id: number;
+  admin_email: string;
+  welcome_email_sent: boolean;
+}
+
+export interface TenantContextResponse {
+  id: number;
+  slug: string;
+  nombre: string;
+  display_name: string;
+  plan: string;
+  is_active: boolean;
+  logo_url?: string | null;
+}
+
+export const onboardingAPI = {
+  createSchool: async (
+    payload: SchoolOnboardingPayload,
+    onboardingKey: string
+  ): Promise<SchoolOnboardingResponse> => {
+    const response = await api.post<SchoolOnboardingResponse>(
+      '/tenants/onboarding-school',
+      payload,
+      {
+        headers: {
+          [ONBOARDING_HEADER_NAME]: onboardingKey,
+        },
+      }
+    );
+    return response.data;
+  },
+  publicSignup: async (payload: SchoolOnboardingPayload): Promise<SchoolOnboardingResponse> => {
+    const response = await api.post<SchoolOnboardingResponse>('/tenants/public-signup', payload);
+    return response.data;
+  },
+};
+
+export const tenantsAPI = {
+  getContext: async (tenantSlug?: string): Promise<TenantContextResponse> => {
+    const headers = tenantSlug?.trim() ? { [TENANT_HEADER_NAME]: tenantSlug.trim() } : undefined;
+    const response = await api.get<TenantContextResponse>('/tenants/context', { headers });
+    return response.data;
   },
 };
 

@@ -2,7 +2,7 @@
 Script para crear todas las tablas en la base de datos
 """
 from app.core.database import engine, Base
-from app.models import usuario, estudiante, pago, compromiso_pago, clase
+from app.models import usuario, estudiante, pago, compromiso_pago, clase, tenant
 
 def create_tables():
     """Crear todas las tablas en la base de datos"""

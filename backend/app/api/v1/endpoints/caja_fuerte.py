@@ -7,13 +7,16 @@ from typing import List, Optional
 from io import BytesIO
 import json
 import os
+import urllib.request
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
 from reportlab.lib import colors
 from app.core.database import get_db
-from app.api.deps import get_admin_or_gerente
+from app.core.config import settings
+from app.api.deps import get_admin_or_gerente, get_required_tenant
 from app.models.usuario import Usuario
+from app.models.tenant import Tenant
 from app.models.caja_fuerte import CajaFuerte, MovimientoCajaFuerte, InventarioEfectivo
 from app.models.caja import TipoMovimiento
 from app.models.pago import MetodoPago
@@ -36,10 +39,10 @@ DENOMINACIONES_COL = [
 ]
 
 
-def _get_or_create_caja_fuerte(db: Session) -> CajaFuerte:
-    caja_fuerte = db.query(CajaFuerte).first()
+def _get_or_create_caja_fuerte(db: Session, tenant_id: int) -> CajaFuerte:
+    caja_fuerte = db.query(CajaFuerte).filter(CajaFuerte.tenant_id == tenant_id).first()
     if not caja_fuerte:
-        caja_fuerte = CajaFuerte()
+        caja_fuerte = CajaFuerte(tenant_id=tenant_id)
         db.add(caja_fuerte)
         db.commit()
         db.refresh(caja_fuerte)
@@ -199,9 +202,10 @@ def _build_movimiento_response(mov: MovimientoCajaFuerte) -> MovimientoCajaFuert
 @router.get("/resumen", response_model=CajaFuerteResumen)
 def get_resumen(
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_gerente)
+    current_user: Usuario = Depends(get_admin_or_gerente),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    caja_fuerte = _get_or_create_caja_fuerte(db)
+    caja_fuerte = _get_or_create_caja_fuerte(db, current_tenant.id)
     return CajaFuerteResumen(
         id=caja_fuerte.id,
         saldo_efectivo=caja_fuerte.saldo_efectivo,
@@ -225,9 +229,10 @@ def list_movimientos(
     fecha_inicio: Optional[date] = None,
     fecha_fin: Optional[date] = None,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_gerente)
+    current_user: Usuario = Depends(get_admin_or_gerente),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    caja_fuerte = _get_or_create_caja_fuerte(db)
+    caja_fuerte = _get_or_create_caja_fuerte(db, current_tenant.id)
     query = db.query(MovimientoCajaFuerte).filter(
         MovimientoCajaFuerte.caja_fuerte_id == caja_fuerte.id
     )
@@ -251,9 +256,10 @@ def list_movimientos(
 def crear_movimiento(
     movimiento: MovimientoCajaFuerteCreate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_gerente)
+    current_user: Usuario = Depends(get_admin_or_gerente),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    caja_fuerte = _get_or_create_caja_fuerte(db)
+    caja_fuerte = _get_or_create_caja_fuerte(db, current_tenant.id)
 
     inventario_detalle = None
     if movimiento.metodo_pago == MetodoPago.EFECTIVO:
@@ -297,13 +303,20 @@ def actualizar_movimiento(
     movimiento_id: int,
     data: MovimientoCajaFuerteUpdate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_gerente)
+    current_user: Usuario = Depends(get_admin_or_gerente),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    mov = db.query(MovimientoCajaFuerte).filter(MovimientoCajaFuerte.id == movimiento_id).first()
+    mov = db.query(MovimientoCajaFuerte).filter(
+        MovimientoCajaFuerte.id == movimiento_id,
+        MovimientoCajaFuerte.caja_fuerte.has(CajaFuerte.tenant_id == current_tenant.id),
+    ).first()
     if not mov:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Movimiento no encontrado")
 
-    caja_fuerte = db.query(CajaFuerte).filter(CajaFuerte.id == mov.caja_fuerte_id).first()
+    caja_fuerte = db.query(CajaFuerte).filter(
+        CajaFuerte.id == mov.caja_fuerte_id,
+        CajaFuerte.tenant_id == current_tenant.id,
+    ).first()
     if not caja_fuerte:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Caja fuerte no encontrada")
 
@@ -365,13 +378,20 @@ def actualizar_movimiento(
 def eliminar_movimiento(
     movimiento_id: int,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_gerente)
+    current_user: Usuario = Depends(get_admin_or_gerente),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    mov = db.query(MovimientoCajaFuerte).filter(MovimientoCajaFuerte.id == movimiento_id).first()
+    mov = db.query(MovimientoCajaFuerte).filter(
+        MovimientoCajaFuerte.id == movimiento_id,
+        MovimientoCajaFuerte.caja_fuerte.has(CajaFuerte.tenant_id == current_tenant.id),
+    ).first()
     if not mov:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Movimiento no encontrado")
 
-    caja_fuerte = db.query(CajaFuerte).filter(CajaFuerte.id == mov.caja_fuerte_id).first()
+    caja_fuerte = db.query(CajaFuerte).filter(
+        CajaFuerte.id == mov.caja_fuerte_id,
+        CajaFuerte.tenant_id == current_tenant.id,
+    ).first()
     if not caja_fuerte:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Caja fuerte no encontrada")
 
@@ -396,9 +416,13 @@ def eliminar_movimiento_con_inventario(
     movimiento_id: int,
     inventario: InventarioUpdate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_gerente)
+    current_user: Usuario = Depends(get_admin_or_gerente),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    mov = db.query(MovimientoCajaFuerte).filter(MovimientoCajaFuerte.id == movimiento_id).first()
+    mov = db.query(MovimientoCajaFuerte).filter(
+        MovimientoCajaFuerte.id == movimiento_id,
+        MovimientoCajaFuerte.caja_fuerte.has(CajaFuerte.tenant_id == current_tenant.id),
+    ).first()
     if not mov:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Movimiento no encontrado")
     if mov.metodo_pago != MetodoPago.EFECTIVO:
@@ -407,7 +431,10 @@ def eliminar_movimiento_con_inventario(
             detail="Este endpoint solo aplica para movimientos en efectivo"
         )
 
-    caja_fuerte = db.query(CajaFuerte).filter(CajaFuerte.id == mov.caja_fuerte_id).first()
+    caja_fuerte = db.query(CajaFuerte).filter(
+        CajaFuerte.id == mov.caja_fuerte_id,
+        CajaFuerte.tenant_id == current_tenant.id,
+    ).first()
     if not caja_fuerte:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Caja fuerte no encontrada")
 
@@ -429,9 +456,13 @@ def eliminar_movimiento_con_inventario(
 def get_recibo_movimiento_pdf(
     movimiento_id: int,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_gerente)
+    current_user: Usuario = Depends(get_admin_or_gerente),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    mov = db.query(MovimientoCajaFuerte).filter(MovimientoCajaFuerte.id == movimiento_id).first()
+    mov = db.query(MovimientoCajaFuerte).filter(
+        MovimientoCajaFuerte.id == movimiento_id,
+        MovimientoCajaFuerte.caja_fuerte.has(CajaFuerte.tenant_id == current_tenant.id),
+    ).first()
     if not mov:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Movimiento no encontrado")
     if mov.tipo != TipoMovimiento.EGRESO:
@@ -439,7 +470,7 @@ def get_recibo_movimiento_pdf(
 
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
-    _pdf_header(c, "Recibo de egreso")
+    _pdf_header(c, "Recibo de egreso", current_tenant)
     y = 580
     c.setLineWidth(0.5)
     c.line(80, y, 532, y)
@@ -472,9 +503,10 @@ def get_recibo_movimiento_pdf(
 @router.get("/inventario", response_model=InventarioResponse)
 def get_inventario(
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_gerente)
+    current_user: Usuario = Depends(get_admin_or_gerente),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    caja_fuerte = _get_or_create_caja_fuerte(db)
+    caja_fuerte = _get_or_create_caja_fuerte(db, current_tenant.id)
     items = db.query(InventarioEfectivo).filter(
         InventarioEfectivo.caja_fuerte_id == caja_fuerte.id
     ).all()
@@ -496,9 +528,10 @@ def get_inventario(
 def update_inventario(
     data: InventarioUpdate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_gerente)
+    current_user: Usuario = Depends(get_admin_or_gerente),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    caja_fuerte = _get_or_create_caja_fuerte(db)
+    caja_fuerte = _get_or_create_caja_fuerte(db, current_tenant.id)
 
     total_efectivo = Decimal("0")
     for item in data.items:
@@ -529,33 +562,62 @@ def update_inventario(
     return InventarioResponse(items=response_items, total_efectivo=total_efectivo)
 
 
-def _pdf_header(c: canvas.Canvas, titulo: str) -> None:
-    _draw_logo(c)
+def _pdf_header(c: canvas.Canvas, titulo: str, tenant: Optional[Tenant] = None) -> None:
+    _draw_logo(c, tenant)
+    title_text, subtitle_text = _tenant_brand_texts(tenant)
     c.setFont("Helvetica-Bold", 16)
-    c.drawCentredString(306, 652, "CEA EDUCAR")
+    c.drawCentredString(306, 652, title_text)
     c.setFont("Helvetica", 11)
-    c.drawCentredString(306, 636, "Centro de ensenanza automovilistica")
+    c.drawCentredString(306, 636, subtitle_text)
     c.setFont("Helvetica-Bold", 14)
     c.drawCentredString(306, 620, titulo)
 
 
-def _draw_logo(c: canvas.Canvas) -> None:
-    logo_path = os.getenv("CEA_LOGO_PATH")
-    if not logo_path:
+def _tenant_brand_texts(tenant: Optional[Tenant]) -> tuple[str, str]:
+    if tenant:
+        title = tenant.display_name or tenant.nombre or settings.BRAND_SHORT_NAME
+        subtitle = tenant.nombre if tenant.display_name and tenant.nombre and tenant.display_name != tenant.nombre else settings.BRAND_FULL_NAME
+        return title, subtitle
+    return settings.BRAND_SHORT_NAME, settings.BRAND_FULL_NAME
+
+
+def _resolve_logo_for_pdf(tenant: Optional[Tenant]):
+    """Retorna path (str) o BytesIO del logo del tenant o fallback."""
+    raw = (tenant.logo_url or "").strip() if tenant and getattr(tenant, "logo_url", None) else None
+    if not raw:
+        raw = settings.BRAND_LOGO_PATH or os.getenv("BRAND_LOGO_PATH") or ""
+    if not raw:
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", ".."))
-        assets_dir = os.path.join(repo_root, "frontend", "src", "assets")
-        logo_path = os.path.join(assets_dir, "cea_educar_final.png")
-        if not os.path.exists(logo_path) and os.path.isdir(assets_dir):
-            for f in os.listdir(assets_dir):
-                if f.lower().endswith(".png"):
-                    logo_path = os.path.join(assets_dir, f)
-                    break
-    if logo_path and os.path.exists(logo_path):
+        default_logo = os.path.join(repo_root, "frontend", "public", "logo-siaec-sin-fondo.png")
+        if os.path.exists(default_logo):
+            return default_logo
+        return None
+    if raw.startswith("http://") or raw.startswith("https://"):
         try:
-            logo = ImageReader(logo_path)
-            c.drawImage(logo, 186, 675, width=240, height=120, preserveAspectRatio=True, mask='auto')
+            req = urllib.request.Request(raw, headers={"User-Agent": "SIAEC-PDF/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return BytesIO(resp.read())
         except Exception:
-            return
+            return None
+    if raw.startswith("/"):
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", ".."))
+        path = os.path.join(repo_root, "frontend", "public", raw.lstrip("/"))
+        if os.path.exists(path):
+            return path
+    if os.path.exists(raw):
+        return raw
+    return None
+
+
+def _draw_logo(c: canvas.Canvas, tenant: Optional[Tenant] = None) -> None:
+    src = _resolve_logo_for_pdf(tenant)
+    if not src:
+        return
+    try:
+        logo = ImageReader(src)
+        c.drawImage(logo, 186, 675, width=240, height=120, preserveAspectRatio=True, mask='auto')
+    except Exception:
+        return
 
 
 def _pdf_kv(c: canvas.Canvas, label: str, value, y: int) -> int:

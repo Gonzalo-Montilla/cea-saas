@@ -16,6 +16,7 @@ from app.models.clase import (
 )
 from app.models.tarifa import Tarifa
 from app.models.caja import Caja, MovimientoCaja, EstadoCaja, TipoMovimiento, ConceptoMovimientoCaja
+from app.models.tenant import Tenant, TenantUser, PlanTenant
 
 __all__ = [
     "Usuario", "RolUsuario",
@@ -25,5 +26,6 @@ __all__ = [
     "Clase", "Instructor", "Vehiculo", "Evaluacion", "MantenimientoVehiculo", "RepuestoMantenimiento", "CombustibleVehiculo",
     "AdjuntoMantenimientoVehiculo", "AdjuntoCombustibleVehiculo", "VehiculoConsumoUmbral",
     "Tarifa",
-    "Caja", "MovimientoCaja", "EstadoCaja", "TipoMovimiento", "ConceptoMovimientoCaja"
+    "Caja", "MovimientoCaja", "EstadoCaja", "TipoMovimiento", "ConceptoMovimientoCaja",
+    "Tenant", "TenantUser", "PlanTenant",
 ]

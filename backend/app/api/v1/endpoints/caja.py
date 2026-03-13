@@ -7,6 +7,7 @@ from decimal import Decimal
 import logging
 from io import BytesIO
 import os
+import urllib.request
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
@@ -15,12 +16,13 @@ from reportlab.lib import colors
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.email import send_email
-from app.api.deps import get_current_active_user, get_admin_or_coordinador_or_cajero
+from app.api.deps import get_current_active_user, get_admin_or_coordinador_or_cajero, get_required_tenant
 from app.models.usuario import Usuario
 from app.models.caja import Caja, MovimientoCaja, EstadoCaja, TipoMovimiento, ConceptoMovimientoCaja, DetallePagoMovimientoCaja
 from app.models.caja_fuerte import CajaFuerte, MovimientoCajaFuerte
 from app.models.pago import Pago, DetallePago, MetodoPago, EstadoPago
 from app.models.estudiante import Estudiante
+from app.models.tenant import Tenant
 from app.schemas.caja import (
     CajaApertura, CajaCierre, CajaResumen, CajaDetalle,
     MovimientoCajaCreate, MovimientoCajaGeneralCreate, MovimientoCajaResponse, DetallePagoResponse,
@@ -38,7 +40,8 @@ logger = logging.getLogger(__name__)
 def abrir_caja(
     caja_data: CajaApertura,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero)
+    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Abrir una nueva caja.
@@ -46,7 +49,8 @@ def abrir_caja(
     """
     # Verificar si ya hay una caja abierta
     caja_abierta = db.query(Caja).filter(
-        Caja.estado == EstadoCaja.ABIERTA
+        Caja.estado == EstadoCaja.ABIERTA,
+        Caja.tenant_id == current_tenant.id,
     ).with_for_update().first()
     
     if caja_abierta:
@@ -57,6 +61,7 @@ def abrir_caja(
     
     # Crear nueva caja
     nueva_caja = Caja(
+        tenant_id=current_tenant.id,
         usuario_apertura_id=current_user.id,
         saldo_inicial=caja_data.saldo_inicial,
         observaciones_apertura=caja_data.observaciones_apertura,
@@ -73,10 +78,14 @@ def abrir_caja(
 @router.get("/actual", response_model=Optional[CajaResumen])
 def get_caja_actual(
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """Obtener la caja actualmente abierta"""
-    caja = db.query(Caja).filter(Caja.estado == EstadoCaja.ABIERTA).first()
+    caja = db.query(Caja).filter(
+        Caja.estado == EstadoCaja.ABIERTA,
+        Caja.tenant_id == current_tenant.id,
+    ).first()
     
     if not caja:
         return None
@@ -89,13 +98,17 @@ def cerrar_caja(
     caja_id: int,
     cierre_data: CajaCierre,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero)
+    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Cerrar la caja realizando el arqueo.
     Calcula la diferencia entre efectivo teórico y físico.
     """
-    caja = db.query(Caja).filter(Caja.id == caja_id).with_for_update().first()
+    caja = db.query(Caja).filter(
+        Caja.id == caja_id,
+        Caja.tenant_id == current_tenant.id,
+    ).with_for_update().first()
     
     if not caja:
         raise HTTPException(
@@ -129,10 +142,10 @@ def cerrar_caja(
     return _build_caja_detalle(caja, db)
 
 
-def _get_or_create_caja_fuerte(db: Session) -> CajaFuerte:
-    caja_fuerte = db.query(CajaFuerte).first()
+def _get_or_create_caja_fuerte(db: Session, tenant_id: int) -> CajaFuerte:
+    caja_fuerte = db.query(CajaFuerte).filter(CajaFuerte.tenant_id == tenant_id).first()
     if not caja_fuerte:
-        caja_fuerte = CajaFuerte()
+        caja_fuerte = CajaFuerte(tenant_id=tenant_id)
         db.add(caja_fuerte)
         db.flush()
     return caja_fuerte
@@ -163,7 +176,7 @@ def _registrar_ingresos_caja_fuerte_por_cierre(
     db: Session,
     current_user: Usuario
 ):
-    caja_fuerte = _get_or_create_caja_fuerte(db)
+    caja_fuerte = _get_or_create_caja_fuerte(db, caja.tenant_id)
 
     def registrar(metodo: MetodoPago, monto: Decimal, concepto: str):
         if monto is None or Decimal(str(monto)) <= 0:
@@ -195,7 +208,7 @@ def _registrar_ingreso_caja_fuerte_por_pago(
 ):
     if metodo == MetodoPago.EFECTIVO:
         return
-    caja_fuerte = _get_or_create_caja_fuerte(db)
+    caja_fuerte = _get_or_create_caja_fuerte(db, pago.tenant_id)
     concepto = f"PAGO #{pago.id} - {metodo.value}"
     mov = MovimientoCajaFuerte(
         caja_fuerte_id=caja_fuerte.id,
@@ -216,13 +229,17 @@ def _registrar_ingreso_caja_fuerte_por_pago(
 @router.get("/dashboard", response_model=DashboardCaja)
 def get_dashboard(
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Dashboard de caja con resumen y alertas
     """
     # Caja actual
-    caja_actual = db.query(Caja).filter(Caja.estado == EstadoCaja.ABIERTA).first()
+    caja_actual = db.query(Caja).filter(
+        Caja.estado == EstadoCaja.ABIERTA,
+        Caja.tenant_id == current_tenant.id,
+    ).first()
     
     dashboard = DashboardCaja(
         caja_actual=_build_caja_resumen(caja_actual, db) if caja_actual else None,
@@ -265,6 +282,8 @@ def get_dashboard(
     # Contar estudiantes con saldo pendiente y próximos a vencer
     dashboard.estudiantes_proximos_vencer = db.query(Estudiante).join(Pago).filter(
         and_(
+            Estudiante.tenant_id == current_tenant.id,
+            Pago.tenant_id == current_tenant.id,
             Estudiante.saldo_pendiente > 0,
             Pago.fecha_pago >= fecha_limite,
             Pago.fecha_pago < hoy - timedelta(days=90)
@@ -275,6 +294,8 @@ def get_dashboard(
     fecha_vencida = hoy - timedelta(days=90)
     dashboard.estudiantes_vencidos = db.query(Estudiante).join(Pago).filter(
         and_(
+            Estudiante.tenant_id == current_tenant.id,
+            Pago.tenant_id == current_tenant.id,
             Estudiante.saldo_pendiente > 0,
             Pago.fecha_pago < fecha_vencida
         )
@@ -290,12 +311,14 @@ def get_historial_cajas(
     fecha_inicio: Optional[datetime] = None,
     fecha_fin: Optional[datetime] = None,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """Obtener historial de cajas cerradas con filtros"""
     # Solo cajas cerradas
     query = db.query(Caja).filter(
-        Caja.estado == EstadoCaja.CERRADA
+        Caja.estado == EstadoCaja.CERRADA,
+        Caja.tenant_id == current_tenant.id,
     ).order_by(Caja.fecha_apertura.desc())
     
     if fecha_inicio:
@@ -313,16 +336,20 @@ def get_historial_cajas(
 def get_recibo_pago_pdf(
     pago_id: int,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    pago = db.query(Pago).filter(Pago.id == pago_id).first()
+    pago = db.query(Pago).filter(
+        Pago.id == pago_id,
+        Pago.tenant_id == current_tenant.id,
+    ).first()
     if not pago:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pago no encontrado")
 
     db.refresh(pago, ['detalles_pago', 'estudiante', 'usuario'])
     estudiante = pago.estudiante
 
-    pdf_bytes = _build_pago_pdf_bytes(pago)
+    pdf_bytes = _build_pago_pdf_bytes(pago, current_tenant)
     return _pdf_response(BytesIO(pdf_bytes), f"recibo_pago_{pago.id}.pdf")
 
 
@@ -330,18 +357,20 @@ def get_recibo_pago_pdf(
 def get_recibo_egreso_pdf(
     egreso_id: int,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     egreso = db.query(MovimientoCaja).filter(
         MovimientoCaja.id == egreso_id,
-        MovimientoCaja.tipo == TipoMovimiento.EGRESO
+        MovimientoCaja.tipo == TipoMovimiento.EGRESO,
+        MovimientoCaja.caja.has(Caja.tenant_id == current_tenant.id),
     ).first()
     if not egreso:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Egreso no encontrado")
 
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
-    _pdf_header(c, "Recibo de egreso")
+    _pdf_header(c, "Recibo de egreso", current_tenant)
     y = 580
     c.setLineWidth(0.5)
     c.line(80, y, 532, y)
@@ -372,10 +401,12 @@ def get_recibo_egreso_pdf(
 def get_recibo_movimiento_pdf(
     movimiento_id: int,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     movimiento = db.query(MovimientoCaja).filter(
-        MovimientoCaja.id == movimiento_id
+        MovimientoCaja.id == movimiento_id,
+        MovimientoCaja.caja.has(Caja.tenant_id == current_tenant.id),
     ).first()
     if not movimiento:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Movimiento no encontrado")
@@ -385,7 +416,7 @@ def get_recibo_movimiento_pdf(
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
     titulo = "Recibo de ingreso" if movimiento.tipo == TipoMovimiento.INGRESO else "Recibo de egreso"
-    _pdf_header(c, titulo)
+    _pdf_header(c, titulo, current_tenant)
     y = 580
     c.setLineWidth(0.5)
     c.line(80, y, 532, y)
@@ -425,15 +456,19 @@ def get_recibo_movimiento_pdf(
 def get_cierre_caja_pdf(
     caja_id: int,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    caja = db.query(Caja).filter(Caja.id == caja_id).first()
+    caja = db.query(Caja).filter(
+        Caja.id == caja_id,
+        Caja.tenant_id == current_tenant.id,
+    ).first()
     if not caja:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Caja no encontrada")
 
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
-    _pdf_header(c, "Cierre de caja")
+    _pdf_header(c, "Cierre de caja", current_tenant)
     y = 580
     c.setLineWidth(0.5)
     c.line(80, y, 532, y)
@@ -462,7 +497,7 @@ def get_cierre_caja_pdf(
         MovimientoCaja.tipo == TipoMovimiento.EGRESO
     ).order_by(MovimientoCaja.fecha.desc()).all()
 
-    y = _ensure_space(c, y, 180, "Cierre de caja (continuacion)")
+    y = _ensure_space(c, y, 180, "Cierre de caja (continuacion)", current_tenant)
     y = _pdf_section(c, "Detalle de egresos", y)
     table_headers = ["Fecha", "Concepto", "Categoria", "Metodo", "Monto"]
     table_widths = [80, 170, 90, 70, 42]
@@ -470,7 +505,7 @@ def get_cierre_caja_pdf(
     for e in egresos:
         if y < 90:
             c.showPage()
-            _pdf_header(c, "Cierre de caja (continuacion)")
+            _pdf_header(c, "Cierre de caja (continuacion)", current_tenant)
             y = 580
             c.setLineWidth(0.5)
             c.line(80, y, 532, y)
@@ -502,7 +537,7 @@ def get_cierre_caja_pdf(
         MovimientoCaja.tipo == TipoMovimiento.EGRESO
     ).group_by(MovimientoCaja.categoria).order_by(func.sum(MovimientoCaja.monto).desc()).limit(5).all()
 
-    y = _ensure_space(c, y, 140, "Cierre de caja (continuacion)")
+    y = _ensure_space(c, y, 140, "Cierre de caja (continuacion)", current_tenant)
     y = _pdf_section(c, "Resumen por categoria", y)
     for r in resumen:
         nombre = r.categoria.value if r.categoria else "OTROS"
@@ -518,14 +553,18 @@ def get_cierre_caja_pdf(
 def registrar_pago(
     pago_data: PagoCreate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero)
+    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Registrar un pago de estudiante.
     El pago se asocia a la caja abierta y actualiza el saldo del estudiante.
     """
     # Verificar que hay una caja abierta
-    caja_abierta = db.query(Caja).filter(Caja.estado == EstadoCaja.ABIERTA).with_for_update().first()
+    caja_abierta = db.query(Caja).filter(
+        Caja.estado == EstadoCaja.ABIERTA,
+        Caja.tenant_id == current_tenant.id,
+    ).with_for_update().first()
     
     if not caja_abierta:
         raise HTTPException(
@@ -534,7 +573,10 @@ def registrar_pago(
         )
     
     # Verificar que el estudiante existe
-    estudiante = db.query(Estudiante).filter(Estudiante.id == pago_data.estudiante_id).with_for_update().first()
+    estudiante = db.query(Estudiante).filter(
+        Estudiante.id == pago_data.estudiante_id,
+        Estudiante.tenant_id == current_tenant.id,
+    ).with_for_update().first()
     
     if not estudiante:
         raise HTTPException(
@@ -557,6 +599,7 @@ def registrar_pago(
     try:
         # Crear el pago
         nuevo_pago = Pago(
+            tenant_id=current_tenant.id,
             estudiante_id=pago_data.estudiante_id,
             caja_id=caja_abierta.id,
             concepto=pago_data.concepto,
@@ -615,7 +658,7 @@ def registrar_pago(
         # Cargar explícitamente las relaciones necesarias
         db.refresh(nuevo_pago, ['detalles_pago', 'estudiante', 'usuario'])
 
-        _enviar_recibo_pago(nuevo_pago)
+        _enviar_recibo_pago(nuevo_pago, current_tenant)
         
         return _build_pago_response(nuevo_pago)
         
@@ -632,13 +675,16 @@ def registrar_pago(
 def buscar_estudiante_financiero(
     cedula: str,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Buscar estudiante por cédula y obtener su información financiera
     """
     estudiante = db.query(Estudiante).join(Usuario).filter(
-        Usuario.cedula == cedula
+        Usuario.cedula == cedula,
+        Estudiante.tenant_id == current_tenant.id,
+        Usuario.tenant_id == current_tenant.id,
     ).first()
     
     if not estudiante:
@@ -656,13 +702,17 @@ def buscar_estudiante_financiero(
 def registrar_egreso(
     egreso_data: MovimientoCajaCreate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero)
+    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Registrar un egreso (gasto) en la caja abierta
     """
     # Verificar que hay una caja abierta
-    caja_abierta = db.query(Caja).filter(Caja.estado == EstadoCaja.ABIERTA).with_for_update().first()
+    caja_abierta = db.query(Caja).filter(
+        Caja.estado == EstadoCaja.ABIERTA,
+        Caja.tenant_id == current_tenant.id,
+    ).with_for_update().first()
     
     if not caja_abierta:
         raise HTTPException(
@@ -721,7 +771,8 @@ def registrar_egreso(
 def registrar_movimiento(
     movimiento_data: MovimientoCajaGeneralCreate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero)
+    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Registrar un movimiento general (ingreso/egreso) en la caja abierta
@@ -731,7 +782,10 @@ def registrar_movimiento(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Solo se permiten ingresos en este módulo"
         )
-    caja_abierta = db.query(Caja).filter(Caja.estado == EstadoCaja.ABIERTA).with_for_update().first()
+    caja_abierta = db.query(Caja).filter(
+        Caja.estado == EstadoCaja.ABIERTA,
+        Caja.tenant_id == current_tenant.id,
+    ).with_for_update().first()
     if not caja_abierta:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -828,7 +882,10 @@ def _actualizar_egresos_caja_por_metodo(caja: Caja, metodo: MetodoPago, monto: D
 
 def _build_caja_resumen(caja: Caja, db: Session) -> CajaResumen:
     """Construir resumen de caja"""
-    num_pagos = db.query(Pago).filter(Pago.caja_id == caja.id).count()
+    num_pagos = db.query(Pago).filter(
+        Pago.caja_id == caja.id,
+        Pago.tenant_id == caja.tenant_id,
+    ).count()
     num_egresos = db.query(MovimientoCaja).filter(
         and_(
             MovimientoCaja.caja_id == caja.id,
@@ -872,11 +929,11 @@ def _build_caja_resumen(caja: Caja, db: Session) -> CajaResumen:
     )
 
 
-def _build_pago_pdf_bytes(pago: Pago) -> bytes:
+def _build_pago_pdf_bytes(pago: Pago, tenant: Optional[Tenant] = None) -> bytes:
     estudiante = pago.estudiante
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
-    _pdf_header(c, "Recibo de pago")
+    _pdf_header(c, "Recibo de pago", tenant)
     y = 580
     c.setLineWidth(0.5)
     c.line(80, y, 532, y)
@@ -920,7 +977,7 @@ def _build_pago_pdf_bytes(pago: Pago) -> bytes:
     return buffer.getvalue()
 
 
-def _enviar_recibo_pago(pago: Pago) -> None:
+def _enviar_recibo_pago(pago: Pago, tenant: Optional[Tenant] = None) -> None:
     if not pago or not pago.estudiante or not pago.estudiante.usuario:
         return
 
@@ -929,13 +986,19 @@ def _enviar_recibo_pago(pago: Pago) -> None:
     saldo_linea = f"Saldo pendiente: {_fmt_money(saldo)}" if saldo > 0 else "Saldo pendiente: $0"
     referencia = pago.referencia_pago if pago.referencia_pago else "N/A"
     metodo = pago.metodo_pago.value if pago.metodo_pago else "MIXTO"
+    tenant_name = (tenant.display_name or tenant.nombre) if tenant else settings.BRAND_SHORT_NAME
+    contact_phone = tenant.contacto_telefono if tenant and tenant.contacto_telefono else settings.HABEAS_CONTACTO
+    contact_email = tenant.contacto_email if tenant and tenant.contacto_email else settings.HABEAS_CORREO
+    razon_social = tenant.nombre if tenant and tenant.nombre else settings.HABEAS_RAZON_SOCIAL
+    nit = tenant.nit if tenant and tenant.nit else settings.HABEAS_NIT
 
-    subject = "Recibo de pago - CEA EDUCAR"
+    subject = f"Tu recibo de pago ya esta disponible - {tenant_name}"
     body = (
         f"Hola {estudiante.usuario.nombre_completo},\n\n"
+        f"En {tenant_name} registramos tu pago exitosamente y aqui esta tu recibo:\n\n"
         f"Matricula: {estudiante.matricula_numero or 'N/A'}\n"
         f"Cedula: {estudiante.usuario.cedula}\n\n"
-        "Gracias por tu pago. Adjuntamos el recibo en PDF.\n\n"
+        "Adjuntamos tu recibo en PDF para que lo tengas a la mano.\n\n"
         "Resumen del pago:\n"
         f"- Fecha: {pago.fecha_pago.strftime('%Y-%m-%d %H:%M')}\n"
         f"- Monto: {_fmt_money(pago.monto)}\n"
@@ -943,15 +1006,15 @@ def _enviar_recibo_pago(pago: Pago) -> None:
         f"- Metodo: {metodo}\n"
         f"- Referencia: {referencia}\n\n"
         f"{saldo_linea}\n\n"
-        "Si tienes dudas o necesitas soporte, contáctanos:\n"
-        f"{settings.HABEAS_CONTACTO} | {settings.HABEAS_CORREO}\n\n"
-        "Gracias por confiar en nosotros.\n\n"
-        "CEA EDUCAR\n"
-        f"{settings.HABEAS_RAZON_SOCIAL}\n"
-        f"NIT {settings.HABEAS_NIT}\n"
+        "Si tienes dudas o necesitas apoyo, puedes escribirnos a:\n"
+        f"{contact_phone} | {contact_email}\n\n"
+        "Gracias por seguir avanzando con nosotros.\n\n"
+        f"{tenant_name}\n"
+        f"{razon_social}\n"
+        f"NIT {nit}\n"
     )
 
-    pdf_bytes = _build_pago_pdf_bytes(pago)
+    pdf_bytes = _build_pago_pdf_bytes(pago, tenant)
     filename = f"recibo_pago_{pago.id}.pdf"
     enviado = send_email(
         estudiante.usuario.email,
@@ -1046,33 +1109,62 @@ def _build_movimiento_response(movimiento: MovimientoCaja) -> MovimientoCajaResp
     )
 
 
-def _pdf_header(c: canvas.Canvas, titulo: str) -> None:
-    _draw_logo(c)
+def _pdf_header(c: canvas.Canvas, titulo: str, tenant: Optional[Tenant] = None) -> None:
+    _draw_logo(c, tenant)
+    title_text, subtitle_text = _tenant_brand_texts(tenant)
     c.setFont("Helvetica-Bold", 16)
-    c.drawCentredString(306, 652, "CEA EDUCAR")
+    c.drawCentredString(306, 652, title_text)
     c.setFont("Helvetica", 11)
-    c.drawCentredString(306, 636, "Centro de ensenanza automovilistica")
+    c.drawCentredString(306, 636, subtitle_text)
     c.setFont("Helvetica-Bold", 14)
     c.drawCentredString(306, 620, titulo)
 
 
-def _draw_logo(c: canvas.Canvas) -> None:
-    logo_path = os.getenv("CEA_LOGO_PATH")
-    if not logo_path:
+def _tenant_brand_texts(tenant: Optional[Tenant]) -> tuple[str, str]:
+    if tenant:
+        title = tenant.display_name or tenant.nombre or settings.BRAND_SHORT_NAME
+        subtitle = tenant.nombre if tenant.display_name and tenant.nombre and tenant.display_name != tenant.nombre else settings.BRAND_FULL_NAME
+        return title, subtitle
+    return settings.BRAND_SHORT_NAME, settings.BRAND_FULL_NAME
+
+
+def _resolve_logo_for_pdf(tenant: Optional[Tenant]):
+    """Retorna path (str) o BytesIO del logo del tenant o fallback."""
+    raw = (tenant.logo_url or "").strip() if tenant and getattr(tenant, "logo_url", None) else None
+    if not raw:
+        raw = settings.BRAND_LOGO_PATH or os.getenv("BRAND_LOGO_PATH") or ""
+    if not raw:
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", ".."))
-        assets_dir = os.path.join(repo_root, "frontend", "src", "assets")
-        logo_path = os.path.join(assets_dir, "cea_educar_final.png")
-        if not os.path.exists(logo_path) and os.path.isdir(assets_dir):
-            for f in os.listdir(assets_dir):
-                if f.lower().endswith(".png"):
-                    logo_path = os.path.join(assets_dir, f)
-                    break
-    if logo_path and os.path.exists(logo_path):
+        default_logo = os.path.join(repo_root, "frontend", "public", "logo-siaec-sin-fondo.png")
+        if os.path.exists(default_logo):
+            return default_logo
+        return None
+    if raw.startswith("http://") or raw.startswith("https://"):
         try:
-            logo = ImageReader(logo_path)
-            c.drawImage(logo, 186, 675, width=240, height=120, preserveAspectRatio=True, mask='auto')
+            req = urllib.request.Request(raw, headers={"User-Agent": "SIAEC-PDF/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return BytesIO(resp.read())
         except Exception:
-            return
+            return None
+    if raw.startswith("/"):
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", ".."))
+        path = os.path.join(repo_root, "frontend", "public", raw.lstrip("/"))
+        if os.path.exists(path):
+            return path
+    if os.path.exists(raw):
+        return raw
+    return None
+
+
+def _draw_logo(c: canvas.Canvas, tenant: Optional[Tenant] = None) -> None:
+    src = _resolve_logo_for_pdf(tenant)
+    if not src:
+        return
+    try:
+        logo = ImageReader(src)
+        c.drawImage(logo, 186, 675, width=240, height=120, preserveAspectRatio=True, mask='auto')
+    except Exception:
+        return
 
 
 def _pdf_kv(c: canvas.Canvas, label: str, value, y: int) -> int:
@@ -1106,10 +1198,10 @@ def _fmt_money(value: Decimal) -> str:
         return f"${value}"
 
 
-def _ensure_space(c: canvas.Canvas, y: int, min_y: int, titulo: str) -> int:
+def _ensure_space(c: canvas.Canvas, y: int, min_y: int, titulo: str, tenant: Optional[Tenant] = None) -> int:
     if y < min_y:
         c.showPage()
-        _pdf_header(c, titulo)
+        _pdf_header(c, titulo, tenant)
         y = 580
         c.setLineWidth(0.5)
         c.line(80, y, 532, y)
@@ -1150,7 +1242,8 @@ def _build_estudiante_financiero(estudiante: Estudiante, db: Session) -> Estudia
     pagos = db.query(Pago).filter(
         and_(
             Pago.estudiante_id == estudiante.id,
-            Pago.estado == EstadoPago.COMPLETADO
+            Pago.estado == EstadoPago.COMPLETADO,
+            Pago.tenant_id == estudiante.tenant_id,
         )
     ).order_by(Pago.fecha_pago.desc()).all()
     

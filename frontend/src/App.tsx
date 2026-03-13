@@ -20,6 +20,7 @@ import { Tarifas } from './pages/Tarifas';
 import { Usuarios } from './pages/Usuarios';
 import { Clases } from './pages/Clases';
 import { RolUsuario } from './types';
+import { SchoolOnboarding } from './pages/SchoolOnboarding';
 
 const MODULE_PATHS: Record<string, string> = {
   dashboard: '/dashboard',
@@ -95,6 +96,14 @@ function AppRoutes() {
         element={
           <PublicRoute>
             <Login />
+          </PublicRoute>
+        }
+      />
+      <Route
+        path="/registro-escuela"
+        element={
+          <PublicRoute>
+            <SchoolOnboarding />
           </PublicRoute>
         }
       />

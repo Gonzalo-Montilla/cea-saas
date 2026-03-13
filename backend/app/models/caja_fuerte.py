@@ -11,6 +11,7 @@ class CajaFuerte(Base):
     __tablename__ = "caja_fuerte"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True, index=True)
 
     saldo_efectivo = Column(Numeric(12, 2), default=0, nullable=False)
     saldo_nequi = Column(Numeric(12, 2), default=0, nullable=False)

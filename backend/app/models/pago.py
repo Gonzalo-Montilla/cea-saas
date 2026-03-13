@@ -30,6 +30,7 @@ class Pago(Base):
     __tablename__ = "pagos"
     
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True, index=True)
     estudiante_id = Column(Integer, ForeignKey("estudiantes.id"), nullable=False)
     caja_id = Column(Integer, ForeignKey("cajas.id"), nullable=True)  # Caja donde se registró
     

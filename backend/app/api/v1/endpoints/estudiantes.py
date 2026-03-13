@@ -8,6 +8,7 @@ from io import BytesIO
 import os
 import base64
 import logging
+import urllib.request
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
@@ -22,6 +23,7 @@ from app.models.estudiante import Estudiante, EstadoEstudiante, CategoriaLicenci
 from app.models.pago import Pago, MetodoPago, EstadoPago
 from app.models.clase import Instructor, Vehiculo, EstadoInstructor
 from app.models.compromiso_pago import CompromisoPago, CuotaPago, FrecuenciaPago, EstadoCuota
+from app.models.tenant import Tenant, TenantUser
 from app.schemas.estudiante import (
     EstudianteCreate,
     EstudianteUpdate,
@@ -33,17 +35,32 @@ from app.schemas.estudiante import (
     AcreditarHorasRequest,
     CorregirServicioRequest
 )
-from app.api.deps import get_current_active_user, get_admin_or_coordinador_or_cajero, require_role
+from app.api.deps import get_current_active_user, get_admin_or_coordinador_or_cajero, get_required_tenant, require_role
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _generate_matricula_numero(db: Session, current_tenant: Tenant) -> str:
+    year = datetime.now().year
+    brand_prefix = settings.BRAND_SHORT_NAME.strip().upper()[:10] or "SIAEC"
+    tenant_prefix = (current_tenant.slug or "TENANT").replace("-", "").upper()[:16]
+    tenant_count = db.query(Estudiante).filter(Estudiante.tenant_id == current_tenant.id).count()
+    sequence = tenant_count + 1
+    while True:
+        matricula = f"{brand_prefix}-{tenant_prefix}-{year}-{sequence:05d}"
+        exists = db.query(Estudiante.id).filter(Estudiante.matricula_numero == matricula).first()
+        if not exists:
+            return matricula
+        sequence += 1
 
 
 @router.post("", response_model=EstudianteResponse, status_code=status.HTTP_201_CREATED)
 def create_estudiante(
     estudiante_data: EstudianteCreate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero)
+    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Crear un nuevo estudiante (solo datos personales):
@@ -54,7 +71,8 @@ def create_estudiante(
     """
     # Verificar si ya existe un usuario con esa cédula o email
     existing_user = db.query(Usuario).filter(
-        or_(Usuario.cedula == estudiante_data.cedula, Usuario.email == estudiante_data.email)
+        or_(Usuario.cedula == estudiante_data.cedula, Usuario.email == estudiante_data.email),
+        Usuario.tenant_id == current_tenant.id,
     ).first()
     
     if existing_user:
@@ -83,20 +101,28 @@ def create_estudiante(
             tipo_documento=estudiante_data.tipo_documento,
             telefono=estudiante_data.telefono,
             rol=RolUsuario.ESTUDIANTE,
+            tenant_id=current_tenant.id,
             is_active=True,
             is_verified=False
         )
         db.add(nuevo_usuario)
         db.flush()
+        db.add(
+            TenantUser(
+                tenant_id=current_tenant.id,
+                user_id=nuevo_usuario.id,
+                rol=RolUsuario.ESTUDIANTE.value,
+                is_active=True,
+            )
+        )
         
-        # 2. Generar número de matrícula (correlativo)
-        ultimo_estudiante = db.query(Estudiante).order_by(Estudiante.id.desc()).first()
-        nuevo_numero = 1 if not ultimo_estudiante else ultimo_estudiante.id + 1
-        matricula_numero = f"CEAEDUCAR-{datetime.now().year}-{nuevo_numero:05d}"
+        # 2. Generar número de matrícula aislado por tenant y globalmente único
+        matricula_numero = _generate_matricula_numero(db, current_tenant)
         
         # 3. Crear Estudiante (solo datos personales)
         nuevo_estudiante = Estudiante(
             usuario_id=nuevo_usuario.id,
+            tenant_id=current_tenant.id,
             matricula_numero=matricula_numero,
             fecha_nacimiento=estudiante_data.fecha_nacimiento,
             direccion=estudiante_data.direccion,
@@ -134,7 +160,7 @@ def create_estudiante(
         db.commit()
         db.refresh(nuevo_estudiante)
 
-        enviado = _enviar_habeas_data(nuevo_estudiante)
+        enviado = _enviar_habeas_data(nuevo_estudiante, current_tenant)
         if enviado:
             datos = dict(nuevo_estudiante.datos_adicionales or {})
             habeas = dict(datos.get("habeas_data", {}))
@@ -162,12 +188,16 @@ def list_estudiantes(
     categoria: Optional[CategoriaLicencia] = None,
     estado: Optional[EstadoEstudiante] = None,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Listar estudiantes con filtros y búsqueda
     """
-    query = db.query(Estudiante).join(Usuario)
+    query = db.query(Estudiante).join(Usuario).filter(
+        Estudiante.tenant_id == current_tenant.id,
+        Usuario.tenant_id == current_tenant.id,
+    )
     
     # Filtro de búsqueda (nombre, cédula, email)
     if search:
@@ -229,12 +259,16 @@ def list_estudiantes(
 def get_estudiante(
     estudiante_id: int,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Obtener detalles de un estudiante por ID
     """
-    estudiante = db.query(Estudiante).filter(Estudiante.id == estudiante_id).first()
+    estudiante = db.query(Estudiante).filter(
+        Estudiante.id == estudiante_id,
+        Estudiante.tenant_id == current_tenant.id,
+    ).first()
     
     if not estudiante:
         raise HTTPException(
@@ -249,9 +283,14 @@ def get_estudiante(
 def get_estudiante_por_cedula(
     cedula: str,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero)
+    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    estudiante = db.query(Estudiante).join(Usuario).filter(Usuario.cedula == cedula).first()
+    estudiante = db.query(Estudiante).join(Usuario).filter(
+        Usuario.cedula == cedula,
+        Estudiante.tenant_id == current_tenant.id,
+        Usuario.tenant_id == current_tenant.id,
+    ).first()
     if not estudiante:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -265,12 +304,16 @@ def update_estudiante(
     estudiante_id: int,
     estudiante_data: EstudianteUpdate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero)
+    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Actualizar información de un estudiante
     """
-    estudiante = db.query(Estudiante).filter(Estudiante.id == estudiante_id).first()
+    estudiante = db.query(Estudiante).filter(
+        Estudiante.id == estudiante_id,
+        Estudiante.tenant_id == current_tenant.id,
+    ).first()
     
     if not estudiante:
         raise HTTPException(
@@ -336,12 +379,16 @@ def update_estudiante(
 def delete_estudiante(
     estudiante_id: int,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero)
+    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Eliminar un estudiante (soft delete - marca como inactivo)
     """
-    estudiante = db.query(Estudiante).filter(Estudiante.id == estudiante_id).first()
+    estudiante = db.query(Estudiante).filter(
+        Estudiante.id == estudiante_id,
+        Estudiante.tenant_id == current_tenant.id,
+    ).first()
     
     if not estudiante:
         raise HTTPException(
@@ -363,7 +410,8 @@ def definir_servicio(
     estudiante_id: int,
     servicio_data: DefinirServicioRequest,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero)
+    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Definir el servicio para un estudiante PROSPECTO:
@@ -373,7 +421,10 @@ def definir_servicio(
     - Asigna horas teóricas y prácticas requeridas
     - Cambia estado de PROSPECTO a ACTIVO
     """
-    estudiante = db.query(Estudiante).filter(Estudiante.id == estudiante_id).first()
+    estudiante = db.query(Estudiante).filter(
+        Estudiante.id == estudiante_id,
+        Estudiante.tenant_id == current_tenant.id,
+    ).first()
     
     if not estudiante:
         raise HTTPException(
@@ -578,7 +629,7 @@ def definir_servicio(
         db.commit()
         db.refresh(estudiante)
 
-        _enviar_contrato_definir_servicio(estudiante)
+        _enviar_contrato_definir_servicio(estudiante, current_tenant)
         
         return _build_estudiante_response(estudiante, db)
         
@@ -594,14 +645,18 @@ def definir_servicio(
 def reactivar_estudiante(
     estudiante_id: int,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero)
+    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Reactivar estudiante para iniciar un nuevo servicio.
     - Guarda un snapshot del servicio anterior en datos_adicionales
     - Reinicia estados/horas/saldos
     """
-    estudiante = db.query(Estudiante).filter(Estudiante.id == estudiante_id).first()
+    estudiante = db.query(Estudiante).filter(
+        Estudiante.id == estudiante_id,
+        Estudiante.tenant_id == current_tenant.id,
+    ).first()
     
     if not estudiante:
         raise HTTPException(
@@ -698,12 +753,16 @@ def reactivar_estudiante(
 def contrato_estudiante_pdf(
     estudiante_id: int,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    estudiante = db.query(Estudiante).filter(Estudiante.id == estudiante_id).first()
+    estudiante = db.query(Estudiante).filter(
+        Estudiante.id == estudiante_id,
+        Estudiante.tenant_id == current_tenant.id,
+    ).first()
     if not estudiante:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Estudiante no encontrado")
-    return _build_contrato_pdf(estudiante)
+    return _build_contrato_pdf(estudiante, current_tenant)
 
 
 @router.post("/{estudiante_id}/acreditar-horas", response_model=EstudianteResponse)
@@ -711,9 +770,13 @@ def acreditar_horas(
     estudiante_id: int,
     payload: AcreditarHorasRequest,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(require_role([RolUsuario.INSTRUCTOR, RolUsuario.ADMIN, RolUsuario.GERENTE, RolUsuario.COORDINADOR]))
+    current_user: Usuario = Depends(require_role([RolUsuario.INSTRUCTOR, RolUsuario.ADMIN, RolUsuario.GERENTE, RolUsuario.COORDINADOR])),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    estudiante = db.query(Estudiante).filter(Estudiante.id == estudiante_id).first()
+    estudiante = db.query(Estudiante).filter(
+        Estudiante.id == estudiante_id,
+        Estudiante.tenant_id == current_tenant.id,
+    ).first()
     if not estudiante:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -800,7 +863,7 @@ def acreditar_horas(
     db.commit()
     db.refresh(estudiante)
 
-    _enviar_acreditacion_horas(estudiante, payload.tipo, payload.horas, fecha_iso)
+    _enviar_acreditacion_horas(estudiante, payload.tipo, payload.horas, fecha_iso, current_tenant)
     return _build_estudiante_response(estudiante, db)
 
 
@@ -809,13 +872,17 @@ def ampliar_servicio(
     estudiante_id: int,
     servicio_data: AmpliarServicioRequest,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero)
+    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Ampliar servicio del estudiante a combo (ej. A2 -> A2+B1)
     - Recalcula valor total y saldo pendiente con base en abonos previos
     """
-    estudiante = db.query(Estudiante).filter(Estudiante.id == estudiante_id).first()
+    estudiante = db.query(Estudiante).filter(
+        Estudiante.id == estudiante_id,
+        Estudiante.tenant_id == current_tenant.id,
+    ).first()
 
     if not estudiante:
         raise HTTPException(
@@ -948,7 +1015,8 @@ def corregir_servicio(
     estudiante_id: int,
     payload: CorregirServicioRequest,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(require_role([RolUsuario.ADMIN, RolUsuario.GERENTE]))
+    current_user: Usuario = Depends(require_role([RolUsuario.ADMIN, RolUsuario.GERENTE])),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Corregir servicio mal definido:
@@ -956,7 +1024,10 @@ def corregir_servicio(
     - Requiere contraseña del admin/gerente
     - Registra historial de correcciones en datos_adicionales
     """
-    estudiante = db.query(Estudiante).filter(Estudiante.id == estudiante_id).first()
+    estudiante = db.query(Estudiante).filter(
+        Estudiante.id == estudiante_id,
+        Estudiante.tenant_id == current_tenant.id,
+    ).first()
     if not estudiante:
         raise HTTPException(status_code=404, detail="Estudiante no encontrado")
 
@@ -974,7 +1045,8 @@ def corregir_servicio(
 
     pago_existente = db.query(Pago).filter(
         Pago.estudiante_id == estudiante.id,
-        Pago.estado == EstadoPago.COMPLETADO
+        Pago.estado == EstadoPago.COMPLETADO,
+        Pago.tenant_id == current_tenant.id,
     ).first()
     if pago_existente:
         raise HTTPException(
@@ -1073,17 +1145,17 @@ def corregir_servicio(
     return _build_estudiante_response(estudiante, db)
 
 
-def _build_contrato_pdf(estudiante: Estudiante) -> Response:
-    pdf_bytes = _build_contrato_pdf_bytes(estudiante)
+def _build_contrato_pdf(estudiante: Estudiante, tenant: Optional[Tenant] = None) -> Response:
+    pdf_bytes = _build_contrato_pdf_bytes(estudiante, tenant)
     return _pdf_response(BytesIO(pdf_bytes), f"contrato_{estudiante.matricula_numero or estudiante.id}.pdf")
 
 
-def _build_contrato_pdf_bytes(estudiante: Estudiante) -> bytes:
+def _build_contrato_pdf_bytes(estudiante: Estudiante, tenant: Optional[Tenant] = None) -> bytes:
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=letter)
     width, height = letter
 
-    _draw_contrato_header(c)
+    _draw_contrato_header(c, tenant)
     y = 680
 
     # Fecha de inscripcion
@@ -1219,11 +1291,11 @@ def _build_contrato_pdf_bytes(estudiante: Estudiante) -> bytes:
     y -= 20
 
     # Texto del contrato
-    y = _ensure_space_contrato(c, y, 120)
-    y = _draw_paragraphs(c, CONTRATO_PARRAFOS, 50, y, 520, 12)
+    y = _ensure_space_contrato(c, y, 120, tenant)
+    y = _draw_paragraphs(c, CONTRATO_PARRAFOS, 50, y, 520, 12, tenant)
 
     # Firmas
-    y = _ensure_space_contrato(c, y, 140)
+    y = _ensure_space_contrato(c, y, 140, tenant)
     y -= 30
     y = _draw_signature_lines(c, y)
 
@@ -1232,16 +1304,26 @@ def _build_contrato_pdf_bytes(estudiante: Estudiante) -> bytes:
     return buffer.getvalue()
 
 
-def _enviar_habeas_data(estudiante: Estudiante) -> bool:
+def _tenant_mail_context(tenant: Optional[Tenant]) -> tuple[str, str, str, str, str]:
+    brand_name = (tenant.display_name or tenant.nombre) if tenant else settings.BRAND_SHORT_NAME
+    contact_phone = tenant.contacto_telefono if tenant and tenant.contacto_telefono else settings.HABEAS_CONTACTO
+    contact_email = tenant.contacto_email if tenant and tenant.contacto_email else settings.HABEAS_CORREO
+    razon_social = tenant.nombre if tenant and tenant.nombre else settings.HABEAS_RAZON_SOCIAL
+    nit = tenant.nit if tenant and tenant.nit else settings.HABEAS_NIT
+    return brand_name, contact_phone, contact_email, razon_social, nit
+
+
+def _enviar_habeas_data(estudiante: Estudiante, tenant: Optional[Tenant] = None) -> bool:
     if not estudiante or not estudiante.usuario:
         return False
     nombre = estudiante.usuario.nombre_completo
     email = estudiante.usuario.email
-    subject = "Autorizacion de tratamiento de datos personales - CEA EDUCAR"
+    brand_name, contact_phone, contact_email, razon_social, nit = _tenant_mail_context(tenant)
+    subject = f"Confirmacion de autorizacion de datos - {brand_name}"
     politica = f"Politica: {settings.HABEAS_POLITICA_URL}" if settings.HABEAS_POLITICA_URL else ""
     body = (
         f"Hola {nombre},\n\n"
-        "Gracias por tu registro. Confirmamos la autorizacion previa, expresa e informada "
+        f"Gracias por confiar en {brand_name}. Confirmamos la autorizacion previa, expresa e informada "
         "para el tratamiento de tus datos personales conforme a la Ley 1581 de 2012.\n\n"
         f"Matricula: {estudiante.matricula_numero or 'N/A'}\n"
         f"Cedula: {estudiante.usuario.cedula}\n\n"
@@ -1256,13 +1338,13 @@ def _enviar_habeas_data(estudiante: Estudiante) -> bool:
         "- Contacto y notificaciones.\n"
         "- Cumplimiento de obligaciones legales y contractuales.\n\n"
         "Derechos del titular: conocer, actualizar, rectificar, suprimir y revocar la autorizacion.\n"
-        "Puedes ejercerlos a traves del correo indicado.\n\n"
-        "CEA EDUCAR\n"
+        "Puedes ejercerlos a traves del correo indicado. Estamos para ayudarte.\n\n"
+        f"{brand_name}\n"
     ).format(
-        razon=settings.HABEAS_RAZON_SOCIAL,
-        nit=settings.HABEAS_NIT,
-        contacto=settings.HABEAS_CONTACTO,
-        correo=settings.HABEAS_CORREO,
+        razon=razon_social,
+        nit=nit,
+        contacto=contact_phone,
+        correo=contact_email,
         politica=politica
     )
 
@@ -1272,29 +1354,30 @@ def _enviar_habeas_data(estudiante: Estudiante) -> bool:
     return enviado
 
 
-def _enviar_contrato_definir_servicio(estudiante: Estudiante) -> None:
+def _enviar_contrato_definir_servicio(estudiante: Estudiante, tenant: Optional[Tenant] = None) -> None:
     if not estudiante or not estudiante.usuario:
         return
 
-    subject = "Contrato de aprendizaje - CEA EDUCAR"
+    brand_name, contact_phone, contact_email, razon_social, nit = _tenant_mail_context(tenant)
+    subject = f"Tu contrato de aprendizaje ya esta listo - {brand_name}"
     body = (
         f"Hola {estudiante.usuario.nombre_completo},\n\n"
-        "Te confirmamos que tu servicio fue definido exitosamente en CEA EDUCAR.\n"
+        f"Nos alegra contarte que tu servicio fue definido exitosamente en {brand_name}.\n"
         "Adjunto encontraras el Contrato de Aprendizaje correspondiente a tu proceso.\n\n"
         f"Matricula: {estudiante.matricula_numero or 'N/A'}\n"
         f"Cedula: {estudiante.usuario.cedula}\n"
         f"Categoria: {estudiante.categoria.value if estudiante.categoria else 'N/A'}\n"
         f"Tipo de servicio: {estudiante.tipo_servicio.value if estudiante.tipo_servicio else 'N/A'}\n"
         f"Fecha de inscripcion: {estudiante.fecha_inscripcion.strftime('%Y-%m-%d') if estudiante.fecha_inscripcion else 'N/A'}\n\n"
-        "Si tienes dudas o necesitas alguna actualizacion, puedes contactarnos a:\n"
-        f"{settings.HABEAS_CONTACTO} | {settings.HABEAS_CORREO}\n\n"
-        "Atentamente,\n"
-        "CEA EDUCAR\n"
-        f"{settings.HABEAS_RAZON_SOCIAL}\n"
-        f"NIT {settings.HABEAS_NIT}\n"
+        "Si tienes dudas o quieres apoyo en cualquier paso, puedes escribirnos a:\n"
+        f"{contact_phone} | {contact_email}\n\n"
+        "Seguimos contigo en este proceso,\n"
+        f"{brand_name}\n"
+        f"{razon_social}\n"
+        f"NIT {nit}\n"
     )
 
-    pdf_bytes = _build_contrato_pdf_bytes(estudiante)
+    pdf_bytes = _build_contrato_pdf_bytes(estudiante, tenant)
     filename = f"contrato_{estudiante.matricula_numero or estudiante.id}.pdf"
     enviado = send_email(
         estudiante.usuario.email,
@@ -1306,7 +1389,13 @@ def _enviar_contrato_definir_servicio(estudiante: Estudiante) -> None:
         logger.warning("No se pudo enviar contrato a %s", estudiante.usuario.email)
 
 
-def _enviar_acreditacion_horas(estudiante: Estudiante, tipo: str, horas: int, fecha_iso: str) -> None:
+def _enviar_acreditacion_horas(
+    estudiante: Estudiante,
+    tipo: str,
+    horas: int,
+    fecha_iso: str,
+    tenant: Optional[Tenant] = None,
+) -> None:
     if not estudiante or not estudiante.usuario:
         return
     tipo_label = "Teoria" if tipo == "TEORICA" else "Practica"
@@ -1317,10 +1406,11 @@ def _enviar_acreditacion_horas(estudiante: Estudiante, tipo: str, horas: int, fe
         pendientes = max((estudiante.horas_practicas_requeridas or 0) - (estudiante.horas_practicas_completadas or 0), 0)
         progreso = f"{estudiante.horas_practicas_completadas}/{estudiante.horas_practicas_requeridas}"
 
-    subject = "Actualizacion de horas acreditadas - CEA EDUCAR"
+    brand_name, contact_phone, contact_email, razon_social, nit = _tenant_mail_context(tenant)
+    subject = f"Actualizacion de tu progreso - {brand_name}"
     body = (
         f"Hola {estudiante.usuario.nombre_completo},\n\n"
-        "Te informamos que se acreditaron horas en tu proceso de formacion:\n\n"
+        f"Te compartimos una actualizacion de tu proceso en {brand_name}:\n\n"
         "Detalle de la acreditacion\n"
         f"- Tipo: {tipo_label}\n"
         f"- Horas acreditadas: {horas}\n"
@@ -1330,41 +1420,67 @@ def _enviar_acreditacion_horas(estudiante: Estudiante, tipo: str, horas: int, fe
         f"- Cedula: {estudiante.usuario.cedula}\n"
         f"- Progreso {tipo_label}: {progreso}\n"
         f"- Horas pendientes de {tipo_label}: {pendientes}\n\n"
-        "Si tienes alguna duda, puedes contactarnos en:\n"
-        f"{settings.HABEAS_CONTACTO} | {settings.HABEAS_CORREO}\n\n"
-        "Gracias por tu compromiso.\n\n"
-        "CEA EDUCAR\n"
-        f"{settings.HABEAS_RAZON_SOCIAL}\n"
-        f"NIT {settings.HABEAS_NIT}\n"
+        "Si necesitas ayuda, estamos disponibles en:\n"
+        f"{contact_phone} | {contact_email}\n\n"
+        "Gracias por tu compromiso y constancia.\n\n"
+        f"{brand_name}\n"
+        f"{razon_social}\n"
+        f"NIT {nit}\n"
     )
     enviado = send_email(estudiante.usuario.email, subject, body)
     if not enviado:
         logger.warning("No se pudo enviar notificacion de horas a %s", estudiante.usuario.email)
 
 
-def _draw_contrato_header(c: canvas.Canvas) -> None:
-    _draw_logo_contrato(c)
+def _draw_contrato_header(c: canvas.Canvas, tenant: Optional[Tenant] = None) -> None:
+    _draw_logo_contrato(c, tenant)
+    tenant_title = (tenant.display_name or tenant.nombre) if tenant else settings.BRAND_SHORT_NAME
     c.setFont("Helvetica-Bold", 11)
-    c.drawCentredString(330, 770, "SISTEMA DE GESTION DE CALIDAD SGC")
+    c.drawCentredString(330, 770, tenant_title[:70])
     c.setFont("Helvetica-Bold", 12)
     c.drawCentredString(330, 752, "CONTRATO DE APRENDIZAJE")
     _draw_header_cells(c, 720)
 
 
-def _draw_logo_contrato(c: canvas.Canvas) -> None:
-    logo_path = os.getenv("CEA_LOGO_PATH")
-    if not logo_path:
+def _resolve_logo_image(tenant: Optional[Tenant], fallback_settings_path: Optional[str] = None):
+    """Resuelve logo del tenant o fallback. Retorna (path_local_str o BytesIO) o None."""
+    raw = None
+    if tenant and getattr(tenant, "logo_url", None):
+        raw = (tenant.logo_url or "").strip()
+    if not raw:
+        raw = fallback_settings_path or settings.BRAND_LOGO_PATH or os.getenv("BRAND_LOGO_PATH") or ""
+    if not raw:
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", ".."))
-        assets_dir = os.path.join(repo_root, "frontend", "src", "assets")
-        logo_path = os.path.join(assets_dir, "cea_educar_final.png")
-        if not os.path.exists(logo_path):
-            logo_path = os.path.join(assets_dir, "cea educar final.jpg")
-    if logo_path and os.path.exists(logo_path):
+        default_logo = os.path.join(repo_root, "frontend", "public", "logo-siaec-sin-fondo.png")
+        if os.path.exists(default_logo):
+            return default_logo
+        return None
+    if raw.startswith("http://") or raw.startswith("https://"):
         try:
-            logo = ImageReader(logo_path)
-            c.drawImage(logo, 30, 700, width=240, height=90, preserveAspectRatio=True, mask='auto')
+            req = urllib.request.Request(raw, headers={"User-Agent": "SIAEC-PDF/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return BytesIO(resp.read())
         except Exception:
-            return
+            return None
+    if raw.startswith("/"):
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", ".."))
+        path = os.path.join(repo_root, "frontend", "public", raw.lstrip("/"))
+        if os.path.exists(path):
+            return path
+    if os.path.exists(raw):
+        return raw
+    return None
+
+
+def _draw_logo_contrato(c: canvas.Canvas, tenant: Optional[Tenant] = None) -> None:
+    src = _resolve_logo_image(tenant)
+    if not src:
+        return
+    try:
+        logo = ImageReader(src)
+        c.drawImage(logo, 30, 700, width=240, height=90, preserveAspectRatio=True, mask='auto')
+    except Exception:
+        return
 
 
 def _draw_header_cells(c: canvas.Canvas, y: int) -> None:
@@ -1525,7 +1641,7 @@ def _draw_certificacion_row(c: canvas.Canvas, y: int, selected: str) -> int:
     return y - h
 
 
-def _draw_paragraphs(c: canvas.Canvas, paragraphs: list, x: int, y: int, width: int, leading: int) -> int:
+def _draw_paragraphs(c: canvas.Canvas, paragraphs: list, x: int, y: int, width: int, leading: int, tenant: Optional[Tenant] = None) -> int:
     font_name = "Helvetica"
     font_size = 9
     c.setFont(font_name, font_size)
@@ -1535,7 +1651,7 @@ def _draw_paragraphs(c: canvas.Canvas, paragraphs: list, x: int, y: int, width: 
             c.setFont("Helvetica-Bold", font_size)
             if y < 80:
                 c.showPage()
-                _draw_contrato_header(c)
+                _draw_contrato_header(c, tenant)
                 y = 680
             c.drawString(x, y, title)
             y -= leading
@@ -1550,7 +1666,7 @@ def _draw_paragraphs(c: canvas.Canvas, paragraphs: list, x: int, y: int, width: 
         for i, line in enumerate(lines):
             if y < 80:
                 c.showPage()
-                _draw_contrato_header(c)
+                _draw_contrato_header(c, tenant)
                 y = 680
                 c.setFont(font_name, font_size)
             is_last = (i == len(lines) - 1)
@@ -1630,10 +1746,10 @@ def _draw_rep_signature(c: canvas.Canvas, x: int, y: int, w: int, h: int) -> Non
             return
 
 
-def _ensure_space_contrato(c: canvas.Canvas, y: int, min_y: int) -> int:
+def _ensure_space_contrato(c: canvas.Canvas, y: int, min_y: int, tenant: Optional[Tenant] = None) -> int:
     if y < min_y:
         c.showPage()
-        _draw_contrato_header(c)
+        _draw_contrato_header(c, tenant)
         return 680
     return y
 
@@ -1696,7 +1812,8 @@ def _build_estudiante_response(estudiante: Estudiante, db: Session = None) -> Es
         pagos = db.query(Pago).filter(
             and_(
                 Pago.estudiante_id == estudiante.id,
-                Pago.estado == EstadoPago.COMPLETADO
+                Pago.estado == EstadoPago.COMPLETADO,
+                Pago.tenant_id == estudiante.tenant_id,
             )
         ).order_by(Pago.fecha_pago.desc()).all()
         

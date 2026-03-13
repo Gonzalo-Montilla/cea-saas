@@ -7,7 +7,12 @@ class Settings(BaseSettings):
     Configuración de la aplicación desde variables de entorno
     """
     # Aplicación
-    PROJECT_NAME: str = "CEA EDUCAR API"
+    APP_ENV: str = "local"
+    APP_NAME: str = "SIAEC_SAAS"
+    APP_URL: str = "http://127.0.0.1:8000"
+    PROJECT_NAME: str = "SIAEC API"
+    BRAND_SHORT_NAME: str = "SIAEC"
+    BRAND_FULL_NAME: str = "Sistema Integral de Administración para Escuelas de Conducción"
     API_V1_STR: str = "/api/v1"
     
     # Base de datos PostgreSQL
@@ -28,16 +33,27 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
     ]
 
+    # Tenancy
+    TENANT_HEADER_NAME: str = "X-Tenant-Slug"
+    DEFAULT_TENANT_SLUG: Optional[str] = None
+    DEFAULT_TENANT_NAME: Optional[str] = None
+    TENANT_STRICT_MODE: bool = False
+    ALLOW_TENANT_BOOTSTRAP: bool = False
+    ALLOW_SCHOOL_ONBOARDING: bool = False
+    SCHOOL_ONBOARDING_KEY: Optional[str] = None
+    ALLOW_PUBLIC_SCHOOL_SIGNUP: bool = False
+
     # Email (SMTP)
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
     SMTP_USER: Optional[str] = None
     SMTP_PASSWORD: Optional[str] = None
-    SMTP_FROM_NAME: str = "CEA EDUCAR"
+    SMTP_FROM_NAME: str = "SIAEC"
     SMTP_USE_TLS: bool = True
+    BRAND_LOGO_PATH: Optional[str] = None
 
     # Habeas Data
-    HABEAS_RAZON_SOCIAL: str = "ESCUELA DE AUTOMOVILISMO EDUCAR DEL CAUCA SAS"
+    HABEAS_RAZON_SOCIAL: str = "SIAEC - Sistema Integral de Administración para Escuelas de Conducción"
     HABEAS_NIT: str = "901463869-8"
     HABEAS_CONTACTO: str = "+57 314 3005442"
     HABEAS_CORREO: str = "ceaeducardelcaucasas@gmail.com"

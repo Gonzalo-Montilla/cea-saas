@@ -6,11 +6,12 @@ from datetime import datetime, timedelta, date
 from decimal import Decimal
 
 from app.core.database import get_db
-from app.api.deps import get_current_active_user
+from app.api.deps import get_current_active_user, get_required_tenant
 from app.models.usuario import Usuario
+from app.models.tenant import Tenant
 from app.models.caja import Caja, MovimientoCaja, EstadoCaja, ConceptoMovimientoCaja, TipoMovimiento
 from app.models.pago import Pago, DetallePago, MetodoPago, EstadoPago
-from app.models.compromiso_pago import CuotaPago, EstadoCuota
+from app.models.compromiso_pago import CompromisoPago, CuotaPago, EstadoCuota
 from app.models.estudiante import Estudiante, EstadoEstudiante
 from app.models.clase import MantenimientoVehiculo, Vehiculo, Instructor
 from app.schemas.reportes import (
@@ -35,7 +36,8 @@ def get_dashboard_ejecutivo(
     fecha_fin: Optional[datetime] = None,
     comparar_periodo_anterior: bool = False,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Dashboard ejecutivo con KPIs y gráficos principales
@@ -53,28 +55,28 @@ def get_dashboard_ejecutivo(
     print(f"\n📅 REPORTES - Período (fecha local): {fecha_inicio_date} hasta {fecha_fin_date}")
     
     # Calcular KPIs
-    kpis = _calcular_kpis(db, fecha_inicio_date, fecha_fin_date, comparar_periodo_anterior)
+    kpis = _calcular_kpis(db, fecha_inicio_date, fecha_fin_date, comparar_periodo_anterior, current_tenant.id)
     
     # Gráfico de evolución de ingresos (período seleccionado)
-    grafico_ingresos = _grafico_evolucion_ingresos(db, fecha_inicio_date, fecha_fin_date)
+    grafico_ingresos = _grafico_evolucion_ingresos(db, fecha_inicio_date, fecha_fin_date, current_tenant.id)
     
     # Gráfico de métodos de pago (período actual)
-    grafico_metodos = _grafico_metodos_pago(db, fecha_inicio_date, fecha_fin_date)
+    grafico_metodos = _grafico_metodos_pago(db, fecha_inicio_date, fecha_fin_date, current_tenant.id)
     
     # Gráfico de estudiantes por categoría
-    grafico_estudiantes = _grafico_estudiantes_categorias(db)
+    grafico_estudiantes = _grafico_estudiantes_categorias(db, current_tenant.id)
     
     # Gráfico de egresos por categoría (período actual)
-    grafico_egresos = _grafico_egresos_categoria(db, fecha_inicio_date, fecha_fin_date)
+    grafico_egresos = _grafico_egresos_categoria(db, fecha_inicio_date, fecha_fin_date, current_tenant.id)
     
     # Ranking de referidos
-    ranking_referidos = _ranking_referidos(db, fecha_inicio_date, fecha_fin_date)
+    ranking_referidos = _ranking_referidos(db, fecha_inicio_date, fecha_fin_date, current_tenant.id)
     
     # Listas de estudiantes
-    lista_registrados = _lista_estudiantes_registrados(db, fecha_inicio_date, fecha_fin_date)
-    lista_pagos = _lista_estudiantes_pagos(db, fecha_inicio_date, fecha_fin_date)
-    lista_egresos = _lista_egresos_caja(db, fecha_inicio_date, fecha_fin_date)
-    lista_otros = _lista_otros_movimientos(db, fecha_inicio_date, fecha_fin_date)
+    lista_registrados = _lista_estudiantes_registrados(db, fecha_inicio_date, fecha_fin_date, current_tenant.id)
+    lista_pagos = _lista_estudiantes_pagos(db, fecha_inicio_date, fecha_fin_date, current_tenant.id)
+    lista_egresos = _lista_egresos_caja(db, fecha_inicio_date, fecha_fin_date, current_tenant.id)
+    lista_otros = _lista_otros_movimientos(db, fecha_inicio_date, fecha_fin_date, current_tenant.id)
     
     return DashboardEjecutivo(
         kpis=kpis,
@@ -96,17 +98,22 @@ def get_dashboard_ejecutivo(
 @router.get("/alertas-operativas", response_model=AlertasOperativas)
 def get_alertas_operativas(
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     ahora = datetime.utcnow()
 
-    caja = db.query(Caja).filter(Caja.estado == EstadoCaja.ABIERTA).order_by(Caja.fecha_apertura.desc()).first()
+    caja = db.query(Caja).filter(
+        Caja.estado == EstadoCaja.ABIERTA,
+        Caja.tenant_id == current_tenant.id,
+    ).order_by(Caja.fecha_apertura.desc()).first()
     caja_abierta = bool(caja)
     caja_abierta_horas = None
     if caja and caja.fecha_apertura:
         caja_abierta_horas = round((ahora - caja.fecha_apertura).total_seconds() / 3600, 1)
 
     pagos_vencidos_query = db.query(Pago).filter(
+        Pago.tenant_id == current_tenant.id,
         Pago.estado == EstadoPago.PENDIENTE,
         Pago.fecha_vencimiento.isnot(None),
         Pago.fecha_vencimiento < ahora
@@ -115,7 +122,12 @@ def get_alertas_operativas(
     pagos_vencidos_total = pagos_vencidos_query.with_entities(func.sum(Pago.monto)).scalar() or Decimal('0')
 
     ventana_fin = ahora + timedelta(days=7)
-    compromisos_query = db.query(CuotaPago).filter(
+    compromisos_query = db.query(CuotaPago).join(
+        CompromisoPago, CuotaPago.compromiso_id == CompromisoPago.id
+    ).join(
+        Estudiante, CompromisoPago.estudiante_id == Estudiante.id
+    ).filter(
+        Estudiante.tenant_id == current_tenant.id,
         CuotaPago.estado.in_([EstadoCuota.PENDIENTE, EstadoCuota.PARCIAL]),
         CuotaPago.fecha_vencimiento >= ahora,
         CuotaPago.fecha_vencimiento <= ventana_fin
@@ -125,18 +137,27 @@ def get_alertas_operativas(
 
     pin_por_vencer_cantidad = 0
     pin_limite = ahora + timedelta(days=90)
-    estudiantes_pin = db.query(Estudiante).filter(Estudiante.sicov_pin.isnot(None)).all()
+    estudiantes_pin = db.query(Estudiante).filter(
+        Estudiante.tenant_id == current_tenant.id,
+        Estudiante.sicov_pin.isnot(None),
+    ).all()
     for est in estudiantes_pin:
         fecha_pin = _parse_pin_vencimiento(est)
         if fecha_pin and ahora <= fecha_pin <= pin_limite:
             pin_por_vencer_cantidad += 1
 
     fallas_abiertas_cantidad = db.query(MantenimientoVehiculo).filter(
+        MantenimientoVehiculo.vehiculo.has(
+            Vehiculo.responsable_instructor.has(
+                Instructor.usuario.has(Usuario.tenant_id == current_tenant.id)
+            )
+        ),
         MantenimientoVehiculo.tipo == "FALLA",
         MantenimientoVehiculo.estado.in_(["ABIERTO", "EN_PROCESO"])
     ).count()
 
     estudiantes_listos_examen_cantidad = db.query(Estudiante).filter(
+        Estudiante.tenant_id == current_tenant.id,
         Estudiante.estado == EstadoEstudiante.LISTO_EXAMEN
     ).count()
 
@@ -158,14 +179,19 @@ def get_alertas_operativas(
 def get_alertas_vencimientos(
     dias: int = Query(30, ge=1, le=365),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     ahora = datetime.utcnow()
     fin = ahora + timedelta(days=dias)
     fin_date = fin.date()
 
     documentos = []
-    vehiculos = db.query(Vehiculo).all()
+    vehiculos = db.query(Vehiculo).filter(
+        Vehiculo.responsable_instructor.has(
+            Instructor.usuario.has(Usuario.tenant_id == current_tenant.id)
+        )
+    ).all()
     for v in vehiculos:
         if v.soat_vencimiento and v.soat_vencimiento <= fin_date:
             documentos.append(AlertaDocumentoVehiculo(
@@ -201,7 +227,7 @@ def get_alertas_vencimientos(
             ))
 
     pins = []
-    estudiantes = db.query(Estudiante).all()
+    estudiantes = db.query(Estudiante).filter(Estudiante.tenant_id == current_tenant.id).all()
     for est in estudiantes:
         fecha_pin = _parse_pin_vencimiento(est)
         if fecha_pin and fecha_pin.date() <= fin_date:
@@ -215,6 +241,7 @@ def get_alertas_vencimientos(
 
     pagos_vencidos = []
     pagos = db.query(Pago).filter(
+        Pago.tenant_id == current_tenant.id,
         Pago.estado == EstadoPago.PENDIENTE,
         Pago.fecha_vencimiento.isnot(None),
         Pago.fecha_vencimiento < ahora
@@ -230,7 +257,12 @@ def get_alertas_vencimientos(
         ))
 
     compromisos = []
-    cuotas = db.query(CuotaPago).filter(
+    cuotas = db.query(CuotaPago).join(
+        CompromisoPago, CuotaPago.compromiso_id == CompromisoPago.id
+    ).join(
+        Estudiante, CompromisoPago.estudiante_id == Estudiante.id
+    ).filter(
+        Estudiante.tenant_id == current_tenant.id,
         CuotaPago.estado.in_([EstadoCuota.PENDIENTE, EstadoCuota.PARCIAL]),
         CuotaPago.fecha_vencimiento >= ahora,
         CuotaPago.fecha_vencimiento <= fin
@@ -246,7 +278,9 @@ def get_alertas_vencimientos(
         ))
 
     documentos_instructor = []
-    instructores = db.query(Instructor).all()
+    instructores = db.query(Instructor).join(Usuario).filter(
+        Usuario.tenant_id == current_tenant.id
+    ).all()
     for inst in instructores:
         nombre = inst.usuario.nombre_completo if inst.usuario else "SIN NOMBRE"
         if inst.licencia_vigencia_hasta and inst.licencia_vigencia_hasta <= fin_date:
@@ -280,7 +314,8 @@ def get_cierre_financiero(
     fecha_inicio: Optional[datetime] = None,
     fecha_fin: Optional[datetime] = None,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     if not fecha_fin:
         fecha_fin = datetime.utcnow()
@@ -290,6 +325,7 @@ def get_cierre_financiero(
     fecha_fin_date = fecha_fin.date()
 
     cajas = db.query(Caja).filter(
+        Caja.tenant_id == current_tenant.id,
         cast(Caja.fecha_apertura, Date) >= fecha_inicio_date,
         cast(Caja.fecha_apertura, Date) <= fecha_fin_date
     ).all()
@@ -371,7 +407,8 @@ def _calcular_kpis(
     db: Session,
     fecha_inicio: date,
     fecha_fin: date,
-    comparar: bool
+    comparar: bool,
+    tenant_id: int,
 ) -> KPIDashboard:
     """Calcula todos los KPIs del dashboard"""
     
@@ -385,6 +422,7 @@ def _calcular_kpis(
     # Usar CAST a DATE para comparar solo fechas, ignorando horas
     cajas_periodo = db.query(Caja).filter(
         and_(
+            Caja.tenant_id == tenant_id,
             cast(Caja.fecha_apertura, Date) >= fecha_inicio,
             cast(Caja.fecha_apertura, Date) <= fecha_fin
         )
@@ -397,7 +435,7 @@ def _calcular_kpis(
         ingresos_cajas_periodo += total_caja
         print(f"  - Caja ID {caja.id} ({caja.fecha_apertura.date()}): Total=${total_caja}")
 
-    ingresos_actual = _sumar_ingresos_periodo(db, fecha_inicio, fecha_fin)
+    ingresos_actual = _sumar_ingresos_periodo(db, fecha_inicio, fecha_fin, tenant_id)
     print(f"💵 Total ingresos del período (por movimientos): ${ingresos_actual}")
     
     ingresos_anterior = None
@@ -407,26 +445,27 @@ def _calcular_kpis(
     if comparar:
         cajas_anterior = db.query(Caja).filter(
             and_(
+                Caja.tenant_id == tenant_id,
                 cast(Caja.fecha_apertura, Date) >= fecha_inicio_anterior,
                 cast(Caja.fecha_apertura, Date) < fecha_fin_anterior
             )
         ).all()
 
-        ingresos_anterior = _sumar_ingresos_periodo(db, fecha_inicio_anterior, fecha_fin_anterior)
+        ingresos_anterior = _sumar_ingresos_periodo(db, fecha_inicio_anterior, fecha_fin_anterior, tenant_id)
         
         if ingresos_anterior > 0:
             cambio_ingresos = float(((ingresos_actual - ingresos_anterior) / ingresos_anterior) * 100)
             tendencia_ingresos = "up" if cambio_ingresos > 0 else "down" if cambio_ingresos < 0 else "neutral"
     
     # EGRESOS TOTALES (de cajas por fecha de apertura)
-    egresos_actual = _sumar_egresos_periodo(db, fecha_inicio, fecha_fin)
+    egresos_actual = _sumar_egresos_periodo(db, fecha_inicio, fecha_fin, tenant_id)
     
     egresos_anterior = None
     cambio_egresos = None
     tendencia_egresos = "neutral"
     
     if comparar:
-        egresos_anterior = _sumar_egresos_periodo(db, fecha_inicio_anterior, fecha_fin_anterior)
+        egresos_anterior = _sumar_egresos_periodo(db, fecha_inicio_anterior, fecha_fin_anterior, tenant_id)
         
         if egresos_anterior > 0:
             cambio_egresos = float(((egresos_actual - egresos_anterior) / egresos_anterior) * 100)
@@ -434,6 +473,7 @@ def _calcular_kpis(
     
     # SALDO PENDIENTE TOTAL
     saldo_pendiente = db.query(func.sum(Estudiante.saldo_pendiente)).filter(
+        Estudiante.tenant_id == tenant_id,
         Estudiante.saldo_pendiente > 0
     ).scalar() or Decimal('0')
 
@@ -452,17 +492,20 @@ def _calcular_kpis(
     # ESTUDIANTES ACTIVOS (en proceso) E INACTIVOS (finalizados o abandonaron)
     # Activos: INSCRITO, EN_FORMACION, LISTO_EXAMEN
     total_activos = db.query(Estudiante).filter(
+        Estudiante.tenant_id == tenant_id,
         Estudiante.estado.in_([EstadoEstudiante.INSCRITO, EstadoEstudiante.EN_FORMACION, EstadoEstudiante.LISTO_EXAMEN])
     ).count()
     
     # Inactivos: GRADUADO, DESERTOR, RETIRADO
     total_inactivos = db.query(Estudiante).filter(
+        Estudiante.tenant_id == tenant_id,
         Estudiante.estado.in_([EstadoEstudiante.GRADUADO, EstadoEstudiante.DESERTOR, EstadoEstudiante.RETIRADO])
     ).count()
     
     # NUEVAS MATRÍCULAS DEL MES
     nuevas_matriculas = db.query(Estudiante).filter(
         and_(
+            Estudiante.tenant_id == tenant_id,
             cast(Estudiante.fecha_inscripcion, Date) >= fecha_inicio,
             cast(Estudiante.fecha_inscripcion, Date) <= fecha_fin
         )
@@ -470,6 +513,7 @@ def _calcular_kpis(
 
     activos_periodo = db.query(Estudiante).filter(
         and_(
+            Estudiante.tenant_id == tenant_id,
             Estudiante.estado.in_([EstadoEstudiante.INSCRITO, EstadoEstudiante.EN_FORMACION, EstadoEstudiante.LISTO_EXAMEN]),
             cast(Estudiante.fecha_inscripcion, Date) >= fecha_inicio,
             cast(Estudiante.fecha_inscripcion, Date) <= fecha_fin
@@ -478,6 +522,7 @@ def _calcular_kpis(
 
     inactivos_periodo = db.query(Estudiante).filter(
         and_(
+            Estudiante.tenant_id == tenant_id,
             Estudiante.estado.in_([EstadoEstudiante.GRADUADO, EstadoEstudiante.DESERTOR, EstadoEstudiante.RETIRADO]),
             cast(Estudiante.fecha_inscripcion, Date) >= fecha_inicio,
             cast(Estudiante.fecha_inscripcion, Date) <= fecha_fin
@@ -493,6 +538,7 @@ def _calcular_kpis(
     # DÍAS PROMEDIO DE PAGO (simplificado - calcular de pagos)
     pagos_periodo = db.query(Pago).filter(
         and_(
+            Pago.tenant_id == tenant_id,
             Pago.estado == EstadoPago.COMPLETADO,
             cast(Pago.fecha_pago, Date) >= fecha_inicio,
             cast(Pago.fecha_pago, Date) <= fecha_fin
@@ -526,12 +572,14 @@ def _calcular_kpis(
     # TASA DE COBRANZA
     total_valor_cursos = db.query(func.sum(Estudiante.valor_total_curso)).filter(
         and_(
+            Estudiante.tenant_id == tenant_id,
             cast(Estudiante.fecha_inscripcion, Date) >= fecha_inicio,
             cast(Estudiante.fecha_inscripcion, Date) <= fecha_fin
         )
     ).scalar() or Decimal('0')
     saldo_pendiente_periodo = db.query(func.sum(Estudiante.saldo_pendiente)).filter(
         and_(
+            Estudiante.tenant_id == tenant_id,
             cast(Estudiante.fecha_inscripcion, Date) >= fecha_inicio,
             cast(Estudiante.fecha_inscripcion, Date) <= fecha_fin
         )
@@ -544,6 +592,7 @@ def _calcular_kpis(
     ahora = datetime.utcnow()
     pagos_pendientes_periodo = db.query(Pago).filter(
         and_(
+            Pago.tenant_id == tenant_id,
             Pago.estado == EstadoPago.PENDIENTE,
             Pago.fecha_vencimiento.isnot(None),
             cast(Pago.fecha_vencimiento, Date) >= fecha_inicio,
@@ -583,7 +632,7 @@ def _calcular_kpis(
     )
 
 
-def _grafico_evolucion_ingresos(db: Session, fecha_inicio: date, fecha_fin: date) -> GraficoEvolucionIngresos:
+def _grafico_evolucion_ingresos(db: Session, fecha_inicio: date, fecha_fin: date, tenant_id: int) -> GraficoEvolucionIngresos:
     """Gráfico de evolución de ingresos del período seleccionado"""
     
     # Determinar la granularidad según el rango de fechas
@@ -608,6 +657,7 @@ def _grafico_evolucion_ingresos(db: Session, fecha_inicio: date, fecha_fin: date
     
     pagos = db.query(Pago).filter(
         and_(
+            Pago.tenant_id == tenant_id,
             Pago.estado == EstadoPago.COMPLETADO,
             cast(Pago.fecha_pago, Date) >= fecha_inicio,
             cast(Pago.fecha_pago, Date) <= fecha_fin
@@ -615,6 +665,7 @@ def _grafico_evolucion_ingresos(db: Session, fecha_inicio: date, fecha_fin: date
     ).all()
     movimientos = db.query(MovimientoCaja).filter(
         and_(
+            MovimientoCaja.caja.has(Caja.tenant_id == tenant_id),
             MovimientoCaja.tipo == TipoMovimiento.INGRESO,
             cast(MovimientoCaja.fecha, Date) >= fecha_inicio,
             cast(MovimientoCaja.fecha, Date) <= fecha_fin
@@ -685,9 +736,9 @@ def _parse_fecha(value) -> Optional[datetime]:
     return None
 
 
-def _grafico_metodos_pago(db: Session, fecha_inicio: date, fecha_fin: date) -> GraficoMetodosPago:
+def _grafico_metodos_pago(db: Session, fecha_inicio: date, fecha_fin: date, tenant_id: int) -> GraficoMetodosPago:
     """Gráfico de ingresos por método de pago (desde Cajas)"""
-    totales = _sumar_ingresos_por_metodo_periodo(db, fecha_inicio, fecha_fin)
+    totales = _sumar_ingresos_por_metodo_periodo(db, fecha_inicio, fecha_fin, tenant_id)
     total_general = sum(totales.values())
     
     datos = [
@@ -711,9 +762,10 @@ def _grafico_metodos_pago(db: Session, fecha_inicio: date, fecha_fin: date) -> G
     )
 
 
-def _grafico_estudiantes_categorias(db: Session) -> GraficoEstudiantesCategorias:
+def _grafico_estudiantes_categorias(db: Session, tenant_id: int) -> GraficoEstudiantesCategorias:
     """Gráfico de estudiantes por categoría de licencia (solo activos)"""
     certificados_count = db.query(func.count(Estudiante.id)).filter(
+        Estudiante.tenant_id == tenant_id,
         Estudiante.estado.in_([EstadoEstudiante.INSCRITO, EstadoEstudiante.EN_FORMACION, EstadoEstudiante.LISTO_EXAMEN]),
         cast(Estudiante.tipo_servicio, String).like("CERTIFICADO%")
     ).scalar() or 0
@@ -722,6 +774,7 @@ def _grafico_estudiantes_categorias(db: Session) -> GraficoEstudiantesCategorias
         Estudiante.categoria,
         func.count(Estudiante.id).label('total')
     ).filter(
+        Estudiante.tenant_id == tenant_id,
         Estudiante.estado.in_([EstadoEstudiante.INSCRITO, EstadoEstudiante.EN_FORMACION, EstadoEstudiante.LISTO_EXAMEN]),
         or_(
             Estudiante.tipo_servicio.is_(None),
@@ -767,9 +820,10 @@ def _grafico_estudiantes_categorias(db: Session) -> GraficoEstudiantesCategorias
     )
 
 
-def _sumar_ingresos_periodo(db: Session, fecha_inicio: date, fecha_fin: date) -> Decimal:
+def _sumar_ingresos_periodo(db: Session, fecha_inicio: date, fecha_fin: date, tenant_id: int) -> Decimal:
     pagos = db.query(Pago).filter(
         and_(
+            Pago.tenant_id == tenant_id,
             Pago.estado == EstadoPago.COMPLETADO,
             cast(Pago.fecha_pago, Date) >= fecha_inicio,
             cast(Pago.fecha_pago, Date) <= fecha_fin
@@ -777,6 +831,7 @@ def _sumar_ingresos_periodo(db: Session, fecha_inicio: date, fecha_fin: date) ->
     ).all()
     movimientos = db.query(MovimientoCaja).filter(
         and_(
+            MovimientoCaja.caja.has(Caja.tenant_id == tenant_id),
             MovimientoCaja.tipo == TipoMovimiento.INGRESO,
             cast(MovimientoCaja.fecha, Date) >= fecha_inicio,
             cast(MovimientoCaja.fecha, Date) <= fecha_fin
@@ -787,9 +842,10 @@ def _sumar_ingresos_periodo(db: Session, fecha_inicio: date, fecha_fin: date) ->
     return total_pagos + total_movs
 
 
-def _sumar_egresos_periodo(db: Session, fecha_inicio: date, fecha_fin: date) -> Decimal:
+def _sumar_egresos_periodo(db: Session, fecha_inicio: date, fecha_fin: date, tenant_id: int) -> Decimal:
     egresos = db.query(MovimientoCaja).filter(
         and_(
+            MovimientoCaja.caja.has(Caja.tenant_id == tenant_id),
             MovimientoCaja.tipo == TipoMovimiento.EGRESO,
             cast(MovimientoCaja.fecha, Date) >= fecha_inicio,
             cast(MovimientoCaja.fecha, Date) <= fecha_fin
@@ -798,7 +854,7 @@ def _sumar_egresos_periodo(db: Session, fecha_inicio: date, fecha_fin: date) -> 
     return sum((e.monto or Decimal('0')) for e in egresos)
 
 
-def _sumar_ingresos_por_metodo_periodo(db: Session, fecha_inicio: date, fecha_fin: date) -> dict:
+def _sumar_ingresos_por_metodo_periodo(db: Session, fecha_inicio: date, fecha_fin: date, tenant_id: int) -> dict:
     totales = {
         'Efectivo': Decimal('0'),
         'Nequi': Decimal('0'),
@@ -812,6 +868,7 @@ def _sumar_ingresos_por_metodo_periodo(db: Session, fecha_inicio: date, fecha_fi
 
     pagos = db.query(Pago).filter(
         and_(
+            Pago.tenant_id == tenant_id,
             Pago.estado == EstadoPago.COMPLETADO,
             cast(Pago.fecha_pago, Date) >= fecha_inicio,
             cast(Pago.fecha_pago, Date) <= fecha_fin
@@ -819,6 +876,7 @@ def _sumar_ingresos_por_metodo_periodo(db: Session, fecha_inicio: date, fecha_fi
     ).all()
     movimientos = db.query(MovimientoCaja).filter(
         and_(
+            MovimientoCaja.caja.has(Caja.tenant_id == tenant_id),
             MovimientoCaja.tipo == TipoMovimiento.INGRESO,
             cast(MovimientoCaja.fecha, Date) >= fecha_inicio,
             cast(MovimientoCaja.fecha, Date) <= fecha_fin
@@ -887,13 +945,14 @@ def _ordenar_buckets(keys: list, label_agrupacion: str) -> list:
     return sorted(keys)
 
 
-def _grafico_egresos_categoria(db: Session, fecha_inicio: date, fecha_fin: date) -> GraficoEgresos:
+def _grafico_egresos_categoria(db: Session, fecha_inicio: date, fecha_fin: date, tenant_id: int) -> GraficoEgresos:
     """Gráfico de egresos por categoría"""
     resultado = db.query(
         MovimientoCaja.categoria,
         func.sum(MovimientoCaja.monto).label('total')
     ).filter(
         and_(
+            MovimientoCaja.caja.has(Caja.tenant_id == tenant_id),
             MovimientoCaja.tipo == TipoMovimiento.EGRESO,
             cast(MovimientoCaja.fecha, Date) >= fecha_inicio,
             cast(MovimientoCaja.fecha, Date) <= fecha_fin
@@ -925,10 +984,11 @@ def _grafico_egresos_categoria(db: Session, fecha_inicio: date, fecha_fin: date)
     )
 
 
-def _lista_estudiantes_registrados(db: Session, fecha_inicio: date, fecha_fin: date) -> list:
+def _lista_estudiantes_registrados(db: Session, fecha_inicio: date, fecha_fin: date, tenant_id: int) -> list:
     """Lista de estudiantes registrados en el período"""
     estudiantes = db.query(Estudiante).filter(
         and_(
+            Estudiante.tenant_id == tenant_id,
             cast(Estudiante.fecha_inscripcion, Date) >= fecha_inicio,
             cast(Estudiante.fecha_inscripcion, Date) <= fecha_fin
         )
@@ -951,10 +1011,11 @@ def _lista_estudiantes_registrados(db: Session, fecha_inicio: date, fecha_fin: d
     return lista
 
 
-def _lista_estudiantes_pagos(db: Session, fecha_inicio: date, fecha_fin: date) -> list:
+def _lista_estudiantes_pagos(db: Session, fecha_inicio: date, fecha_fin: date, tenant_id: int) -> list:
     """Lista de estudiantes que realizaron pagos en el período"""
     pagos = db.query(Pago).filter(
         and_(
+            Pago.tenant_id == tenant_id,
             Pago.estado == EstadoPago.COMPLETADO,
             cast(Pago.fecha_pago, Date) >= fecha_inicio,
             cast(Pago.fecha_pago, Date) <= fecha_fin
@@ -984,9 +1045,10 @@ def _lista_estudiantes_pagos(db: Session, fecha_inicio: date, fecha_fin: date) -
     return lista
 
 
-def _lista_egresos_caja(db: Session, fecha_inicio: date, fecha_fin: date) -> list:
+def _lista_egresos_caja(db: Session, fecha_inicio: date, fecha_fin: date, tenant_id: int) -> list:
     egresos = db.query(MovimientoCaja).filter(
         and_(
+            MovimientoCaja.caja.has(Caja.tenant_id == tenant_id),
             MovimientoCaja.tipo == TipoMovimiento.EGRESO,
             cast(MovimientoCaja.fecha, Date) >= fecha_inicio,
             cast(MovimientoCaja.fecha, Date) <= fecha_fin
@@ -1014,7 +1076,7 @@ def _lista_egresos_caja(db: Session, fecha_inicio: date, fecha_fin: date) -> lis
     return lista
 
 
-def _lista_otros_movimientos(db: Session, fecha_inicio: date, fecha_fin: date) -> list:
+def _lista_otros_movimientos(db: Session, fecha_inicio: date, fecha_fin: date, tenant_id: int) -> list:
     categorias = [
         ConceptoMovimientoCaja.ESTUDIANTE_NO_REGISTRADO,
         ConceptoMovimientoCaja.PAGO_PRESTAMO_EMPLEADO,
@@ -1024,6 +1086,7 @@ def _lista_otros_movimientos(db: Session, fecha_inicio: date, fecha_fin: date) -
     ]
     movimientos = db.query(MovimientoCaja).filter(
         and_(
+            MovimientoCaja.caja.has(Caja.tenant_id == tenant_id),
             MovimientoCaja.tipo == TipoMovimiento.INGRESO,
             MovimientoCaja.categoria.in_(categorias),
             cast(MovimientoCaja.fecha, Date) >= fecha_inicio,
@@ -1050,13 +1113,14 @@ def _lista_otros_movimientos(db: Session, fecha_inicio: date, fecha_fin: date) -
     return lista
 
 
-def _ranking_referidos(db: Session, fecha_inicio: date, fecha_fin: date) -> list:
+def _ranking_referidos(db: Session, fecha_inicio: date, fecha_fin: date, tenant_id: int) -> list:
     """Ranking de referidos que más estudiantes envían"""
     from app.models.estudiante import OrigenCliente
     
     # Obtener todos los estudiantes referidos en el período (o todos si se requiere vista completa)
     estudiantes_referidos = db.query(Estudiante).filter(
         and_(
+            Estudiante.tenant_id == tenant_id,
             Estudiante.origen_cliente == OrigenCliente.REFERIDO,
             Estudiante.referido_por.isnot(None),
             cast(Estudiante.fecha_inscripcion, Date) >= fecha_inicio,
@@ -1067,6 +1131,7 @@ def _ranking_referidos(db: Session, fecha_inicio: date, fecha_fin: date) -> list
     # Si no hay datos en el período, mostrar ranking histórico
     if not estudiantes_referidos:
         estudiantes_referidos = db.query(Estudiante).filter(
+            Estudiante.tenant_id == tenant_id,
             Estudiante.origen_cliente == OrigenCliente.REFERIDO,
             Estudiante.referido_por.isnot(None)
         ).all()

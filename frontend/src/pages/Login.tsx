@@ -1,19 +1,48 @@
-import { useState, FormEvent } from 'react';
+import { useEffect, useState, FormEvent } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { authAPI } from '../services/api';
-import logo from '../assets/cea_educar_final.png';
+import { authAPI, tenantsAPI } from '../services/api';
+import { BRAND_LOGO_URL, BRAND_NAME, BRAND_TAGLINE } from '../config/branding';
 import '../styles/Login.css';
 
 export const Login = () => {
-  const [email, setEmail] = useState('');
+  const [searchParams] = useSearchParams();
+  const initialTenantSlug =
+    (searchParams.get('tenant') || localStorage.getItem('tenant_slug') || '').trim();
+  const initialEmail = (searchParams.get('email') || '').trim();
+  const [tenantSlug, setTenantSlug] = useState(initialTenantSlug);
+  const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [tenantDisplayName, setTenantDisplayName] = useState(BRAND_NAME);
+  const [tenantLogoUrl, setTenantLogoUrl] = useState(BRAND_LOGO_URL);
   const { login } = useAuth();
   const navigate = useNavigate();
+
+  const loadTenantPreview = async (slug: string) => {
+    const normalized = slug.trim().toLowerCase();
+    if (!normalized) {
+      setTenantDisplayName(BRAND_NAME);
+      setTenantLogoUrl(BRAND_LOGO_URL);
+      return;
+    }
+    try {
+      const ctx = await tenantsAPI.getContext(normalized);
+      setTenantDisplayName(ctx.display_name || ctx.nombre || BRAND_NAME);
+      setTenantLogoUrl(ctx.logo_url || BRAND_LOGO_URL);
+    } catch {
+      setTenantDisplayName(BRAND_NAME);
+      setTenantLogoUrl(BRAND_LOGO_URL);
+    }
+  };
+
+  useEffect(() => {
+    void loadTenantPreview(initialTenantSlug);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -21,6 +50,13 @@ export const Login = () => {
     setIsLoading(true);
 
     try {
+      const normalizedTenant = tenantSlug.trim().toLowerCase();
+      if (!normalizedTenant) {
+        setError('Ingresa el codigo de tu escuela (tenant).');
+        return;
+      }
+      localStorage.setItem('tenant_slug', normalizedTenant);
+
       const healthy = await authAPI.checkHealth();
       if (!healthy) {
         setError('No se pudo conectar al servidor. Verifica que el backend esté activo.');
@@ -40,7 +76,7 @@ export const Login = () => {
     <div className="login-container">
       <div className="login-card">
         <div className="login-header">
-          <img src={logo} alt="CEA EDUCAR" className="login-logo" />
+          <img src={tenantLogoUrl} alt={tenantDisplayName} className="login-logo" />
           <p>Sistema de Gestión</p>
         </div>
         
@@ -55,6 +91,26 @@ export const Login = () => {
               required
               disabled={isLoading}
               placeholder="correo@ejemplo.com"
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="tenantSlug">Codigo de escuela (tenant)</label>
+            <input
+              id="tenantSlug"
+              type="text"
+              value={tenantSlug}
+              onChange={(e) => {
+                const value = e.target.value;
+                setTenantSlug(value);
+                void loadTenantPreview(value);
+              }}
+              onBlur={() => {
+                void loadTenantPreview(tenantSlug);
+              }}
+              required
+              disabled={isLoading}
+              placeholder="ejemplo: conduce-bien"
             />
           </div>
 
@@ -88,8 +144,12 @@ export const Login = () => {
           </button>
         </form>
 
+        <div className="login-links">
+          <Link to="/registro-escuela">Registrar nueva escuela</Link>
+        </div>
+
         <div className="login-footer">
-          <p>Centro de Enseñanza Automovilística EDUCAR</p>
+          <p>{`${BRAND_NAME} - ${BRAND_TAGLINE}`}</p>
         </div>
       </div>
     </div>
