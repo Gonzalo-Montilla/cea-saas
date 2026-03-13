@@ -17,6 +17,7 @@ backend/env/
 
 # Environment variables
 backend/.env
+frontend/.env
 .env
 
 # Database
