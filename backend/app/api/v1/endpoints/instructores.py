@@ -6,8 +6,9 @@ from datetime import datetime, date
 from decimal import Decimal
 
 from app.core.database import get_db
-from app.api.deps import get_current_active_user
+from app.api.deps import get_current_active_user, get_required_tenant
 from app.models.usuario import Usuario
+from app.models.tenant import Tenant
 from app.models.clase import Instructor, EstadoInstructor, EstadoDocumentacion, Clase, TipoClase, EstadoClase
 from app.models.estudiante import Estudiante
 from app.schemas.instructor import (
@@ -28,12 +29,16 @@ def listar_instructores(
     estado: Optional[str] = None,
     busqueda: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Lista todos los instructores con paginación y filtros
     """
-    query = db.query(Instructor).join(Usuario, Instructor.usuario_id == Usuario.id)
+    query = db.query(Instructor).join(Usuario, Instructor.usuario_id == Usuario.id).filter(
+        Instructor.tenant_id == current_tenant.id,
+        Usuario.tenant_id == current_tenant.id,
+    )
     
     # Filtrar por estado
     if estado:
@@ -93,19 +98,23 @@ def listar_instructores(
 def obtener_instructor(
     instructor_id: int,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Obtiene el detalle completo de un instructor con estadísticas
     """
-    instructor = db.query(Instructor).filter(Instructor.id == instructor_id).first()
+    instructor = db.query(Instructor).filter(
+        Instructor.id == instructor_id,
+        Instructor.tenant_id == current_tenant.id,
+    ).first()
     if not instructor:
         raise HTTPException(status_code=404, detail="Instructor no encontrado")
     
     usuario = instructor.usuario
     
     # Calcular estadísticas
-    estadisticas = _calcular_estadisticas_instructor(db, instructor_id)
+    estadisticas = _calcular_estadisticas_instructor(db, instructor_id, current_tenant.id)
     
     return InstructorDetalle(
         id=instructor.id,
@@ -146,29 +155,40 @@ def obtener_instructor(
 def crear_instructor(
     instructor_data: InstructorCreate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Crea un nuevo instructor
     """
     # Verificar que el usuario existe
-    usuario = db.query(Usuario).filter(Usuario.id == instructor_data.usuario_id).first()
+    usuario = db.query(Usuario).filter(
+        Usuario.id == instructor_data.usuario_id,
+        Usuario.tenant_id == current_tenant.id,
+    ).first()
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     
     # Verificar que el usuario no sea ya un instructor
-    instructor_existente = db.query(Instructor).filter(Instructor.usuario_id == instructor_data.usuario_id).first()
+    instructor_existente = db.query(Instructor).filter(
+        Instructor.usuario_id == instructor_data.usuario_id,
+        Instructor.tenant_id == current_tenant.id,
+    ).first()
     if instructor_existente:
         raise HTTPException(status_code=400, detail="Este usuario ya es un instructor")
     
     # Verificar que la licencia no esté duplicada
     if instructor_data.licencia_numero:
-        lic_existente = db.query(Instructor).filter(Instructor.licencia_numero == instructor_data.licencia_numero).first()
+        lic_existente = db.query(Instructor).filter(
+            Instructor.licencia_numero == instructor_data.licencia_numero,
+            Instructor.tenant_id == current_tenant.id,
+        ).first()
         if lic_existente:
             raise HTTPException(status_code=400, detail="Ya existe un instructor con esta licencia")
     
     # Crear instructor
     nuevo_instructor = Instructor(
+        tenant_id=current_tenant.id,
         usuario_id=instructor_data.usuario_id,
         licencia_numero=instructor_data.licencia_numero,
         categorias_enseña=instructor_data.categorias_enseña,
@@ -226,12 +246,16 @@ def actualizar_instructor(
     instructor_id: int,
     instructor_data: InstructorUpdate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Actualiza un instructor existente
     """
-    instructor = db.query(Instructor).filter(Instructor.id == instructor_id).first()
+    instructor = db.query(Instructor).filter(
+        Instructor.id == instructor_id,
+        Instructor.tenant_id == current_tenant.id,
+    ).first()
     if not instructor:
         raise HTTPException(status_code=404, detail="Instructor no encontrado")
     
@@ -239,7 +263,8 @@ def actualizar_instructor(
     if instructor_data.licencia_numero and instructor_data.licencia_numero != instructor.licencia_numero:
         lic_existente = db.query(Instructor).filter(
             Instructor.licencia_numero == instructor_data.licencia_numero,
-            Instructor.id != instructor_id
+            Instructor.id != instructor_id,
+            Instructor.tenant_id == current_tenant.id,
         ).first()
         if lic_existente:
             raise HTTPException(status_code=400, detail="Ya existe un instructor con esta licencia")
@@ -289,12 +314,16 @@ def actualizar_instructor(
 def eliminar_instructor(
     instructor_id: int,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Desactiva un instructor (soft delete)
     """
-    instructor = db.query(Instructor).filter(Instructor.id == instructor_id).first()
+    instructor = db.query(Instructor).filter(
+        Instructor.id == instructor_id,
+        Instructor.tenant_id == current_tenant.id,
+    ).first()
     if not instructor:
         raise HTTPException(status_code=404, detail="Instructor no encontrado")
     
@@ -309,16 +338,20 @@ def eliminar_instructor(
 def obtener_estadisticas_instructor(
     instructor_id: int,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_active_user)
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Obtiene las estadísticas de un instructor
     """
-    instructor = db.query(Instructor).filter(Instructor.id == instructor_id).first()
+    instructor = db.query(Instructor).filter(
+        Instructor.id == instructor_id,
+        Instructor.tenant_id == current_tenant.id,
+    ).first()
     if not instructor:
         raise HTTPException(status_code=404, detail="Instructor no encontrado")
     
-    return _calcular_estadisticas_instructor(db, instructor_id)
+    return _calcular_estadisticas_instructor(db, instructor_id, current_tenant.id)
 
 
 # ==================== FUNCIONES AUXILIARES ====================
@@ -358,13 +391,16 @@ def _validar_y_actualizar_estado_documentacion(instructor: Instructor) -> str:
     return EstadoDocumentacion.COMPLETO.value
 
 
-def _calcular_estadisticas_instructor(db: Session, instructor_id: int) -> InstructorEstadisticas:
+def _calcular_estadisticas_instructor(db: Session, instructor_id: int, tenant_id: int) -> InstructorEstadisticas:
     """Calcula las estadísticas de un instructor"""
     
     # TODO: Implementar cuando el módulo de clases esté completo
     # Por ahora retornamos estadísticas vacías para evitar errores de schema
     
-    instructor = db.query(Instructor).filter(Instructor.id == instructor_id).first()
+    instructor = db.query(Instructor).filter(
+        Instructor.id == instructor_id,
+        Instructor.tenant_id == tenant_id,
+    ).first()
     promedio_calificacion = instructor.calificacion_promedio or Decimal('0.0') if instructor else Decimal('0.0')
     
     return InstructorEstadisticas(

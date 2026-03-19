@@ -17,6 +17,7 @@ from app.models.clase import (
 from app.models.tarifa import Tarifa
 from app.models.caja import Caja, MovimientoCaja, EstadoCaja, TipoMovimiento, ConceptoMovimientoCaja
 from app.models.tenant import Tenant, TenantUser, PlanTenant
+from app.models.tenant_service_rule import TenantServiceRule
 
 __all__ = [
     "Usuario", "RolUsuario",
@@ -26,6 +27,7 @@ __all__ = [
     "Clase", "Instructor", "Vehiculo", "Evaluacion", "MantenimientoVehiculo", "RepuestoMantenimiento", "CombustibleVehiculo",
     "AdjuntoMantenimientoVehiculo", "AdjuntoCombustibleVehiculo", "VehiculoConsumoUmbral",
     "Tarifa",
+    "TenantServiceRule",
     "Caja", "MovimientoCaja", "EstadoCaja", "TipoMovimiento", "ConceptoMovimientoCaja",
     "Tenant", "TenantUser", "PlanTenant",
 ]

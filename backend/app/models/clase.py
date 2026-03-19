@@ -32,6 +32,8 @@ class Clase(Base):
     estado = Column(SQLEnum(EstadoClase), default=EstadoClase.PROGRAMADA, nullable=False)
     fecha_programada = Column(DateTime, nullable=False)
     fecha_completada = Column(DateTime)
+    reminder_24h_sent_at = Column(DateTime)
+    reminder_2h_sent_at = Column(DateTime)
     duracion_horas = Column(Integer, default=1, nullable=False)
     
     # Auditoría
@@ -67,6 +69,7 @@ class Instructor(Base):
     __tablename__ = "instructores"
     
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True, index=True)
     usuario_id = Column(Integer, ForeignKey("usuarios.id"), unique=True, nullable=False)
     
     # Información específica
@@ -113,6 +116,7 @@ class Vehiculo(Base):
     __tablename__ = "vehiculos"
     
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True, index=True)
     placa = Column(String(10), unique=True, nullable=False)
     tipo = Column(String(50))  # MOTO, AUTO, CAMION
     marca = Column(String(50))

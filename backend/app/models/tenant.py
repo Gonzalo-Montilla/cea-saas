@@ -1,7 +1,7 @@
 from datetime import datetime
 import enum
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -25,7 +25,7 @@ class Tenant(Base):
 
     # Branding y contacto (base para white-label)
     display_name = Column(String(255))
-    logo_url = Column(String(500))
+    logo_url = Column(Text)
     contacto_email = Column(String(255))
     contacto_telefono = Column(String(50))
     nit = Column(String(50))

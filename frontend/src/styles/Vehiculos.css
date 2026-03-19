@@ -219,3 +219,26 @@
   gap: 12px;
   align-items: center;
 }
+
+.no-vehiculos {
+  text-align: center;
+  padding: 4rem 2rem;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.no-vehiculos svg {
+  color: #ddd;
+  margin-bottom: 1rem;
+}
+
+.no-vehiculos h3 {
+  color: #666;
+  font-size: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.no-vehiculos p {
+  color: #999;
+}

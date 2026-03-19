@@ -210,7 +210,7 @@ export const Caja = () => {
       const cedulaLimpia = formatDocumentoBusqueda(cedulaParam);
       if (cedulaLimpia) {
         setCedula(cedulaLimpia);
-        handleBuscarEstudiante(cedulaLimpia);
+        void buscarEstudiantePorDocumento(cedulaLimpia);
       }
     }
   }, [location.search]);
@@ -258,8 +258,8 @@ export const Caja = () => {
     }
   };
   
-  const handleBuscarEstudiante = async (cedulaOverride?: string) => {
-    const cedulaLimpia = formatDocumentoBusqueda(cedulaOverride ?? cedula);
+  const buscarEstudiantePorDocumento = async (documento: string) => {
+    const cedulaLimpia = formatDocumentoBusqueda(documento);
     if (!cedulaLimpia) {
       alert('Ingrese el documento del estudiante');
       return;
@@ -275,6 +275,10 @@ export const Caja = () => {
     } finally {
       setBuscando(false);
     }
+  };
+
+  const handleBuscarEstudiante = async () => {
+    await buscarEstudiantePorDocumento(cedula);
   };
   
   const handleRegistrarPago = async () => {
@@ -944,10 +948,15 @@ export const Caja = () => {
               placeholder="Buscar por documento..."
               value={cedula}
               onChange={(e) => setCedula(formatDocumentoBusqueda(e.target.value))}
-              onKeyDown={(e) => e.key === 'Enter' && handleBuscarEstudiante()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  void handleBuscarEstudiante();
+                }
+              }}
               className="search-input"
             />
-            <button onClick={handleBuscarEstudiante} disabled={buscando} className="btn-search">
+            <button type="button" onClick={() => void handleBuscarEstudiante()} disabled={buscando} className="btn-search">
               <Search size={20} />
               {buscando ? 'Buscando...' : 'Buscar'}
             </button>

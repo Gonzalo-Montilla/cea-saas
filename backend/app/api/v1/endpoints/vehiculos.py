@@ -6,8 +6,9 @@ from datetime import datetime
 import base64
 
 from app.core.database import get_db
-from app.api.deps import get_admin_or_coordinador
+from app.api.deps import get_admin_or_coordinador, get_required_tenant
 from app.models.usuario import Usuario
+from app.models.tenant import Tenant
 from app.models.clase import (
     Vehiculo,
     Instructor,
@@ -51,12 +52,13 @@ def listar_vehiculos(
     search: Optional[str] = None,
     activo: Optional[bool] = None,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador)
+    current_user: Usuario = Depends(get_admin_or_coordinador),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Listar vehículos con paginación y filtros.
     """
-    query = db.query(Vehiculo)
+    query = db.query(Vehiculo).filter(Vehiculo.tenant_id == current_tenant.id)
 
     if activo is not None:
         query = query.filter(Vehiculo.is_active == (1 if activo else 0))
@@ -87,12 +89,16 @@ def listar_vehiculos(
 def crear_vehiculo(
     vehiculo_data: VehiculoCreate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador)
+    current_user: Usuario = Depends(get_admin_or_coordinador),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Crear un vehículo.
     """
-    existente = db.query(Vehiculo).filter(Vehiculo.placa == vehiculo_data.placa).first()
+    existente = db.query(Vehiculo).filter(
+        Vehiculo.placa == vehiculo_data.placa,
+        Vehiculo.tenant_id == current_tenant.id,
+    ).first()
     if existente:
         raise HTTPException(status_code=400, detail="Ya existe un vehículo con esa placa")
 
@@ -100,12 +106,14 @@ def crear_vehiculo(
     if responsable_id:
         instructor = db.query(Instructor).filter(
             Instructor.id == responsable_id,
-            Instructor.estado == EstadoInstructor.ACTIVO
+            Instructor.estado == EstadoInstructor.ACTIVO,
+            Instructor.tenant_id == current_tenant.id,
         ).first()
         if not instructor:
             raise HTTPException(status_code=400, detail="El instructor responsable no es válido o no está activo")
 
     nuevo = Vehiculo(
+        tenant_id=current_tenant.id,
         placa=vehiculo_data.placa,
         tipo=vehiculo_data.tipo,
         marca=vehiculo_data.marca,
@@ -130,17 +138,24 @@ def actualizar_vehiculo(
     vehiculo_id: int,
     vehiculo_data: VehiculoUpdate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador)
+    current_user: Usuario = Depends(get_admin_or_coordinador),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Actualizar un vehículo.
     """
-    vehiculo = db.query(Vehiculo).filter(Vehiculo.id == vehiculo_id).first()
+    vehiculo = db.query(Vehiculo).filter(
+        Vehiculo.id == vehiculo_id,
+        Vehiculo.tenant_id == current_tenant.id,
+    ).first()
     if not vehiculo:
         raise HTTPException(status_code=404, detail="Vehículo no encontrado")
 
     if vehiculo_data.placa and vehiculo_data.placa != vehiculo.placa:
-        existente = db.query(Vehiculo).filter(Vehiculo.placa == vehiculo_data.placa).first()
+        existente = db.query(Vehiculo).filter(
+            Vehiculo.placa == vehiculo_data.placa,
+            Vehiculo.tenant_id == current_tenant.id,
+        ).first()
         if existente:
             raise HTTPException(status_code=400, detail="Ya existe un vehículo con esa placa")
 
@@ -153,7 +168,8 @@ def actualizar_vehiculo(
         if responsable_id:
             instructor = db.query(Instructor).filter(
                 Instructor.id == responsable_id,
-                Instructor.estado == EstadoInstructor.ACTIVO
+                Instructor.estado == EstadoInstructor.ACTIVO,
+                Instructor.tenant_id == current_tenant.id,
             ).first()
             if not instructor:
                 raise HTTPException(status_code=400, detail="El instructor responsable no es válido o no está activo")
@@ -170,12 +186,16 @@ def actualizar_vehiculo(
 def desactivar_vehiculo(
     vehiculo_id: int,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador)
+    current_user: Usuario = Depends(get_admin_or_coordinador),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
     """
     Desactivar un vehículo (soft delete).
     """
-    vehiculo = db.query(Vehiculo).filter(Vehiculo.id == vehiculo_id).first()
+    vehiculo = db.query(Vehiculo).filter(
+        Vehiculo.id == vehiculo_id,
+        Vehiculo.tenant_id == current_tenant.id,
+    ).first()
     if not vehiculo:
         raise HTTPException(status_code=404, detail="Vehículo no encontrado")
 
@@ -188,9 +208,13 @@ def desactivar_vehiculo(
 def obtener_vehiculo(
     vehiculo_id: int,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador)
+    current_user: Usuario = Depends(get_admin_or_coordinador),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    vehiculo = db.query(Vehiculo).filter(Vehiculo.id == vehiculo_id).first()
+    vehiculo = db.query(Vehiculo).filter(
+        Vehiculo.id == vehiculo_id,
+        Vehiculo.tenant_id == current_tenant.id,
+    ).first()
     if not vehiculo:
         raise HTTPException(status_code=404, detail="Vehículo no encontrado")
     return vehiculo
@@ -205,9 +229,13 @@ def listar_mantenimientos(
     fecha_fin: Optional[datetime] = None,
     orden: Optional[str] = "desc",
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador)
+    current_user: Usuario = Depends(get_admin_or_coordinador),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    vehiculo = db.query(Vehiculo).filter(Vehiculo.id == vehiculo_id).first()
+    vehiculo = db.query(Vehiculo).filter(
+        Vehiculo.id == vehiculo_id,
+        Vehiculo.tenant_id == current_tenant.id,
+    ).first()
     if not vehiculo:
         raise HTTPException(status_code=404, detail="Vehículo no encontrado")
     query = db.query(MantenimientoVehiculo).filter(
@@ -228,9 +256,13 @@ def crear_mantenimiento(
     vehiculo_id: int,
     mantenimiento_data: MantenimientoCreate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador)
+    current_user: Usuario = Depends(get_admin_or_coordinador),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    vehiculo = db.query(Vehiculo).filter(Vehiculo.id == vehiculo_id).first()
+    vehiculo = db.query(Vehiculo).filter(
+        Vehiculo.id == vehiculo_id,
+        Vehiculo.tenant_id == current_tenant.id,
+    ).first()
     if not vehiculo:
         raise HTTPException(status_code=404, detail="Vehículo no encontrado")
 
@@ -263,8 +295,16 @@ def actualizar_mantenimiento(
     mantenimiento_id: int,
     mantenimiento_data: MantenimientoUpdate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador)
+    current_user: Usuario = Depends(get_admin_or_coordinador),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
+    vehiculo = db.query(Vehiculo).filter(
+        Vehiculo.id == vehiculo_id,
+        Vehiculo.tenant_id == current_tenant.id,
+    ).first()
+    if not vehiculo:
+        raise HTTPException(status_code=404, detail="Vehículo no encontrado")
+
     mantenimiento = db.query(MantenimientoVehiculo).filter(
         MantenimientoVehiculo.id == mantenimiento_id,
         MantenimientoVehiculo.vehiculo_id == vehiculo_id
@@ -278,9 +318,7 @@ def actualizar_mantenimiento(
 
     # Si se cierra mantenimiento de falla, reactivar vehículo
     if (mantenimiento.estado or "").upper() == "CERRADO" and (mantenimiento.tipo or "").upper() == "FALLA":
-        vehiculo = db.query(Vehiculo).filter(Vehiculo.id == vehiculo_id).first()
-        if vehiculo:
-            vehiculo.is_active = 1
+        vehiculo.is_active = 1
 
     db.commit()
     db.refresh(mantenimiento)
@@ -293,8 +331,16 @@ def agregar_repuesto(
     mantenimiento_id: int,
     repuesto_data: RepuestoCreate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador)
+    current_user: Usuario = Depends(get_admin_or_coordinador),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
+    vehiculo = db.query(Vehiculo).filter(
+        Vehiculo.id == vehiculo_id,
+        Vehiculo.tenant_id == current_tenant.id,
+    ).first()
+    if not vehiculo:
+        raise HTTPException(status_code=404, detail="Vehículo no encontrado")
+
     mantenimiento = db.query(MantenimientoVehiculo).filter(
         MantenimientoVehiculo.id == mantenimiento_id,
         MantenimientoVehiculo.vehiculo_id == vehiculo_id
@@ -325,9 +371,13 @@ def listar_combustible(
     conductor: Optional[str] = None,
     orden: Optional[str] = "desc",
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador)
+    current_user: Usuario = Depends(get_admin_or_coordinador),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    vehiculo = db.query(Vehiculo).filter(Vehiculo.id == vehiculo_id).first()
+    vehiculo = db.query(Vehiculo).filter(
+        Vehiculo.id == vehiculo_id,
+        Vehiculo.tenant_id == current_tenant.id,
+    ).first()
     if not vehiculo:
         raise HTTPException(status_code=404, detail="Vehículo no encontrado")
     query = db.query(CombustibleVehiculo).filter(
@@ -351,8 +401,16 @@ async def agregar_adjuntos_mantenimiento(
     mantenimiento_id: int,
     archivos: List[UploadFile] = File(...),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador)
+    current_user: Usuario = Depends(get_admin_or_coordinador),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
+    vehiculo = db.query(Vehiculo).filter(
+        Vehiculo.id == vehiculo_id,
+        Vehiculo.tenant_id == current_tenant.id,
+    ).first()
+    if not vehiculo:
+        raise HTTPException(status_code=404, detail="Vehículo no encontrado")
+
     mantenimiento = db.query(MantenimientoVehiculo).filter(
         MantenimientoVehiculo.id == mantenimiento_id,
         MantenimientoVehiculo.vehiculo_id == vehiculo_id
@@ -387,8 +445,16 @@ async def agregar_adjuntos_combustible(
     combustible_id: int,
     archivos: List[UploadFile] = File(...),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador)
+    current_user: Usuario = Depends(get_admin_or_coordinador),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
+    vehiculo = db.query(Vehiculo).filter(
+        Vehiculo.id == vehiculo_id,
+        Vehiculo.tenant_id == current_tenant.id,
+    ).first()
+    if not vehiculo:
+        raise HTTPException(status_code=404, detail="Vehículo no encontrado")
+
     combustible = db.query(CombustibleVehiculo).filter(
         CombustibleVehiculo.id == combustible_id,
         CombustibleVehiculo.vehiculo_id == vehiculo_id
@@ -460,9 +526,13 @@ def resumen_combustible(
     fecha_fin: Optional[datetime] = None,
     conductor: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador)
+    current_user: Usuario = Depends(get_admin_or_coordinador),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    vehiculo = db.query(Vehiculo).filter(Vehiculo.id == vehiculo_id).first()
+    vehiculo = db.query(Vehiculo).filter(
+        Vehiculo.id == vehiculo_id,
+        Vehiculo.tenant_id == current_tenant.id,
+    ).first()
     if not vehiculo:
         raise HTTPException(status_code=404, detail="Vehículo no encontrado")
 
@@ -522,9 +592,13 @@ def exportar_hoja_vida(
     comb_fecha_fin: Optional[datetime] = None,
     comb_conductor: Optional[str] = None,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador)
+    current_user: Usuario = Depends(get_admin_or_coordinador),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    vehiculo = db.query(Vehiculo).filter(Vehiculo.id == vehiculo_id).first()
+    vehiculo = db.query(Vehiculo).filter(
+        Vehiculo.id == vehiculo_id,
+        Vehiculo.tenant_id == current_tenant.id,
+    ).first()
     if not vehiculo:
         raise HTTPException(status_code=404, detail="Vehículo no encontrado")
 
@@ -594,9 +668,13 @@ def registrar_combustible(
     vehiculo_id: int,
     combustible_data: CombustibleCreate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_coordinador)
+    current_user: Usuario = Depends(get_admin_or_coordinador),
+    current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    vehiculo = db.query(Vehiculo).filter(Vehiculo.id == vehiculo_id).first()
+    vehiculo = db.query(Vehiculo).filter(
+        Vehiculo.id == vehiculo_id,
+        Vehiculo.tenant_id == current_tenant.id,
+    ).first()
     if not vehiculo:
         raise HTTPException(status_code=404, detail="Vehículo no encontrado")
 

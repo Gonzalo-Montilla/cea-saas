@@ -30,8 +30,35 @@ interface DashboardData {
   lista_otros_movimientos: any[];
 }
 
+interface ClasesKpisData {
+  total_programadas: number;
+  total_completadas: number;
+  total_canceladas: number;
+  tasa_cumplimiento: number;
+  instructores_productividad: {
+    instructor_id: number;
+    nombre_completo: string;
+    clases_programadas: number;
+    clases_completadas: number;
+    clases_canceladas: number;
+    porcentaje_cumplimiento: number;
+  }[];
+}
+
+interface AsistenciaDiariaData {
+  datos: {
+    fecha: string;
+    total: number;
+    programadas: number;
+    completadas: number;
+    canceladas: number;
+  }[];
+}
+
 export const Reportes = () => {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [clasesKpis, setClasesKpis] = useState<ClasesKpisData | null>(null);
+  const [asistenciaDiaria, setAsistenciaDiaria] = useState<AsistenciaDiariaData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,8 +81,14 @@ export const Reportes = () => {
         params.fecha_fin = fin.toISOString();
       }
 
-      const data = await reportesAPI.getDashboard(params);
+      const [data, clasesData, asistenciaData] = await Promise.all([
+        reportesAPI.getDashboard(params),
+        reportesAPI.getKpisClases(params),
+        reportesAPI.getAsistenciaClasesDiaria(params),
+      ]);
       setDashboard(data);
+      setClasesKpis(clasesData);
+      setAsistenciaDiaria(asistenciaData);
     } catch (err) {
       console.error('Error al cargar dashboard:', err);
       setError('Error al cargar los reportes');
@@ -153,6 +186,13 @@ export const Reportes = () => {
   const datosEgresos = (grafico_egresos?.datos || []).map((d: any) => ({
     categoria: d.nombre,
     monto: parseFloat(d.valor)
+  }));
+
+  const datosAsistencia = (asistenciaDiaria?.datos || []).map((d) => ({
+    fecha: d.fecha,
+    programadas: Number(d.programadas || 0),
+    completadas: Number(d.completadas || 0),
+    canceladas: Number(d.canceladas || 0),
   }));
 
   const COLORES_METODOS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
@@ -287,6 +327,95 @@ export const Reportes = () => {
           colorIcono="#22c55e"
         />
       </div>
+
+      {clasesKpis && (
+        <>
+          <div className="kpis-grid">
+            <KPICard
+              titulo="Clases Programadas"
+              valor={clasesKpis.total_programadas}
+              icono={<Calendar size={24} />}
+              colorIcono="#2563eb"
+            />
+            <KPICard
+              titulo="Clases Completadas"
+              valor={clasesKpis.total_completadas}
+              icono={<TrendingUp size={24} />}
+              colorIcono="#16a34a"
+            />
+            <KPICard
+              titulo="Clases Canceladas"
+              valor={clasesKpis.total_canceladas}
+              icono={<AlertCircle size={24} />}
+              colorIcono="#dc2626"
+            />
+            <KPICard
+              titulo="Cumplimiento Clases"
+              valor={formatearPorcentaje(clasesKpis.tasa_cumplimiento || 0)}
+              icono={<BarChart3 size={24} />}
+              colorIcono="#7c3aed"
+            />
+          </div>
+
+          <div className="grafico-card">
+            <div className="grafico-header">
+              <h3>Top Instructores por Cumplimiento</h3>
+              <span className="grafico-subtitle">Top 10 por clases completadas</span>
+            </div>
+            {clasesKpis.instructores_productividad?.length ? (
+              <div className="tabla-simple-wrapper">
+                <table className="tabla-simple">
+                  <thead>
+                    <tr>
+                      <th>Instructor</th>
+                      <th>Programadas</th>
+                      <th>Completadas</th>
+                      <th>Canceladas</th>
+                      <th>Cumplimiento</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {clasesKpis.instructores_productividad.map((row) => (
+                      <tr key={row.instructor_id}>
+                        <td>{row.nombre_completo}</td>
+                        <td>{row.clases_programadas}</td>
+                        <td>{row.clases_completadas}</td>
+                        <td>{row.clases_canceladas}</td>
+                        <td>{formatearPorcentaje(row.porcentaje_cumplimiento || 0)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="grafico-subtitle">Sin datos de instructores para el período seleccionado.</p>
+            )}
+          </div>
+
+          <div className="grafico-card grafico-grande">
+            <div className="grafico-header">
+              <h3>Asistencia diaria de clases</h3>
+              <span className="grafico-subtitle">Programadas vs completadas vs canceladas</span>
+            </div>
+            {datosAsistencia.length ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={datosAsistencia}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="fecha" stroke="#6b7280" style={{ fontSize: '12px' }} />
+                  <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="programadas" stackId="a" fill="#2563eb" name="Programadas" />
+                  <Bar dataKey="completadas" stackId="a" fill="#16a34a" name="Completadas" />
+                  <Bar dataKey="canceladas" stackId="a" fill="#dc2626" name="Canceladas" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <p className="grafico-subtitle">Sin datos de asistencia diaria en el período seleccionado.</p>
+            )}
+          </div>
+        </>
+      )}
 
       {/* Gráficos Grid */}
       <div className="graficos-grid">

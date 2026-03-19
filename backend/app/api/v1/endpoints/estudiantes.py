@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from typing import List, Optional
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -16,6 +17,7 @@ from reportlab.lib import colors
 from app.core.database import get_db
 from app.core.security import get_password_hash, verify_password
 from app.core.precios import calcular_precio, obtener_categoria_licencia, es_certificado_sin_practica
+from app.core.formacion import obtener_horas_requeridas_por_servicio
 from app.core.config import settings
 from app.core.email import send_email
 from app.models.usuario import Usuario, RolUsuario
@@ -334,6 +336,33 @@ def update_estudiante(
         if field in update_data:
             user_fields[field] = update_data.pop(field)
 
+    # Validaciones de unicidad en usuario (correo y cédula son globales en BD)
+    if "email" in user_fields and user_fields["email"]:
+        email_normalized = str(user_fields["email"]).strip().lower()
+        duplicate_email = db.query(Usuario.id).filter(
+            Usuario.email == email_normalized,
+            Usuario.id != estudiante.usuario_id,
+        ).first()
+        if duplicate_email:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="El correo ya está registrado por otro usuario",
+            )
+        user_fields["email"] = email_normalized
+
+    if "cedula" in user_fields and user_fields["cedula"]:
+        cedula_normalized = str(user_fields["cedula"]).strip()
+        duplicate_cedula = db.query(Usuario.id).filter(
+            Usuario.cedula == cedula_normalized,
+            Usuario.id != estudiante.usuario_id,
+        ).first()
+        if duplicate_cedula:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="La cédula ya está registrada por otro usuario",
+            )
+        user_fields["cedula"] = cedula_normalized
+
     if nombre_parts:
         datos = dict(estudiante.datos_adicionales or {})
         nombres_actuales = dict(datos.get("nombres", {}))
@@ -369,7 +398,14 @@ def update_estudiante(
         for field, value in user_fields.items():
             setattr(estudiante.usuario, field, value)
     
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No se pudo actualizar: el correo o la cédula ya existen",
+        )
     db.refresh(estudiante)
     
     return _build_estudiante_response(estudiante, db)
@@ -540,22 +576,14 @@ def definir_servicio(
                 )
             estudiante.valor_total_curso = servicio_data.valor_total_curso
         
-        # 5. Asignar horas teóricas y prácticas según la categoría
-        horas_map = {
-            CategoriaLicencia.A2: {"teoricas": 28, "practicas": 15},
-            CategoriaLicencia.B1: {"teoricas": 30, "practicas": 20},
-            CategoriaLicencia.C1: {"teoricas": 36, "practicas": 30},
-        }
-
-        if es_certificado_sin_practica(servicio_data.tipo_servicio):
-            estudiante.horas_teoricas_requeridas = 0
-            estudiante.horas_practicas_requeridas = 0
-        elif estudiante.categoria in horas_map:
-            estudiante.horas_teoricas_requeridas = horas_map[estudiante.categoria]["teoricas"]
-            estudiante.horas_practicas_requeridas = horas_map[estudiante.categoria]["practicas"]
-        else:
-            estudiante.horas_teoricas_requeridas = 0
-            estudiante.horas_practicas_requeridas = 0
+        # 5. Asignar horas teóricas y prácticas con reglas del tenant (fallback legado)
+        horas_teoria, horas_practica = obtener_horas_requeridas_por_servicio(
+            db=db,
+            tenant_id=current_tenant.id,
+            tipo_servicio=servicio_data.tipo_servicio,
+        )
+        estudiante.horas_teoricas_requeridas = horas_teoria
+        estudiante.horas_practicas_requeridas = horas_practica
 
         if servicio_data.es_recategorizacion:
             datos = dict(estudiante.datos_adicionales or {})
@@ -948,20 +976,13 @@ def ampliar_servicio(
     estudiante.valor_total_curso = nuevo_valor_total
     estudiante.saldo_pendiente = nuevo_saldo
 
-    horas_map = {
-        CategoriaLicencia.A2: {"teoricas": 28, "practicas": 15},
-        CategoriaLicencia.B1: {"teoricas": 30, "practicas": 20},
-        CategoriaLicencia.C1: {"teoricas": 36, "practicas": 30},
-    }
-    if es_certificado_sin_practica(servicio_data.tipo_servicio_nuevo):
-        estudiante.horas_teoricas_requeridas = 0
-        estudiante.horas_practicas_requeridas = 0
-    elif estudiante.categoria in horas_map:
-        estudiante.horas_teoricas_requeridas = horas_map[estudiante.categoria]["teoricas"]
-        estudiante.horas_practicas_requeridas = horas_map[estudiante.categoria]["practicas"]
-    else:
-        estudiante.horas_teoricas_requeridas = 0
-        estudiante.horas_practicas_requeridas = 0
+    horas_teoria, horas_practica = obtener_horas_requeridas_por_servicio(
+        db=db,
+        tenant_id=current_tenant.id,
+        tipo_servicio=servicio_data.tipo_servicio_nuevo,
+    )
+    estudiante.horas_teoricas_requeridas = horas_teoria
+    estudiante.horas_practicas_requeridas = horas_practica
 
     datos = dict(estudiante.datos_adicionales or {})
     ampliaciones = list(datos.get("ampliaciones_servicio", []))
@@ -1082,20 +1103,13 @@ def corregir_servicio(
     estudiante.valor_total_curso = nuevo_valor_total
     estudiante.saldo_pendiente = nuevo_valor_total
 
-    horas_map = {
-        CategoriaLicencia.A2: {"teoricas": 28, "practicas": 15},
-        CategoriaLicencia.B1: {"teoricas": 30, "practicas": 20},
-        CategoriaLicencia.C1: {"teoricas": 36, "practicas": 30},
-    }
-    if es_certificado_sin_practica(payload.tipo_servicio_nuevo):
-        estudiante.horas_teoricas_requeridas = 0
-        estudiante.horas_practicas_requeridas = 0
-    elif estudiante.categoria in horas_map:
-        estudiante.horas_teoricas_requeridas = horas_map[estudiante.categoria]["teoricas"]
-        estudiante.horas_practicas_requeridas = horas_map[estudiante.categoria]["practicas"]
-    else:
-        estudiante.horas_teoricas_requeridas = 0
-        estudiante.horas_practicas_requeridas = 0
+    horas_teoria, horas_practica = obtener_horas_requeridas_por_servicio(
+        db=db,
+        tenant_id=current_tenant.id,
+        tipo_servicio=payload.tipo_servicio_nuevo,
+    )
+    estudiante.horas_teoricas_requeridas = horas_teoria
+    estudiante.horas_practicas_requeridas = horas_practica
 
     datos = dict(estudiante.datos_adicionales or {})
     correcciones = list(datos.get("correcciones_servicio", []))
@@ -1455,6 +1469,12 @@ def _resolve_logo_image(tenant: Optional[Tenant], fallback_settings_path: Option
         if os.path.exists(default_logo):
             return default_logo
         return None
+    if raw.startswith("data:image"):
+        try:
+            _header, encoded = raw.split(",", 1)
+            return BytesIO(base64.b64decode(encoded))
+        except Exception:
+            return None
     if raw.startswith("http://") or raw.startswith("https://"):
         try:
             req = urllib.request.Request(raw, headers={"User-Agent": "SIAEC-PDF/1.0"})

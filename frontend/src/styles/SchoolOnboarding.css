@@ -73,6 +73,11 @@
   box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.12);
 }
 
+.onboarding-help {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .onboarding-button {
   border: none;
   background: var(--primary);

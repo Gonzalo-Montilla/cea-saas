@@ -263,8 +263,14 @@ export const Vehiculos = () => {
       ) : (
         <div className="vehiculos-table">
           {vehiculos.length === 0 ? (
-            <div className="empty-state">
-              <p>No se encontraron vehículos</p>
+            <div className="no-vehiculos">
+              <Car size={64} />
+              <h3>No se encontraron vehículos</h3>
+              {busquedaDebounced || filtroActivo !== 'activos' ? (
+                <p>Intenta ajustar los filtros de búsqueda</p>
+              ) : (
+                <p>Comienza agregando tu primer vehículo</p>
+              )}
             </div>
           ) : (
             <table>

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, extract, cast, Date, or_, String
+from sqlalchemy import func, and_, extract, cast, Date, or_, String, case
 from typing import Optional
 from datetime import datetime, timedelta, date
 from decimal import Decimal
@@ -13,7 +13,7 @@ from app.models.caja import Caja, MovimientoCaja, EstadoCaja, ConceptoMovimiento
 from app.models.pago import Pago, DetallePago, MetodoPago, EstadoPago
 from app.models.compromiso_pago import CompromisoPago, CuotaPago, EstadoCuota
 from app.models.estudiante import Estudiante, EstadoEstudiante
-from app.models.clase import MantenimientoVehiculo, Vehiculo, Instructor
+from app.models.clase import MantenimientoVehiculo, Vehiculo, Instructor, Clase, EstadoClase
 from app.schemas.reportes import (
     DashboardEjecutivo, KPIDashboard, KPIMetrica,
     GraficoEvolucionIngresos, GraficoMetodosPago,
@@ -377,6 +377,137 @@ def get_cierre_financiero(
         total_sistecredito=total_sistecredito,
         cajas=cajas_response
     )
+
+
+@router.get("/kpis-clases")
+def get_kpis_clases(
+    fecha_inicio: Optional[datetime] = None,
+    fecha_fin: Optional[datetime] = None,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
+):
+    if not fecha_fin:
+        fecha_fin = datetime.utcnow()
+    if not fecha_inicio:
+        fecha_inicio = fecha_fin.replace(day=1)
+    fecha_inicio_date = fecha_inicio.date()
+    fecha_fin_date = fecha_fin.date()
+
+    clases = (
+        db.query(Clase)
+        .join(Estudiante, Clase.estudiante_id == Estudiante.id)
+        .filter(
+            Estudiante.tenant_id == current_tenant.id,
+            cast(Clase.fecha_programada, Date) >= fecha_inicio_date,
+            cast(Clase.fecha_programada, Date) <= fecha_fin_date,
+        )
+        .all()
+    )
+
+    total_programadas = len([c for c in clases if c.estado == EstadoClase.PROGRAMADA])
+    total_completadas = len([c for c in clases if c.estado == EstadoClase.COMPLETADA])
+    total_canceladas = len([c for c in clases if c.estado == EstadoClase.CANCELADA])
+
+    base_cumplimiento = total_completadas + total_canceladas
+    tasa_cumplimiento = (total_completadas / base_cumplimiento * 100) if base_cumplimiento > 0 else 0.0
+
+    productividad: dict[int, dict] = {}
+    for clase in clases:
+        if not clase.instructor_id:
+            continue
+        if clase.instructor_id not in productividad:
+            nombre = (
+                clase.instructor.usuario.nombre_completo
+                if clase.instructor and clase.instructor.usuario
+                else f"Instructor {clase.instructor_id}"
+            )
+            productividad[clase.instructor_id] = {
+                "instructor_id": clase.instructor_id,
+                "nombre_completo": nombre,
+                "clases_programadas": 0,
+                "clases_completadas": 0,
+                "clases_canceladas": 0,
+                "porcentaje_cumplimiento": 0.0,
+            }
+        ref = productividad[clase.instructor_id]
+        ref["clases_programadas"] += 1
+        if clase.estado == EstadoClase.COMPLETADA:
+            ref["clases_completadas"] += 1
+        elif clase.estado == EstadoClase.CANCELADA:
+            ref["clases_canceladas"] += 1
+
+    for _, row in productividad.items():
+        base = row["clases_completadas"] + row["clases_canceladas"]
+        row["porcentaje_cumplimiento"] = (row["clases_completadas"] / base * 100) if base > 0 else 0.0
+
+    instructores_productividad = sorted(
+        productividad.values(),
+        key=lambda r: (r["clases_completadas"], r["clases_programadas"]),
+        reverse=True,
+    )[:10]
+
+    return {
+        "periodo_inicio": fecha_inicio,
+        "periodo_fin": fecha_fin,
+        "total_programadas": total_programadas,
+        "total_completadas": total_completadas,
+        "total_canceladas": total_canceladas,
+        "tasa_cumplimiento": round(tasa_cumplimiento, 2),
+        "instructores_productividad": instructores_productividad,
+    }
+
+
+@router.get("/asistencia-clases-diaria")
+def get_asistencia_clases_diaria(
+    fecha_inicio: Optional[datetime] = None,
+    fecha_fin: Optional[datetime] = None,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
+):
+    if not fecha_fin:
+        fecha_fin = datetime.utcnow()
+    if not fecha_inicio:
+        fecha_inicio = fecha_fin.replace(day=1)
+    fecha_inicio_date = fecha_inicio.date()
+    fecha_fin_date = fecha_fin.date()
+
+    fecha_col = cast(Clase.fecha_programada, Date)
+    rows = (
+        db.query(
+            fecha_col.label("fecha"),
+            func.count(Clase.id).label("total"),
+            func.sum(case((Clase.estado == EstadoClase.PROGRAMADA, 1), else_=0)).label("programadas"),
+            func.sum(case((Clase.estado == EstadoClase.COMPLETADA, 1), else_=0)).label("completadas"),
+            func.sum(case((Clase.estado == EstadoClase.CANCELADA, 1), else_=0)).label("canceladas"),
+        )
+        .join(Estudiante, Clase.estudiante_id == Estudiante.id)
+        .filter(
+            Estudiante.tenant_id == current_tenant.id,
+            fecha_col >= fecha_inicio_date,
+            fecha_col <= fecha_fin_date,
+        )
+        .group_by(fecha_col)
+        .order_by(fecha_col.asc())
+        .all()
+    )
+
+    datos = []
+    for r in rows:
+        datos.append({
+            "fecha": r.fecha.isoformat() if hasattr(r.fecha, "isoformat") else str(r.fecha),
+            "total": int(r.total or 0),
+            "programadas": int(r.programadas or 0),
+            "completadas": int(r.completadas or 0),
+            "canceladas": int(r.canceladas or 0),
+        })
+
+    return {
+        "periodo_inicio": fecha_inicio,
+        "periodo_fin": fecha_fin,
+        "datos": datos,
+    }
 
 
 # ==================== FUNCIONES AUXILIARES ====================

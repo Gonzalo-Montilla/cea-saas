@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 import logging
 from io import BytesIO
+import base64
 import os
 import urllib.request
 from reportlab.lib.pagesizes import letter
@@ -1139,6 +1140,12 @@ def _resolve_logo_for_pdf(tenant: Optional[Tenant]):
         if os.path.exists(default_logo):
             return default_logo
         return None
+    if raw.startswith("data:image"):
+        try:
+            _header, encoded = raw.split(",", 1)
+            return BytesIO(base64.b64decode(encoded))
+        except Exception:
+            return None
     if raw.startswith("http://") or raw.startswith("https://"):
         try:
             req = urllib.request.Request(raw, headers={"User-Agent": "SIAEC-PDF/1.0"})

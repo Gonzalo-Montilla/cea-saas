@@ -250,6 +250,83 @@ export const estudiantesAPI = {
   },
 };
 
+export interface ClaseItem {
+  id: number;
+  estudiante_id: number;
+  estudiante_nombre: string;
+  instructor_id?: number | null;
+  instructor_nombre?: string | null;
+  vehiculo_id?: number | null;
+  vehiculo_label?: string | null;
+  tipo: 'TEORICA' | 'PRACTICA';
+  estado: 'PROGRAMADA' | 'COMPLETADA' | 'CANCELADA';
+  fecha_programada: string;
+  fecha_completada?: string | null;
+  duracion_horas: number;
+  created_at: string;
+}
+
+export const clasesAPI = {
+  getAll: async (params?: {
+    skip?: number;
+    limit?: number;
+    estado?: string;
+    tipo?: string;
+    fecha_desde?: string;
+    fecha_hasta?: string;
+    instructor_id?: number;
+    estudiante_id?: number;
+    vehiculo_id?: number;
+  }): Promise<{ items: ClaseItem[]; total: number; skip: number; limit: number }> => {
+    const queryParams = new URLSearchParams();
+    if (params?.skip !== undefined) queryParams.append('skip', params.skip.toString());
+    if (params?.limit !== undefined) queryParams.append('limit', params.limit.toString());
+    if (params?.estado) queryParams.append('estado', params.estado);
+    if (params?.tipo) queryParams.append('tipo', params.tipo);
+    if (params?.fecha_desde) queryParams.append('fecha_desde', params.fecha_desde);
+    if (params?.fecha_hasta) queryParams.append('fecha_hasta', params.fecha_hasta);
+    if (params?.instructor_id !== undefined) queryParams.append('instructor_id', params.instructor_id.toString());
+    if (params?.estudiante_id !== undefined) queryParams.append('estudiante_id', params.estudiante_id.toString());
+    if (params?.vehiculo_id !== undefined) queryParams.append('vehiculo_id', params.vehiculo_id.toString());
+    const query = queryParams.toString();
+    const response = await api.get(`/clases/${query ? `?${query}` : ''}`);
+    return response.data;
+  },
+  create: async (data: {
+    estudiante_id: number;
+    instructor_id: number;
+    vehiculo_id?: number | null;
+    tipo: 'TEORICA' | 'PRACTICA';
+    fecha_programada: string;
+    duracion_horas: number;
+    observaciones?: string | null;
+  }): Promise<ClaseItem> => {
+    const response = await api.post<ClaseItem>('/clases/', data);
+    return response.data;
+  },
+  completar: async (claseId: number, data?: { acreditar_horas?: boolean; observaciones?: string | null }): Promise<ClaseItem> => {
+    const response = await api.put<ClaseItem>(`/clases/${claseId}/completar`, data || {});
+    return response.data;
+  },
+  cancelar: async (claseId: number, data?: { motivo?: string | null }): Promise<ClaseItem> => {
+    const response = await api.put<ClaseItem>(`/clases/${claseId}/cancelar`, data || {});
+    return response.data;
+  },
+  reprogramar: async (
+    claseId: number,
+    data: {
+      fecha_programada: string;
+      duracion_horas?: number;
+      instructor_id?: number;
+      vehiculo_id?: number | null;
+      observaciones?: string | null;
+    }
+  ): Promise<ClaseItem> => {
+    const response = await api.put<ClaseItem>(`/clases/${claseId}/reprogramar`, data);
+    return response.data;
+  }
+};
+
 // Caja endpoints
 export const cajaAPI = {
   abrirCaja: async (data: { saldo_inicial: number; observaciones_apertura?: string | null }): Promise<any> => {
@@ -482,6 +559,22 @@ export const reportesAPI = {
     const response = await api.get(`/reportes/cierre-financiero${query ? `?${query}` : ''}`);
     return response.data;
   },
+  getKpisClases: async (params?: { fecha_inicio?: string; fecha_fin?: string }): Promise<any> => {
+    const queryParams = new URLSearchParams();
+    if (params?.fecha_inicio) queryParams.append('fecha_inicio', params.fecha_inicio);
+    if (params?.fecha_fin) queryParams.append('fecha_fin', params.fecha_fin);
+    const query = queryParams.toString();
+    const response = await api.get(`/reportes/kpis-clases${query ? `?${query}` : ''}`);
+    return response.data;
+  },
+  getAsistenciaClasesDiaria: async (params?: { fecha_inicio?: string; fecha_fin?: string }): Promise<any> => {
+    const queryParams = new URLSearchParams();
+    if (params?.fecha_inicio) queryParams.append('fecha_inicio', params.fecha_inicio);
+    if (params?.fecha_fin) queryParams.append('fecha_fin', params.fecha_fin);
+    const query = queryParams.toString();
+    const response = await api.get(`/reportes/asistencia-clases-diaria${query ? `?${query}` : ''}`);
+    return response.data;
+  },
 };
 
 // Vehículos endpoints
@@ -656,6 +749,33 @@ export const tarifasAPI = {
   },
   delete: async (id: number): Promise<void> => {
     await api.delete(`/tarifas/${id}`);
+  }
+};
+
+export interface TenantServiceRule {
+  tipo_servicio: string;
+  horas_teoricas_requeridas: number;
+  horas_practicas_requeridas: number;
+  activo: boolean;
+  es_personalizado: boolean;
+  updated_at?: string | null;
+}
+
+export const tenantServiceRulesAPI = {
+  getAll: async (): Promise<TenantServiceRule[]> => {
+    const response = await api.get<TenantServiceRule[]>('/tenant-service-rules');
+    return response.data;
+  },
+  upsert: async (
+    tipoServicio: string,
+    data: { horas_teoricas_requeridas: number; horas_practicas_requeridas: number; activo?: boolean }
+  ): Promise<TenantServiceRule> => {
+    const response = await api.put<TenantServiceRule>(`/tenant-service-rules/${tipoServicio}`, data);
+    return response.data;
+  },
+  reset: async (tipoServicio: string): Promise<TenantServiceRule> => {
+    const response = await api.delete<TenantServiceRule>(`/tenant-service-rules/${tipoServicio}`);
+    return response.data;
   }
 };
 

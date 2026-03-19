@@ -59,6 +59,14 @@
   text-align: left;
 }
 
+.section-title {
+  margin: 8px 0 12px 0;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
 .btn-icon {
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -71,4 +79,13 @@
 .btn-icon.danger {
   background: #fee2e2;
   border-color: #fecaca;
+}
+
+.info-message {
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
 }

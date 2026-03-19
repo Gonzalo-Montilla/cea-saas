@@ -331,6 +331,28 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
+.tabla-simple-wrapper {
+  overflow-x: auto;
+}
+
+.tabla-simple {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.tabla-simple th,
+.tabla-simple td {
+  text-align: left;
+  padding: 10px 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.tabla-simple th {
+  color: #6b7280;
+  font-weight: 600;
+}
+
 .grafico-grande {
   grid-column: span 2;
 }

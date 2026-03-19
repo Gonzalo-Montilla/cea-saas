@@ -36,6 +36,9 @@ const initialForm: FormState = {
 
 export const SchoolOnboarding = () => {
   const [form, setForm] = useState<FormState>(initialForm);
+  const [logoFileName, setLogoFileName] = useState('');
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [isProcessingLogo, setIsProcessingLogo] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState<null | { tenantSlug: string; adminEmail: string }>(null);
@@ -45,12 +48,62 @@ export const SchoolOnboarding = () => {
     setForm((prev) => ({ ...prev, [key]: value }));
   };
 
+  const fileToDataUrl = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = typeof reader.result === 'string' ? reader.result : '';
+        if (!result.startsWith('data:image')) {
+          reject(new Error('No se pudo procesar la imagen del logo'));
+          return;
+        }
+        resolve(result);
+      };
+      reader.onerror = () => reject(new Error('No se pudo leer el archivo del logo'));
+      reader.readAsDataURL(file);
+    });
+
+  const handleLogoFileChange = async (file: File | null) => {
+    if (!file) {
+      setLogoFileName('');
+      setLogoFile(null);
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      setError('El archivo del logo debe ser una imagen');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setError('El logo no puede superar 2MB');
+      return;
+    }
+    try {
+      setIsProcessingLogo(true);
+      const dataUrl = await fileToDataUrl(file);
+      setError('');
+      setLogoFile(file);
+      setLogoFileName(file.name);
+      updateField('logo_url', dataUrl);
+    } catch (err: any) {
+      setError(err?.message || 'No se pudo procesar la imagen del logo');
+      setLogoFile(null);
+      setLogoFileName('');
+    } finally {
+      setIsProcessingLogo(false);
+    }
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     setIsLoading(true);
 
     try {
+      let logoUrlFinal = form.logo_url.trim() || undefined;
+      if (logoFile) {
+        setIsProcessingLogo(true);
+        logoUrlFinal = await fileToDataUrl(logoFile);
+      }
       const result = await onboardingAPI.publicSignup(
         {
           nombre_escuela: form.nombre_escuela.trim(),
@@ -60,7 +113,7 @@ export const SchoolOnboarding = () => {
           contacto_email: form.contacto_email.trim(),
           contacto_telefono: form.contacto_telefono.trim() || undefined,
           nit: form.nit.trim() || undefined,
-          logo_url: form.logo_url.trim() || undefined,
+          logo_url: logoUrlFinal,
           admin_email: form.admin_email.trim(),
           admin_password: form.admin_password,
           admin_nombre_completo: form.admin_nombre_completo.trim(),
@@ -76,6 +129,7 @@ export const SchoolOnboarding = () => {
     } catch (err: any) {
       setError(err.response?.data?.detail || 'No se pudo registrar la escuela. Intenta nuevamente.');
     } finally {
+      setIsProcessingLogo(false);
       setIsLoading(false);
     }
   };
@@ -149,8 +203,20 @@ export const SchoolOnboarding = () => {
                 <input value={form.nit} onChange={(e) => updateField('nit', e.target.value)} />
               </label>
               <label>
-                URL de logo
+                URL de logo (opcional)
                 <input value={form.logo_url} onChange={(e) => updateField('logo_url', e.target.value)} />
+              </label>
+              <label>
+                Subir logo desde PC (opcional)
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  onChange={(e) => {
+                    void handleLogoFileChange(e.target.files?.[0] || null);
+                  }}
+                />
+                {logoFileName && <small className="onboarding-help">Logo cargado: {logoFileName}</small>}
+                {isProcessingLogo && <small className="onboarding-help">Procesando logo...</small>}
               </label>
               <label>
                 Email administrador
@@ -197,8 +263,8 @@ export const SchoolOnboarding = () => {
 
             {error && <div className="onboarding-error">{error}</div>}
 
-            <button className="onboarding-button" type="submit" disabled={isLoading}>
-              {isLoading ? 'Creando escuela...' : 'Crear escuela'}
+            <button className="onboarding-button" type="submit" disabled={isLoading || isProcessingLogo}>
+              {isLoading ? 'Creando escuela...' : isProcessingLogo ? 'Procesando logo...' : 'Crear escuela'}
             </button>
           </form>
         )}

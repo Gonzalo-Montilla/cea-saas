@@ -31,7 +31,7 @@ class SchoolOnboardingRequest(BaseModel):
     contacto_email: EmailStr
     contacto_telefono: str | None = Field(default=None, max_length=50)
     nit: str | None = Field(default=None, max_length=50)
-    logo_url: str | None = Field(default=None, max_length=500)
+    logo_url: str | None = None
     admin_email: EmailStr
     admin_password: str = Field(min_length=8, max_length=128)
     admin_nombre_completo: str = Field(min_length=3, max_length=255)
