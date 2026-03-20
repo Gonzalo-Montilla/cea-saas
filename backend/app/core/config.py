@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     ALLOW_SCHOOL_ONBOARDING: bool = False
     SCHOOL_ONBOARDING_KEY: Optional[str] = None
     ALLOW_PUBLIC_SCHOOL_SIGNUP: bool = False
+    SAAS_ADMIN_EMAILS: Optional[str] = None
+    SAAS_ADMIN_ALLOWED_ROLES: str = "ADMIN,GERENTE"
+    DEFAULT_DEMO_DAYS: int = 14
 
     # Email (SMTP)
     SMTP_HOST: str = "smtp.gmail.com"

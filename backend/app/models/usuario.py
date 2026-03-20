@@ -33,11 +33,13 @@ class Usuario(Base):
     # Estado
     is_active = Column(Boolean, default=True, nullable=False)
     is_verified = Column(Boolean, default=False)
+    must_change_password = Column(Boolean, default=False, nullable=False)
     
     # Auditoría
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_login = Column(DateTime)
+    password_changed_at = Column(DateTime)
     
     # Relaciones
     estudiante = relationship("Estudiante", back_populates="usuario", uselist=False)

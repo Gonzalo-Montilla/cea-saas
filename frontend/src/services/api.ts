@@ -78,6 +78,13 @@ export const authAPI = {
     const response = await api.post<TokenResponse>('/auth/login', data);
     return response.data;
   },
+  loginGlobal: async (data: LoginRequest): Promise<TokenResponse> => {
+    const response = await axios.post<TokenResponse>(`${API_URL}/auth/login-global`, data, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 15000,
+    });
+    return response.data;
+  },
   checkHealth: async (): Promise<boolean> => {
     try {
       await axios.get(HEALTH_URL, { timeout: 3000 });
@@ -95,6 +102,21 @@ export const authAPI = {
   getCurrentUser: async (): Promise<Usuario> => {
     const response = await api.get<Usuario>('/auth/me');
     return response.data;
+  },
+  getCurrentUserGlobal: async (): Promise<Usuario> => {
+    const token = localStorage.getItem('access_token');
+    const response = await axios.get<Usuario>(`${API_URL}/auth/me-global`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      timeout: 15000,
+    });
+    return response.data;
+  },
+  changePasswordGlobal: async (data: { current_password: string; new_password: string }): Promise<void> => {
+    const token = localStorage.getItem('access_token');
+    await axios.post(`${API_URL}/auth/change-password-global`, data, {
+      headers: token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' },
+      timeout: 15000,
+    });
   },
 
   logout: () => {
@@ -573,6 +595,149 @@ export const reportesAPI = {
     if (params?.fecha_fin) queryParams.append('fecha_fin', params.fecha_fin);
     const query = queryParams.toString();
     const response = await api.get(`/reportes/asistencia-clases-diaria${query ? `?${query}` : ''}`);
+    return response.data;
+  },
+};
+
+export interface SaasTenantItem {
+  id: number;
+  slug: string;
+  nombre: string;
+  display_name?: string | null;
+  plan: string;
+  is_active: boolean;
+  is_demo: boolean;
+  demo_ends_at?: string | null;
+  contacto_email?: string | null;
+  created_at: string;
+}
+
+export interface SaasUserItem {
+  id: number;
+  email: string;
+  nombre_completo: string;
+  cedula: string;
+  tipo_documento?: string | null;
+  telefono?: string | null;
+  rol: string;
+  is_active: boolean;
+  created_at: string;
+  last_login?: string | null;
+  must_change_password?: boolean;
+  password_changed_at?: string | null;
+  permisos_modulos?: string[];
+}
+
+export interface SaasAuditLogItem {
+  id: number;
+  actor_user_id: number;
+  actor_email: string;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  summary: string;
+  payload?: Record<string, any>;
+  ip_address?: string | null;
+  created_at: string;
+}
+
+export const saasAdminAPI = {
+  getSummary: async (): Promise<{
+    total_tenants: number;
+    active_tenants: number;
+    inactive_tenants: number;
+    demo_tenants: number;
+    demos_por_vencer: number;
+    plan_counts: Record<string, number>;
+    mrr_estimado: number;
+  }> => {
+    const response = await api.get('/saas-admin/summary');
+    return response.data;
+  },
+  getTenants: async (params?: {
+    skip?: number;
+    limit?: number;
+    search?: string;
+    plan?: string;
+    is_demo?: boolean;
+    is_active?: boolean;
+  }): Promise<{ items: SaasTenantItem[]; total: number; skip: number; limit: number }> => {
+    const queryParams = new URLSearchParams();
+    if (params?.skip !== undefined) queryParams.append('skip', params.skip.toString());
+    if (params?.limit !== undefined) queryParams.append('limit', params.limit.toString());
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.plan) queryParams.append('plan', params.plan);
+    if (params?.is_demo !== undefined) queryParams.append('is_demo', String(params.is_demo));
+    if (params?.is_active !== undefined) queryParams.append('is_active', String(params.is_active));
+    const query = queryParams.toString();
+    const response = await api.get(`/saas-admin/tenants${query ? `?${query}` : ''}`);
+    return response.data;
+  },
+  updateTenant: async (
+    tenantId: number,
+    data: { plan?: string; is_active?: boolean; is_demo?: boolean; demo_ends_at?: string | null }
+  ): Promise<SaasTenantItem> => {
+    const response = await api.put(`/saas-admin/tenants/${tenantId}`, data);
+    return response.data;
+  },
+  getUsers: async (params?: {
+    skip?: number;
+    limit?: number;
+    search?: string;
+    is_active?: boolean;
+  }): Promise<{ items: SaasUserItem[]; total: number; skip: number; limit: number }> => {
+    const queryParams = new URLSearchParams();
+    if (params?.skip !== undefined) queryParams.append('skip', params.skip.toString());
+    if (params?.limit !== undefined) queryParams.append('limit', params.limit.toString());
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.is_active !== undefined) queryParams.append('is_active', String(params.is_active));
+    const query = queryParams.toString();
+    const response = await api.get(`/saas-admin/users${query ? `?${query}` : ''}`);
+    return response.data;
+  },
+  createUser: async (data: {
+    email: string;
+    password: string;
+    nombre_completo: string;
+    cedula: string;
+    tipo_documento?: string;
+    telefono?: string | null;
+    rol: string;
+    is_active?: boolean;
+    permisos_modulos?: string[];
+  }): Promise<SaasUserItem> => {
+    const response = await api.post('/saas-admin/users', data);
+    return response.data;
+  },
+  updateUser: async (
+    userId: number,
+    data: {
+      nombre_completo?: string;
+      telefono?: string | null;
+      rol?: string;
+      is_active?: boolean;
+      permisos_modulos?: string[];
+    }
+  ): Promise<SaasUserItem> => {
+    const response = await api.put(`/saas-admin/users/${userId}`, data);
+    return response.data;
+  },
+  resetUserPassword: async (userId: number, newPassword: string): Promise<void> => {
+    await api.put(`/saas-admin/users/${userId}/password`, { new_password: newPassword });
+  },
+  getAuditLogs: async (params?: {
+    skip?: number;
+    limit?: number;
+    action?: string;
+    search?: string;
+  }): Promise<{ items: SaasAuditLogItem[]; total: number; skip: number; limit: number }> => {
+    const queryParams = new URLSearchParams();
+    if (params?.skip !== undefined) queryParams.append('skip', params.skip.toString());
+    if (params?.limit !== undefined) queryParams.append('limit', params.limit.toString());
+    if (params?.action) queryParams.append('action', params.action);
+    if (params?.search) queryParams.append('search', params.search);
+    const query = queryParams.toString();
+    const response = await api.get(`/saas-admin/audit-logs${query ? `?${query}` : ''}`);
     return response.data;
   },
 };

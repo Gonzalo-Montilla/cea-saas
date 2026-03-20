@@ -1,0 +1,152 @@
+.saas-admin-container {
+  display: grid;
+  gap: 16px;
+}
+
+.saas-admin-banner {
+  background: rgba(37, 99, 235, 0.1);
+  border: 1px solid rgba(37, 99, 235, 0.25);
+  color: #1d4ed8;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.saas-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.saas-kpi-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  display: grid;
+  gap: 6px;
+}
+
+.saas-kpi-card h4 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.saas-kpi-card strong {
+  font-size: 22px;
+}
+
+.saas-kpi-card span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.saas-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.saas-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.saas-card h3 {
+  margin: 0;
+}
+
+.saas-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.saas-plan-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.saas-search {
+  display: flex;
+  gap: 8px;
+}
+
+.saas-search input {
+  width: 280px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.saas-search select {
+  min-width: 190px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.saas-table-wrap {
+  overflow-x: auto;
+}
+
+.saas-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.saas-table th,
+.saas-table td {
+  border-bottom: 1px solid var(--border);
+  padding: 8px 6px;
+  text-align: left;
+}
+
+.saas-table th {
+  color: var(--text-secondary);
+}
+
+.saas-table select,
+.saas-table input[type="date"],
+.saas-table input[type="text"] {
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.saas-user-form {
+  display: grid;
+  grid-template-columns: 1.2fr 1.2fr 0.8fr 0.8fr 0.8fr 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.saas-user-form input,
+.saas-user-form select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.saas-user-actions {
+  display: flex;
+  gap: 8px;
+}
+
+@media (max-width: 1100px) {
+  .saas-user-form {
+    grid-template-columns: 1fr 1fr;
+  }
+}

@@ -146,12 +146,18 @@ export const Login = () => {
 
         <div className="login-links">
           <Link to="/registro-escuela">Registrar nueva escuela</Link>
+          <span> · </span>
+          <Link to="/login-saas">Acceso SaaS Admin</Link>
         </div>
 
         <div className="login-footer">
           <p>{`${BRAND_NAME} - ${BRAND_TAGLINE}`}</p>
         </div>
       </div>
+
+      <footer className="login-global-footer">
+        <p>Copyright © {new Date().getFullYear()} Prometheus Tech. Todos los derechos reservados.</p>
+      </footer>
     </div>
   );
 };

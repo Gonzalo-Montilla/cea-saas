@@ -17,11 +17,13 @@ import {
   Bell,
   ClipboardList,
   Menu,
-  Wallet
+  Wallet,
+  Building2,
 } from 'lucide-react';
 import { RolUsuario } from '../types';
 import { BRAND_LOGO_URL, BRAND_NAME } from '../config/branding';
 import { tenantsAPI } from '../services/api';
+import { isSaasAdminUser } from '../utils/saasAdmin';
 import '../styles/Layout.css';
 
 interface LayoutProps {
@@ -37,6 +39,12 @@ export const Layout = ({ children }: LayoutProps) => {
 
   useEffect(() => {
     const loadTenantBranding = async () => {
+      const authMode = (localStorage.getItem('auth_mode') || 'tenant').toLowerCase();
+      if (authMode === 'global') {
+        setTenantDisplayName('Backoffice SaaS');
+        setTenantLogoUrl(BRAND_LOGO_URL);
+        return;
+      }
       try {
         const tenantSlug = (localStorage.getItem('tenant_slug') || '').trim();
         const ctx = await tenantsAPI.getContext(tenantSlug || undefined);
@@ -56,6 +64,7 @@ export const Layout = ({ children }: LayoutProps) => {
   };
 
   const adminRoles = [RolUsuario.ADMIN, RolUsuario.COORDINADOR, RolUsuario.GERENTE];
+  const showSaasAdmin = isSaasAdminUser(user || undefined);
   const menuItems = [
     { path: '/dashboard', icon: Home, label: 'Dashboard', moduleId: 'dashboard', roles: [RolUsuario.ADMIN, RolUsuario.GERENTE, RolUsuario.CAJERO] },
     { path: '/nuevo-estudiante', icon: UserPlus, label: 'Nuevo Estudiante', moduleId: 'nuevo_estudiante', roles: [RolUsuario.ADMIN, RolUsuario.GERENTE, RolUsuario.CAJERO] },
@@ -71,9 +80,11 @@ export const Layout = ({ children }: LayoutProps) => {
     { path: '/clases', icon: Calendar, label: 'Programar Clases', moduleId: 'clases', roles: [RolUsuario.INSTRUCTOR, RolUsuario.ADMIN, RolUsuario.GERENTE, RolUsuario.COORDINADOR] },
     { path: '/usuarios', icon: Shield, label: 'Usuarios', moduleId: 'usuarios', roles: [RolUsuario.ADMIN, RolUsuario.GERENTE] },
     { path: '/tarifas', icon: GraduationCap, label: 'Tarifas', moduleId: 'tarifas', roles: [RolUsuario.ADMIN, RolUsuario.GERENTE] },
+    { path: '/saas-admin', icon: Building2, label: 'Backoffice SaaS', moduleId: 'saas_admin', roles: [RolUsuario.ADMIN] },
   ];
 
   const allowedItems = menuItems.filter((item) => {
+    if (item.path === '/saas-admin') return showSaasAdmin;
     if (!user?.rol) return false;
     if (user?.permisos_modulos && user.permisos_modulos.length > 0) {
       return user.permisos_modulos.includes(item.moduleId);

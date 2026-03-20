@@ -19,8 +19,12 @@ import { VehiculoDetalle } from './pages/VehiculoDetalle';
 import { Tarifas } from './pages/Tarifas';
 import { Usuarios } from './pages/Usuarios';
 import { Clases } from './pages/Clases';
+import { SaasAdmin } from './pages/SaasAdmin';
 import { RolUsuario } from './types';
 import { SchoolOnboarding } from './pages/SchoolOnboarding';
+import { LoginSaas } from './pages/LoginSaas';
+import { SaasForcePasswordChange } from './pages/SaasForcePasswordChange';
+import { isSaasAdminUser } from './utils/saasAdmin';
 
 const MODULE_PATHS: Record<string, string> = {
   dashboard: '/dashboard',
@@ -39,7 +43,10 @@ const MODULE_PATHS: Record<string, string> = {
   tarifas: '/tarifas'
 };
 
-const getHomeRoute = (user?: { rol?: RolUsuario; permisos_modulos?: string[] }) => {
+const getHomeRoute = (user?: { rol?: RolUsuario; permisos_modulos?: string[]; must_change_password?: boolean }) => {
+  const authMode = (localStorage.getItem('auth_mode') || 'tenant').toLowerCase();
+  if (authMode === 'global' && user?.must_change_password) return '/saas-cambiar-password';
+  if (isSaasAdminUser(user as any)) return '/saas-admin';
   if (user?.permisos_modulos && user.permisos_modulos.length > 0) {
     const first = user.permisos_modulos.find((m) => MODULE_PATHS[m]);
     if (first) return MODULE_PATHS[first];
@@ -62,6 +69,9 @@ const RoleRoute = ({ children, roles, moduleId }: { children: React.ReactNode; r
   }
   if (!isAuthenticated) {
     return <Navigate to="/login" />;
+  }
+  if (user?.must_change_password && (localStorage.getItem('auth_mode') || '').toLowerCase() === 'global') {
+    return <Navigate to="/saas-cambiar-password" />;
   }
   if (!user || !hasModuleAccess(user, moduleId, roles)) {
     return <Navigate to={getHomeRoute(user || undefined)} />;
@@ -88,6 +98,24 @@ const HomeRedirect = () => {
   return <Navigate to={getHomeRoute(user || undefined)} />;
 };
 
+const SaasAdminRoute = ({ children }: { children: React.ReactNode }) => {
+  const { isAuthenticated, isLoading, user } = useAuth();
+  if (isLoading) return <div>Cargando...</div>;
+  if (!isAuthenticated) return <Navigate to="/login-saas" />;
+  if (user?.must_change_password) return <Navigate to="/saas-cambiar-password" />;
+  if (!isSaasAdminUser(user || undefined)) return <Navigate to={getHomeRoute(user || undefined)} />;
+  return <>{children}</>;
+};
+
+const SaasForcePasswordRoute = ({ children }: { children: React.ReactNode }) => {
+  const { isAuthenticated, isLoading, user, getAuthMode } = useAuth();
+  if (isLoading) return <div>Cargando...</div>;
+  if (!isAuthenticated) return <Navigate to="/login-saas" />;
+  if (getAuthMode() !== 'global') return <Navigate to={getHomeRoute(user || undefined)} />;
+  if (!user?.must_change_password) return <Navigate to={getHomeRoute(user || undefined)} />;
+  return <>{children}</>;
+};
+
 function AppRoutes() {
   return (
     <Routes>
@@ -105,6 +133,22 @@ function AppRoutes() {
           <PublicRoute>
             <SchoolOnboarding />
           </PublicRoute>
+        }
+      />
+      <Route
+        path="/login-saas"
+        element={
+          <PublicRoute>
+            <LoginSaas />
+          </PublicRoute>
+        }
+      />
+      <Route
+        path="/saas-cambiar-password"
+        element={
+          <SaasForcePasswordRoute>
+            <SaasForcePasswordChange />
+          </SaasForcePasswordRoute>
         }
       />
       <Route
@@ -275,6 +319,16 @@ function AppRoutes() {
               <Clases />
             </Layout>
           </RoleRoute>
+        }
+      />
+      <Route
+        path="/saas-admin"
+        element={
+          <SaasAdminRoute>
+            <Layout>
+              <SaasAdmin />
+            </Layout>
+          </SaasAdminRoute>
         }
       />
       <Route path="/" element={<HomeRedirect />} />

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from typing import Optional
 from datetime import datetime
 from app.models.usuario import RolUsuario
@@ -48,6 +48,21 @@ class UserResponse(BaseModel):
     is_verified: bool
     created_at: datetime
     last_login: Optional[datetime]
+    permisos_modulos: Optional[list[str]] = None
+    must_change_password: bool = False
+    password_changed_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
+
+
+class GlobalPasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, value: str) -> str:
+        if not value or len(value) < 6:
+            raise ValueError("La nueva contraseña debe tener al menos 6 caracteres")
+        return value

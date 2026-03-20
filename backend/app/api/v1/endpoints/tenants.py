@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
@@ -136,6 +137,12 @@ def _create_school_and_admin(db: Session, payload: SchoolOnboardingRequest) -> t
         display_name=_normalize_str(payload.display_name) or normalized_nombre,
         plan=payload.plan.value,
         is_active=payload.activate_tenant,
+        is_demo=(payload.plan == PlanTenant.FREE),
+        demo_ends_at=(
+            datetime.utcnow() + timedelta(days=max(1, settings.DEFAULT_DEMO_DAYS))
+            if payload.plan == PlanTenant.FREE
+            else None
+        ),
         contacto_email=_normalize_str(str(payload.contacto_email).lower()),
         contacto_telefono=_normalize_str(payload.contacto_telefono),
         nit=_normalize_str(payload.nit),

@@ -64,6 +64,8 @@ export interface Usuario {
   created_at: string;
   last_login?: string;
   permisos_modulos?: string[];
+  must_change_password?: boolean;
+  password_changed_at?: string | null;
 }
 
 export interface Estudiante {
@@ -118,6 +120,9 @@ export interface AuthContextType {
   user: Usuario | null;
   token: string | null;
   login: (email: string, password: string) => Promise<void>;
+  loginGlobal: (email: string, password: string) => Promise<void>;
+  refreshUser: () => Promise<void>;
+  getAuthMode: () => 'tenant' | 'global';
   logout: () => void;
   isAuthenticated: boolean;
   isLoading: boolean;

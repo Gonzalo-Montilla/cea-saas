@@ -22,6 +22,8 @@ class Tenant(Base):
     nombre = Column(String(255), nullable=False)
     plan = Column(String(30), default=PlanTenant.FREE.value, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
+    is_demo = Column(Boolean, default=False, nullable=False)
+    demo_ends_at = Column(DateTime)
 
     # Branding y contacto (base para white-label)
     display_name = Column(String(255))

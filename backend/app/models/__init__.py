@@ -18,6 +18,7 @@ from app.models.tarifa import Tarifa
 from app.models.caja import Caja, MovimientoCaja, EstadoCaja, TipoMovimiento, ConceptoMovimientoCaja
 from app.models.tenant import Tenant, TenantUser, PlanTenant
 from app.models.tenant_service_rule import TenantServiceRule
+from app.models.saas_audit_log import SaasAuditLog
 
 __all__ = [
     "Usuario", "RolUsuario",
@@ -28,6 +29,7 @@ __all__ = [
     "AdjuntoMantenimientoVehiculo", "AdjuntoCombustibleVehiculo", "VehiculoConsumoUmbral",
     "Tarifa",
     "TenantServiceRule",
+    "SaasAuditLog",
     "Caja", "MovimientoCaja", "EstadoCaja", "TipoMovimiento", "ConceptoMovimientoCaja",
     "Tenant", "TenantUser", "PlanTenant",
 ]

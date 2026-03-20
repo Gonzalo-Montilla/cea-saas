@@ -124,6 +124,42 @@ def get_current_user(
     return user
 
 
+def get_current_user_global(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> Usuario:
+    """
+    Obtiene usuario actual desde JWT sin validación de tenant.
+    Útil para backoffice SaaS (owner panel).
+    """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="No se pudieron validar las credenciales",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = decode_token(token)
+        if payload is None:
+            raise credentials_exception
+        if payload.get("global") is not True:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token no corresponde a acceso global SaaS",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        user_id_str = payload.get("sub")
+        if user_id_str is None:
+            raise credentials_exception
+        user_id = int(user_id_str)
+    except (JWTError, ValueError):
+        raise credentials_exception
+
+    user = db.query(Usuario).filter(Usuario.id == user_id).first()
+    if user is None:
+        raise credentials_exception
+    return user
+
+
 def get_current_active_user(
     current_user: Usuario = Depends(get_current_user)
 ) -> Usuario:
@@ -134,6 +170,51 @@ def get_current_active_user(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Usuario inactivo"
+        )
+    return current_user
+
+
+def get_current_active_user_global(
+    current_user: Usuario = Depends(get_current_user_global)
+) -> Usuario:
+    if not current_user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Usuario inactivo",
+        )
+    return current_user
+
+
+def get_saas_admin_user(
+    current_user: Usuario = Depends(get_current_active_user_global),
+) -> Usuario:
+    if bool(getattr(current_user, "must_change_password", False)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Debes cambiar tu contraseña temporal antes de usar el backoffice SaaS",
+        )
+    raw = (settings.SAAS_ADMIN_EMAILS or "").strip()
+    allowed = {e.strip().lower() for e in raw.split(",") if e.strip()}
+    current_email = (current_user.email or "").strip().lower()
+    user_permisos = current_user.permisos_modulos or []
+    has_scope = isinstance(user_permisos, list) and any(
+        str(p).strip().lower() == "saas_admin" for p in user_permisos
+    )
+    is_allowed_email = bool(allowed) and current_email in allowed
+    if not (is_allowed_email or has_scope):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes acceso al backoffice SaaS",
+        )
+    raw_roles = (settings.SAAS_ADMIN_ALLOWED_ROLES or "").strip()
+    allowed_roles = {r.strip().upper() for r in raw_roles.split(",") if r.strip()}
+    if not allowed_roles:
+        allowed_roles = {"ADMIN", "GERENTE"}
+    current_role = current_user.rol.value if hasattr(current_user.rol, "value") else str(current_user.rol)
+    if str(current_role).upper() not in allowed_roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="La cuenta no tiene un rol válido para backoffice SaaS",
         )
     return current_user
 
