@@ -1204,3 +1204,110 @@
     padding: 0.625rem 0.75rem;
   }
 }
+
+/* ===== Dark theme polish ===== */
+:root[data-theme='dark'] .grafico-card,
+:root[data-theme='dark'] .tabla-estudiantes-card,
+:root[data-theme='dark'] .ranking-referidos-card,
+:root[data-theme='dark'] .loading-estado,
+:root[data-theme='dark'] .error-estado {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-md);
+}
+
+:root[data-theme='dark'] .tabla-scroll,
+:root[data-theme='dark'] .ranking-table,
+:root[data-theme='dark'] .tabla-simple {
+  border-color: var(--border);
+}
+
+:root[data-theme='dark'] .grafico-header,
+:root[data-theme='dark'] .tabla-header,
+:root[data-theme='dark'] .pdf-preview-header {
+  border-bottom-color: var(--border);
+  background: var(--surface-2);
+}
+
+:root[data-theme='dark'] .grafico-header h3,
+:root[data-theme='dark'] .tabla-titulo,
+:root[data-theme='dark'] .ranking-titulo,
+:root[data-theme='dark'] .podio-nombre,
+:root[data-theme='dark'] .kpi-valor,
+:root[data-theme='dark'] .td-nombre,
+:root[data-theme='dark'] .td-nombre-ref,
+:root[data-theme='dark'] .tabla-estudiantes td,
+:root[data-theme='dark'] .ranking-table td {
+  color: var(--text-primary);
+}
+
+:root[data-theme='dark'] .tabla-simple th,
+:root[data-theme='dark'] .tabla-estudiantes th,
+:root[data-theme='dark'] .ranking-table th,
+:root[data-theme='dark'] .tabla-count,
+:root[data-theme='dark'] .ranking-descripcion,
+:root[data-theme='dark'] .td-fecha,
+:root[data-theme='dark'] .td-fecha-small,
+:root[data-theme='dark'] .td-telefono,
+:root[data-theme='dark'] .text-muted,
+:root[data-theme='dark'] .kpi-titulo,
+:root[data-theme='dark'] .kpi-unidad,
+:root[data-theme='dark'] .kpi-cambio-texto {
+  color: var(--text-secondary);
+}
+
+:root[data-theme='dark'] .tabla-estudiantes thead,
+:root[data-theme='dark'] .ranking-table thead,
+:root[data-theme='dark'] .ranking-table tbody tr:hover,
+:root[data-theme='dark'] .tabla-estudiantes tbody tr:hover,
+:root[data-theme='dark'] .ranking-header-clickable:hover,
+:root[data-theme='dark'] .collapse-btn:hover,
+:root[data-theme='dark'] .tendencia-neutral,
+:root[data-theme='dark'] .filtro-btn {
+  background: var(--surface-2);
+}
+
+:root[data-theme='dark'] .spinner {
+  border-color: #334155;
+  border-top-color: var(--primary);
+}
+
+:root[data-theme='dark'] .podio-item {
+  background: linear-gradient(165deg, #132035 0%, #1a2740 100%);
+  border-color: #334155;
+}
+
+:root[data-theme='dark'] .podio-posicion-1 {
+  border-color: #fbbf24;
+}
+
+:root[data-theme='dark'] .podio-posicion-2 {
+  border-color: #94a3b8;
+}
+
+:root[data-theme='dark'] .podio-posicion-3 {
+  border-color: #f59e0b;
+}
+
+:root[data-theme='dark'] .podio-medalla {
+  background: var(--surface);
+}
+
+:root[data-theme='dark'] .podio-stats {
+  background: rgba(15, 23, 42, 0.6);
+}
+
+:root[data-theme='dark'] .btn-exportar.secondary,
+:root[data-theme='dark'] .btn-ver-detalle {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+:root[data-theme='dark'] .pdf-preview-content {
+  background: var(--surface);
+}
+
+:root[data-theme='dark'] .pdf-preview-body {
+  background: #0f172a;
+}

@@ -195,7 +195,9 @@ export const Reportes = () => {
     canceladas: Number(d.canceladas || 0),
   }));
 
-  const COLORES_METODOS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
+  const CHART_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)'];
+  const GRID_COLOR = 'var(--chart-grid)';
+  const AXIS_COLOR = 'var(--chart-axis)';
 
   const downloadCSV = (filename: string, rows: (string | number)[][]) => {
     const escape = (value: string | number) => {
@@ -400,14 +402,14 @@ export const Reportes = () => {
             {datosAsistencia.length ? (
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={datosAsistencia}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis dataKey="fecha" stroke="#6b7280" style={{ fontSize: '12px' }} />
-                  <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} />
+                  <XAxis dataKey="fecha" stroke={AXIS_COLOR} style={{ fontSize: '12px' }} />
+                  <YAxis stroke={AXIS_COLOR} style={{ fontSize: '12px' }} />
                   <Tooltip />
                   <Legend />
-                  <Bar dataKey="programadas" stackId="a" fill="#2563eb" name="Programadas" />
-                  <Bar dataKey="completadas" stackId="a" fill="#16a34a" name="Completadas" />
-                  <Bar dataKey="canceladas" stackId="a" fill="#dc2626" name="Canceladas" />
+                  <Bar dataKey="programadas" stackId="a" fill="var(--chart-1)" name="Programadas" />
+                  <Bar dataKey="completadas" stackId="a" fill="var(--chart-2)" name="Completadas" />
+                  <Bar dataKey="canceladas" stackId="a" fill="var(--chart-4)" name="Canceladas" />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
@@ -430,20 +432,20 @@ export const Reportes = () => {
           </div>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={datosIngresosLinea}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis dataKey="mes" stroke="#6b7280" style={{ fontSize: '12px' }} />
-              <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
+              <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} />
+              <XAxis dataKey="mes" stroke={AXIS_COLOR} style={{ fontSize: '12px' }} />
+              <YAxis stroke={AXIS_COLOR} style={{ fontSize: '12px' }} />
               <Tooltip
-                contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+                contentStyle={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px' }}
                 formatter={(value: any) => formatearMoneda(value)}
               />
               <Legend />
               <Line
                 type="monotone"
                 dataKey="ingresos"
-                stroke="#2563eb"
+                stroke="var(--chart-1)"
                 strokeWidth={3}
-                dot={{ fill: '#2563eb', r: 4 }}
+                dot={{ fill: 'var(--chart-1)', r: 4 }}
                 activeDot={{ r: 6 }}
                 name="Ingresos"
               />
@@ -459,16 +461,16 @@ export const Reportes = () => {
           </div>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={datosMetodosPago}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis dataKey="nombre" stroke="#6b7280" style={{ fontSize: '11px' }} angle={-45} textAnchor="end" height={100} />
-              <YAxis stroke="#6b7280" style={{ fontSize: '12px' }} />
+              <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} />
+              <XAxis dataKey="nombre" stroke={AXIS_COLOR} style={{ fontSize: '11px' }} angle={-45} textAnchor="end" height={100} />
+              <YAxis stroke={AXIS_COLOR} style={{ fontSize: '12px' }} />
               <Tooltip
-                contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+                contentStyle={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px' }}
                 formatter={(value: any) => formatearMoneda(value)}
               />
               <Bar dataKey="valor" name="Monto">
                 {datosMetodosPago.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={COLORES_METODOS[index % COLORES_METODOS.length]} />
+                  <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                 ))}
               </Bar>
             </BarChart>
@@ -490,11 +492,11 @@ export const Reportes = () => {
                 labelLine={false}
                 label={({ nombre, porcentaje }) => `${nombre}: ${typeof porcentaje === 'number' ? porcentaje.toFixed(1) : '0.0'}%`}
                 outerRadius={100}
-                fill="#8884d8"
+                fill="var(--chart-5)"
                 dataKey="valor"
               >
                 {datosEstudiantes.map((entry, index) => (
-                  <Cell key={`cell-${index}`} fill={entry.color} />
+                  <Cell key={`cell-${index}`} fill={entry.color || CHART_COLORS[index % CHART_COLORS.length]} />
                 ))}
               </Pie>
               <Tooltip formatter={(value: any) => `${value} estudiantes`} />
@@ -513,14 +515,14 @@ export const Reportes = () => {
           </div>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={datosEgresos} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-              <XAxis type="number" stroke="#6b7280" style={{ fontSize: '12px' }} />
-              <YAxis dataKey="categoria" type="category" stroke="#6b7280" style={{ fontSize: '12px' }} width={150} />
+              <CartesianGrid strokeDasharray="3 3" stroke={GRID_COLOR} />
+              <XAxis type="number" stroke={AXIS_COLOR} style={{ fontSize: '12px' }} />
+              <YAxis dataKey="categoria" type="category" stroke={AXIS_COLOR} style={{ fontSize: '12px' }} width={150} />
               <Tooltip
-                contentStyle={{ backgroundColor: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px' }}
+                contentStyle={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px' }}
                 formatter={(value: any) => formatearMoneda(value)}
               />
-              <Bar dataKey="monto" fill="#ef4444" name="Monto" />
+              <Bar dataKey="monto" fill="var(--chart-4)" name="Monto" />
             </BarChart>
           </ResponsiveContainer>
         </div>

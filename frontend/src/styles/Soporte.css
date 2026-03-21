@@ -101,6 +101,21 @@
   margin-top: 3px;
 }
 
+:root[data-theme='dark'] .soporte-tenant-card {
+  background: linear-gradient(165deg, #132035 0%, #1a2740 100%);
+  border-color: rgba(96, 165, 250, 0.22);
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.46);
+}
+
+:root[data-theme='dark'] .soporte-tenant-form input,
+:root[data-theme='dark'] .soporte-tenant-form select,
+:root[data-theme='dark'] .soporte-tenant-form textarea,
+:root[data-theme='dark'] .soporte-tenant-filters input,
+:root[data-theme='dark'] .soporte-tenant-filters select {
+  background: #0f172a;
+  border-color: #334155;
+}
+
 .soporte-tenant-error,
 .soporte-tenant-info {
   /* kept for compatibility; base styles now from bo-alert classes */

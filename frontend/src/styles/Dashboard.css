@@ -180,3 +180,29 @@
   gap: 4px;
   color: var(--text-secondary);
 }
+
+:root[data-theme='dark'] .stat-card {
+  background: linear-gradient(165deg, #132035 0%, #1a2740 100%);
+  border-color: rgba(96, 165, 250, 0.22);
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.45);
+}
+
+:root[data-theme='dark'] .stat-card:hover {
+  box-shadow: 0 14px 30px rgba(2, 6, 23, 0.55);
+}
+
+:root[data-theme='dark'] .stat-icon {
+  background: rgba(96, 165, 250, 0.18);
+  border: 1px solid rgba(96, 165, 250, 0.25);
+}
+
+:root[data-theme='dark'] .info-panel,
+:root[data-theme='dark'] .quick-action,
+:root[data-theme='dark'] .alerta-card {
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+:root[data-theme='dark'] .quick-action:hover {
+  background: var(--surface-2);
+}

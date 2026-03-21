@@ -51,7 +51,7 @@ MODULE_USERS = "saas_users_manage"
 MODULE_AUDIT = "saas_audit_read"
 MODULE_PIPELINE = "saas_pipeline_manage"
 MODULE_SUPPORT = "saas_support_manage"
-SUPPORT_STATUSES = {"OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"}
+SUPPORT_STATUSES = {"OPEN", "IN_PROGRESS", "WAITING_CUSTOMER", "RESOLVED", "CLOSED"}
 SUPPORT_PRIORITIES = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
 
 
@@ -1065,14 +1065,18 @@ def get_support_summary(
     by_priority = db.query(SaasSupportTicket.priority, func.count(SaasSupportTicket.id)).group_by(SaasSupportTicket.priority).all()
     status_counts = {str(s): int(c or 0) for s, c in by_status}
     priority_counts = {str(s): int(c or 0) for s, c in by_priority}
-    open_total = int(status_counts.get("OPEN", 0) + status_counts.get("IN_PROGRESS", 0))
+    open_total = int(
+        status_counts.get("OPEN", 0)
+        + status_counts.get("IN_PROGRESS", 0)
+        + status_counts.get("WAITING_CUSTOMER", 0)
+    )
     overdue_open = db.query(func.count(SaasSupportTicket.id)).filter(
-        SaasSupportTicket.status.in_(["OPEN", "IN_PROGRESS"]),
+        SaasSupportTicket.status.in_(["OPEN", "IN_PROGRESS", "WAITING_CUSTOMER"]),
         SaasSupportTicket.due_at.isnot(None),
         SaasSupportTicket.due_at < datetime.utcnow(),
     ).scalar() or 0
     due_soon_open = db.query(func.count(SaasSupportTicket.id)).filter(
-        SaasSupportTicket.status.in_(["OPEN", "IN_PROGRESS"]),
+        SaasSupportTicket.status.in_(["OPEN", "IN_PROGRESS", "WAITING_CUSTOMER"]),
         SaasSupportTicket.due_at.isnot(None),
         SaasSupportTicket.due_at >= datetime.utcnow(),
         SaasSupportTicket.due_at <= (datetime.utcnow() + timedelta(hours=24)),
@@ -1291,7 +1295,7 @@ def run_support_sla_alerts(
     _require_saas_module(admin, MODULE_SUPPORT, "ejecutar alertas SLA de soporte")
     now = datetime.utcnow()
     candidates = db.query(SaasSupportTicket).filter(
-        SaasSupportTicket.status.in_(["OPEN", "IN_PROGRESS"]),
+        SaasSupportTicket.status.in_(["OPEN", "IN_PROGRESS", "WAITING_CUSTOMER"]),
         SaasSupportTicket.due_at.isnot(None),
     ).all()
     evaluated = 0

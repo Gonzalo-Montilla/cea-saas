@@ -19,6 +19,8 @@ import {
   Menu,
   Wallet,
   Building2,
+  Moon,
+  Sun,
 } from 'lucide-react';
 import { RolUsuario } from '../types';
 import { BRAND_LOGO_URL, BRAND_NAME } from '../config/branding';
@@ -40,7 +42,16 @@ export const Layout = ({ children }: LayoutProps) => {
   const [sessionNotice, setSessionNotice] = useState('');
   const [supportUnreadCount, setSupportUnreadCount] = useState(0);
   const [supportNotice, setSupportNotice] = useState('');
+  const [themeMode, setThemeMode] = useState<'light' | 'dark'>(() => {
+    const saved = (localStorage.getItem('theme_mode') || '').toLowerCase();
+    return saved === 'dark' ? 'dark' : 'light';
+  });
   const supportPrevUnreadRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', themeMode);
+    localStorage.setItem('theme_mode', themeMode);
+  }, [themeMode]);
 
   useEffect(() => {
     const loadTenantBranding = async () => {
@@ -85,6 +96,10 @@ export const Layout = ({ children }: LayoutProps) => {
     } finally {
       // no-op
     }
+  };
+
+  const toggleThemeMode = () => {
+    setThemeMode((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
 
   const adminRoles = [RolUsuario.ADMIN, RolUsuario.COORDINADOR, RolUsuario.GERENTE];
@@ -264,6 +279,13 @@ export const Layout = ({ children }: LayoutProps) => {
             <div className="header-actions">
               <span className="user-role-badge">{user?.rol}</span>
               <span className="user-name">{user?.nombre_completo}</span>
+              <button
+                onClick={toggleThemeMode}
+                className="icon-button"
+                title={themeMode === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+              >
+                {themeMode === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+              </button>
               <button onClick={() => void handleLogoutAllSessions()} className="icon-button" title="Cerrar todas las sesiones">
                 <Shield size={20} />
               </button>

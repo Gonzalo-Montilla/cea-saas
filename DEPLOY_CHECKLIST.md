@@ -52,6 +52,8 @@ Checklist rapido para pasar de local/staging a produccion sin romper acceso, cor
 - Cambio de password obligatorio y redireccion limpio
 - Acceso por modulos segun permisos internos
 - Flujo basico de facturacion y soporte sin errores 500/401/403 inesperados
+- Ejecutar `backend\scripts\run_preflight_production.bat` y confirmar `PRECHECK OK`
+- Verificar `GET /health/ready` responde `ready=true`
 
 ## 6) Observabilidad minima
 
@@ -59,7 +61,15 @@ Checklist rapido para pasar de local/staging a produccion sin romper acceso, cor
 - Revisar errores JS en consola frontend
 - Configurar alertas basicas (caida API, error SMTP, error DB)
 
-## 7) Go-live
+## 7) Automatizaciones programadas (obligatorio)
+
+- Programar en servidor (Task Scheduler o cron) la ejecucion de:
+  - `backend\scripts\run_class_reminders.bat` (cada 10 minutos)
+  - `backend\scripts\run_saas_automation.bat` (1 vez por dia, recomendado 08:00)
+- Verificar que ambos procesos escriban salida `OK:` en logs de ejecucion
+- Si falla una tarea, validar acceso a DB, SMTP y variables de entorno
+
+## 8) Go-live
 
 - Ventana de despliegue definida
 - Rollback plan definido

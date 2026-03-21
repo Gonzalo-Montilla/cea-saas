@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { Layout } from './components/Layout';
@@ -356,6 +357,12 @@ function AppRoutes() {
 }
 
 function App() {
+  useEffect(() => {
+    const saved = (localStorage.getItem('theme_mode') || '').toLowerCase();
+    const theme = saved === 'dark' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', theme);
+  }, []);
+
   return (
     <BrowserRouter>
       <AuthProvider>

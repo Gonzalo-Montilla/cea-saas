@@ -287,3 +287,20 @@
   padding: 24px;
   overflow-y: auto;
 }
+
+:root[data-theme='dark'] .nav-item.active {
+  background-color: rgba(96, 165, 250, 0.18);
+  border-left-color: #93c5fd;
+}
+
+:root[data-theme='dark'] .icon-button:hover,
+:root[data-theme='dark'] .sidebar-toggle:hover {
+  background: rgba(96, 165, 250, 0.2);
+  color: #bfdbfe;
+}
+
+:root[data-theme='dark'] .layout-session-notice {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.2);
+  color: #bbf7d0;
+}

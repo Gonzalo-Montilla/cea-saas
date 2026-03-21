@@ -66,9 +66,10 @@ const AUDIT_ACTIONS = [
   'tenant.access_link_resent',
 ];
 const LEAD_STAGES = ['NUEVO', 'CONTACTADO', 'DEMO_AGENDADA', 'PROPUESTA_ENVIADA', 'CERRADO_GANADO', 'CERRADO_PERDIDO'];
-const SUPPORT_STATUSES = ['OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'];
+const SUPPORT_STATUSES = ['OPEN', 'IN_PROGRESS', 'WAITING_CUSTOMER', 'RESOLVED', 'CLOSED'];
 const SUPPORT_PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
-const CHART_COLORS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+const CHART_COLORS = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)', 'var(--chart-6)'];
+const PAGE_SIZE_OPTIONS = [20, 50, 100];
 const RESUMEN_PERIODS = [
   { value: '7d', label: 'Últimos 7 días' },
   { value: '30d', label: 'Últimos 30 días' },
@@ -170,6 +171,15 @@ export const SaasAdmin = () => {
   const [billingLoading, setBillingLoading] = useState(false);
   const [supportLoading, setSupportLoading] = useState(false);
   const [auditExporting, setAuditExporting] = useState(false);
+  const [auditSkip, setAuditSkip] = useState(0);
+  const [auditLimit, setAuditLimit] = useState(50);
+  const [auditTotal, setAuditTotal] = useState(0);
+  const [billingSkip, setBillingSkip] = useState(0);
+  const [billingLimit, setBillingLimit] = useState(50);
+  const [billingTotal, setBillingTotal] = useState(0);
+  const [supportSkip, setSupportSkip] = useState(0);
+  const [supportLimit, setSupportLimit] = useState(50);
+  const [supportTotal, setSupportTotal] = useState(0);
   const [savingTenantId, setSavingTenantId] = useState<number | null>(null);
   const [resendingAccessLinkTenantId, setResendingAccessLinkTenantId] = useState<number | null>(null);
   const [savingUserId, setSavingUserId] = useState<number | null>(null);
@@ -303,16 +313,20 @@ export const SaasAdmin = () => {
     }
   };
 
-  const loadAuditLogs = async () => {
+  const loadAuditLogs = async (pageSkip = auditSkip, pageLimit = auditLimit) => {
     try {
       setAuditLoading(true);
       setError('');
       const auditData = await saasAdminAPI.getAuditLogs({
-        limit: 100,
+        skip: pageSkip,
+        limit: pageLimit,
         search: auditSearch.trim() || undefined,
         action: auditAction || undefined,
       });
       setAuditLogs(auditData.items || []);
+      setAuditSkip(Number(auditData.skip || 0));
+      setAuditLimit(Number(auditData.limit || pageLimit));
+      setAuditTotal(Number(auditData.total || 0));
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'No se pudo cargar auditoría SaaS');
     } finally {
@@ -320,18 +334,22 @@ export const SaasAdmin = () => {
     }
   };
 
-  const loadBillingEvents = async () => {
+  const loadBillingEvents = async (pageSkip = billingSkip, pageLimit = billingLimit) => {
     try {
       setBillingLoading(true);
       setError('');
       const [data, aging] = await Promise.all([
         saasAdminAPI.getBillingEvents({
-          limit: 120,
+          skip: pageSkip,
+          limit: pageLimit,
           search: billingSearch.trim() || undefined,
         }),
         saasAdminAPI.getBillingAgingSummary(),
       ]);
       setBillingEvents(data.items || []);
+      setBillingSkip(Number(data.skip || 0));
+      setBillingLimit(Number(data.limit || pageLimit));
+      setBillingTotal(Number(data.total || 0));
       setAgingSummary(aging);
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'No se pudo cargar historial de cobros');
@@ -340,16 +358,23 @@ export const SaasAdmin = () => {
     }
   };
 
-  const loadSupportTickets = async () => {
+  const loadSupportTickets = async (pageSkip = supportSkip, pageLimit = supportLimit) => {
     try {
       setSupportLoading(true);
       setError('');
       const [summaryData, ticketsData] = await Promise.all([
         saasAdminAPI.getSupportSummary(),
-        saasAdminAPI.getSupportTickets({ limit: 120, search: supportSearch.trim() || undefined }),
+        saasAdminAPI.getSupportTickets({
+          skip: pageSkip,
+          limit: pageLimit,
+          search: supportSearch.trim() || undefined,
+        }),
       ]);
       setSupportSummary(summaryData);
       setSupportTickets(ticketsData.items || []);
+      setSupportSkip(Number(ticketsData.skip || 0));
+      setSupportLimit(Number(ticketsData.limit || pageLimit));
+      setSupportTotal(Number(ticketsData.total || 0));
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'No se pudo cargar soporte SaaS');
     } finally {
@@ -408,12 +433,31 @@ export const SaasAdmin = () => {
   useEffect(() => {
     if ((saasView === 'resumen' || saasView === 'tenants') && (canTenants || canBilling)) void loadData();
     if (saasView === 'resumen') void loadResumenInsights();
-    if (saasView === 'billing' && canBilling) void loadBillingEvents();
+    if (saasView === 'billing' && canBilling) void loadBillingEvents(billingSkip, billingLimit);
     if (saasView === 'users' && canUsers) void loadUsers();
     if (saasView === 'pipeline' && canPipeline) void loadPipeline();
-    if (saasView === 'support' && canSupport) void loadSupportTickets();
-    if ((saasView === 'audit' || saasView === 'security') && canAudit) void loadAuditLogs();
+    if (saasView === 'support' && canSupport) void loadSupportTickets(supportSkip, supportLimit);
+    if ((saasView === 'audit' || saasView === 'security') && canAudit) void loadAuditLogs(auditSkip, auditLimit);
   }, [canTenants, canBilling, canUsers, canPipeline, canSupport, canAudit, saasView]);
+
+  const auditPage = Math.floor(auditSkip / Math.max(auditLimit, 1)) + 1;
+  const auditTotalPages = Math.max(1, Math.ceil(auditTotal / Math.max(auditLimit, 1)));
+  const auditFrom = auditTotal === 0 ? 0 : auditSkip + 1;
+  const auditTo = Math.min(auditSkip + auditLogs.length, auditTotal);
+  const canAuditPrev = auditSkip > 0;
+  const canAuditNext = auditSkip + auditLimit < auditTotal;
+  const billingPage = Math.floor(billingSkip / Math.max(billingLimit, 1)) + 1;
+  const billingTotalPages = Math.max(1, Math.ceil(billingTotal / Math.max(billingLimit, 1)));
+  const billingFrom = billingTotal === 0 ? 0 : billingSkip + 1;
+  const billingTo = Math.min(billingSkip + billingEvents.length, billingTotal);
+  const canBillingPrev = billingSkip > 0;
+  const canBillingNext = billingSkip + billingLimit < billingTotal;
+  const supportPage = Math.floor(supportSkip / Math.max(supportLimit, 1)) + 1;
+  const supportTotalPages = Math.max(1, Math.ceil(supportTotal / Math.max(supportLimit, 1)));
+  const supportFrom = supportTotal === 0 ? 0 : supportSkip + 1;
+  const supportTo = Math.min(supportSkip + supportTickets.length, supportTotal);
+  const canSupportPrev = supportSkip > 0;
+  const canSupportNext = supportSkip + supportLimit < supportTotal;
 
   const byPlanRows = useMemo(() => {
     const counts = summary?.plan_counts || {};
@@ -1327,7 +1371,7 @@ export const SaasAdmin = () => {
               value={supportSearch}
               onChange={(e) => setSupportSearch(e.target.value)}
             />
-            <button type="button" className="btn-primary" onClick={() => void loadSupportTickets()} disabled={supportLoading}>
+            <button type="button" className="btn-primary" onClick={() => void loadSupportTickets(0, supportLimit)} disabled={supportLoading}>
               Buscar
             </button>
             <button
@@ -1480,6 +1524,47 @@ export const SaasAdmin = () => {
             </tbody>
           </table>
         </div>
+        <div className="saas-pagination">
+          <span>
+            Mostrando {supportFrom}-{supportTo} de {supportTotal}
+          </span>
+          <label>
+            Filas:
+            <select
+              value={supportLimit}
+              onChange={(e) => {
+                const nextLimit = Number(e.target.value || 50);
+                void loadSupportTickets(0, nextLimit);
+              }}
+              disabled={supportLoading}
+            >
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => void loadSupportTickets(Math.max(0, supportSkip - supportLimit), supportLimit)}
+            disabled={supportLoading || !canSupportPrev}
+          >
+            Anterior
+          </button>
+          <span>
+            Página {supportPage} de {supportTotalPages}
+          </span>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => void loadSupportTickets(supportSkip + supportLimit, supportLimit)}
+            disabled={supportLoading || !canSupportNext}
+          >
+            Siguiente
+          </button>
+        </div>
       </div>
       )}
 
@@ -1535,7 +1620,7 @@ export const SaasAdmin = () => {
                   <XAxis dataKey="name" />
                   <YAxis />
                   <Tooltip formatter={(value: any) => money(Number(value || 0))} />
-                  <Bar dataKey="amount" fill="#f59e0b" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="amount" fill="var(--chart-3)" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -1550,7 +1635,7 @@ export const SaasAdmin = () => {
                   <XAxis dataKey="name" interval={0} angle={-15} height={64} textAnchor="end" />
                   <YAxis allowDecimals={false} />
                   <Tooltip />
-                  <Bar dataKey="value" fill="#2563eb" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="value" fill="var(--chart-1)" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -1565,7 +1650,7 @@ export const SaasAdmin = () => {
                   <XAxis dataKey="name" />
                   <YAxis allowDecimals={false} />
                   <Tooltip />
-                  <Bar dataKey="value" fill="#8b5cf6" radius={[6, 6, 0, 0]} />
+                  <Bar dataKey="value" fill="var(--chart-5)" radius={[6, 6, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -1598,8 +1683,8 @@ export const SaasAdmin = () => {
                   <YAxis />
                   <Tooltip formatter={(value: any) => money(Number(value || 0))} />
                   <Legend />
-                  <Line type="monotone" dataKey="payments" name="Pagos registrados" stroke="#10b981" strokeWidth={2} />
-                  <Line type="monotone" dataKey="charges" name="Cargos emitidos" stroke="#ef4444" strokeWidth={2} />
+                  <Line type="monotone" dataKey="payments" name="Pagos registrados" stroke="var(--chart-2)" strokeWidth={2} />
+                  <Line type="monotone" dataKey="charges" name="Cargos emitidos" stroke="var(--chart-4)" strokeWidth={2} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -1812,11 +1897,13 @@ export const SaasAdmin = () => {
           </div>
         </div>
 
-        <div className="saas-table-wrap bo-table-wrap">
+        <div className="saas-table-wrap bo-table-wrap saas-table-wrap-tenants">
           <table className="saas-table bo-table">
             <thead>
               <tr>
-                <th>Escuela</th>
+                <th className="saas-sticky-col">
+                  <div className="saas-sticky-cell saas-sticky-cell-header">Escuela</div>
+                </th>
                 <th>Codigo de escuela</th>
                 <th>Plan</th>
                 <th>Suscripción</th>
@@ -1834,7 +1921,9 @@ export const SaasAdmin = () => {
             <tbody>
               {tenants.map((t, idx) => (
                 <tr key={t.id}>
-                  <td>{t.display_name || t.nombre}</td>
+                  <td className="saas-sticky-col">
+                    <div className="saas-sticky-cell">{t.display_name || t.nombre}</div>
+                  </td>
                   <td>{t.slug}</td>
                   <td>
                     <select
@@ -2034,7 +2123,7 @@ export const SaasAdmin = () => {
               value={billingSearch}
               onChange={(e) => setBillingSearch(e.target.value)}
             />
-            <button type="button" className="btn-primary" onClick={() => void loadBillingEvents()} disabled={billingLoading}>
+            <button type="button" className="btn-primary" onClick={() => void loadBillingEvents(0, billingLimit)} disabled={billingLoading}>
               Buscar
             </button>
             <button type="button" className="btn-secondary" onClick={() => void runCycleCharges()} disabled={processingCycleCharges}>
@@ -2090,6 +2179,47 @@ export const SaasAdmin = () => {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="saas-pagination">
+          <span>
+            Mostrando {billingFrom}-{billingTo} de {billingTotal}
+          </span>
+          <label>
+            Filas:
+            <select
+              value={billingLimit}
+              onChange={(e) => {
+                const nextLimit = Number(e.target.value || 50);
+                void loadBillingEvents(0, nextLimit);
+              }}
+              disabled={billingLoading}
+            >
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => void loadBillingEvents(Math.max(0, billingSkip - billingLimit), billingLimit)}
+            disabled={billingLoading || !canBillingPrev}
+          >
+            Anterior
+          </button>
+          <span>
+            Página {billingPage} de {billingTotalPages}
+          </span>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => void loadBillingEvents(billingSkip + billingLimit, billingLimit)}
+            disabled={billingLoading || !canBillingNext}
+          >
+            Siguiente
+          </button>
         </div>
       </div>
       )}
@@ -2322,7 +2452,7 @@ export const SaasAdmin = () => {
               value={auditSearch}
               onChange={(e) => setAuditSearch(e.target.value)}
             />
-            <button type="button" className="btn-primary" onClick={() => void loadAuditLogs()} disabled={auditLoading}>
+            <button type="button" className="btn-primary" onClick={() => void loadAuditLogs(0, auditLimit)} disabled={auditLoading}>
               Buscar
             </button>
             <button type="button" className="btn-secondary" onClick={() => void exportAuditCsv()} disabled={auditExporting}>
@@ -2361,6 +2491,47 @@ export const SaasAdmin = () => {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="saas-pagination">
+          <span>
+            Mostrando {auditFrom}-{auditTo} de {auditTotal}
+          </span>
+          <label>
+            Filas:
+            <select
+              value={auditLimit}
+              onChange={(e) => {
+                const nextLimit = Number(e.target.value || 50);
+                void loadAuditLogs(0, nextLimit);
+              }}
+              disabled={auditLoading}
+            >
+              {PAGE_SIZE_OPTIONS.map((size) => (
+                <option key={size} value={size}>
+                  {size}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => void loadAuditLogs(Math.max(0, auditSkip - auditLimit), auditLimit)}
+            disabled={auditLoading || !canAuditPrev}
+          >
+            Anterior
+          </button>
+          <span>
+            Página {auditPage} de {auditTotalPages}
+          </span>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => void loadAuditLogs(auditSkip + auditLimit, auditLimit)}
+            disabled={auditLoading || !canAuditNext}
+          >
+            Siguiente
+          </button>
         </div>
       </div>
       )}

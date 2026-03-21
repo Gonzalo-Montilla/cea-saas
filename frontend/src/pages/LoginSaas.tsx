@@ -1,8 +1,9 @@
 import { FormEvent, useState } from 'react';
-import { Eye, EyeOff, Rocket } from 'lucide-react';
+import { Eye, EyeOff } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { authAPI } from '../services/api';
+import { BRAND_LOGO_URL, BRAND_NAME, BRAND_TAGLINE } from '../config/branding';
 import '../styles/Login.css';
 
 export const LoginSaas = () => {
@@ -11,6 +12,7 @@ export const LoginSaas = () => {
   const [mfaCode, setMfaCode] = useState('');
   const [backupCode, setBackupCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [logoError, setLogoError] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const { loginGlobal } = useAuth();
@@ -39,7 +41,16 @@ export const LoginSaas = () => {
     <div className="login-container">
       <div className="login-card">
         <div className="login-header">
-          <Rocket size={54} style={{ color: 'var(--primary)', marginBottom: 8 }} />
+          {!logoError ? (
+            <img
+              src={BRAND_LOGO_URL}
+              alt={BRAND_NAME}
+              className="login-logo"
+              onError={() => setLogoError(true)}
+            />
+          ) : (
+            <p>{BRAND_NAME}</p>
+          )}
           <p>Acceso Backoffice SaaS</p>
         </div>
 
@@ -114,6 +125,10 @@ export const LoginSaas = () => {
 
         <div className="login-links">
           <Link to="/login">Volver al login de escuela</Link>
+        </div>
+
+        <div className="login-footer">
+          <p>{`${BRAND_NAME} - ${BRAND_TAGLINE}`}</p>
         </div>
       </div>
 

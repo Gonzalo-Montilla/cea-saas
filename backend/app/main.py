@@ -1,6 +1,9 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+
 from app.api.v1.api import api_router
+from app.core.database import SessionLocal
 from app.core.config import settings
 
 app = FastAPI(
@@ -54,3 +57,42 @@ def root():
 @app.get("/health")
 def health_check():
     return {"status": "healthy"}
+
+
+@app.get("/health/ready")
+def readiness_check():
+    db_ok = False
+    db_error = None
+    db = SessionLocal()
+    try:
+        db.execute(text("SELECT 1"))
+        db_ok = True
+    except Exception as exc:
+        db_error = str(exc)
+    finally:
+        db.close()
+
+    env_checks = {
+        "secret_key_configured": bool(settings.SECRET_KEY and "change-in-production" not in settings.SECRET_KEY.lower()),
+        "smtp_user_configured": bool((settings.SMTP_USER or "").strip()),
+        "smtp_password_configured": bool((settings.SMTP_PASSWORD or "").strip()),
+        "portal_url_configured": bool((settings.PORTAL_URL or "").strip()),
+    }
+    app_env = (settings.APP_ENV or "").strip().lower()
+    if app_env == "production":
+        app_url = (settings.APP_URL or "").strip().lower()
+        portal_url = (settings.PORTAL_URL or "").strip().lower()
+        env_checks["app_url_not_localhost"] = bool(app_url and "localhost" not in app_url and "127.0.0.1" not in app_url)
+        env_checks["portal_url_not_localhost"] = bool(
+            portal_url and "localhost" not in portal_url and "127.0.0.1" not in portal_url
+        )
+    env_ok = all(env_checks.values())
+    ready = bool(db_ok and env_ok)
+    return {
+        "status": "ready" if ready else "not_ready",
+        "ready": ready,
+        "checks": {
+            "database": {"ok": db_ok, "error": db_error},
+            "environment": {"ok": env_ok, "details": env_checks},
+        },
+    }
