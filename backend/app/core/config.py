@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     APP_ENV: str = "local"
     APP_NAME: str = "SIAEC_SAAS"
     APP_URL: str = "http://127.0.0.1:8000"
+    PORTAL_URL: str = "http://localhost:5173"
     PROJECT_NAME: str = "SIAEC API"
     BRAND_SHORT_NAME: str = "SIAEC"
     BRAND_FULL_NAME: str = "Sistema Integral de Administración para Escuelas de Conducción"
@@ -43,7 +44,11 @@ class Settings(BaseSettings):
     SCHOOL_ONBOARDING_KEY: Optional[str] = None
     ALLOW_PUBLIC_SCHOOL_SIGNUP: bool = False
     SAAS_ADMIN_EMAILS: Optional[str] = None
+    SAAS_SUPPORT_ALERT_EMAILS: Optional[str] = None
     SAAS_ADMIN_ALLOWED_ROLES: str = "ADMIN,GERENTE"
+    SAAS_LOGIN_MAX_ATTEMPTS: int = 5
+    SAAS_LOGIN_LOCK_MINUTES: int = 15
+    MFA_TOTP_ISSUER: str = "SIAEC SaaS"
     DEFAULT_DEMO_DAYS: int = 14
 
     # Email (SMTP)

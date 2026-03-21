@@ -11,7 +11,7 @@ export const SaasForcePasswordChange = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const { refreshUser, getAuthMode } = useAuth();
+  const { getAuthMode, logout } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: FormEvent) => {
@@ -31,8 +31,12 @@ export const SaasForcePasswordChange = () => {
         current_password: currentPassword,
         new_password: newPassword,
       });
-      await refreshUser();
-      navigate('/saas-admin');
+      // El backend invalida sesiones al cambiar contraseña (session_version).
+      // Cerramos sesión explícitamente en contexto y redirigimos al login SaaS.
+      logout();
+      localStorage.removeItem('tenant_slug');
+      localStorage.setItem('auth_mode', 'global');
+      window.location.href = '/login-saas';
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'No se pudo cambiar la contraseña.');
     } finally {

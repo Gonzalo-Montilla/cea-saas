@@ -25,6 +25,7 @@ import { SchoolOnboarding } from './pages/SchoolOnboarding';
 import { LoginSaas } from './pages/LoginSaas';
 import { SaasForcePasswordChange } from './pages/SaasForcePasswordChange';
 import { isSaasAdminUser } from './utils/saasAdmin';
+import { Soporte } from './pages/Soporte';
 
 const MODULE_PATHS: Record<string, string> = {
   dashboard: '/dashboard',
@@ -46,7 +47,7 @@ const MODULE_PATHS: Record<string, string> = {
 const getHomeRoute = (user?: { rol?: RolUsuario; permisos_modulos?: string[]; must_change_password?: boolean }) => {
   const authMode = (localStorage.getItem('auth_mode') || 'tenant').toLowerCase();
   if (authMode === 'global' && user?.must_change_password) return '/saas-cambiar-password';
-  if (isSaasAdminUser(user as any)) return '/saas-admin';
+  if (isSaasAdminUser(user as any)) return '/saas-admin/resumen';
   if (user?.permisos_modulos && user.permisos_modulos.length > 0) {
     const first = user.permisos_modulos.find((m) => MODULE_PATHS[m]);
     if (first) return MODULE_PATHS[first];
@@ -113,6 +114,14 @@ const SaasForcePasswordRoute = ({ children }: { children: React.ReactNode }) => 
   if (!isAuthenticated) return <Navigate to="/login-saas" />;
   if (getAuthMode() !== 'global') return <Navigate to={getHomeRoute(user || undefined)} />;
   if (!user?.must_change_password) return <Navigate to={getHomeRoute(user || undefined)} />;
+  return <>{children}</>;
+};
+
+const TenantRoute = ({ children }: { children: React.ReactNode }) => {
+  const { isAuthenticated, isLoading, user, getAuthMode } = useAuth();
+  if (isLoading) return <div>Cargando...</div>;
+  if (!isAuthenticated) return <Navigate to="/login" />;
+  if (getAuthMode() === 'global') return <Navigate to={getHomeRoute(user || undefined)} />;
   return <>{children}</>;
 };
 
@@ -322,13 +331,23 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/saas-admin"
+        path="/saas-admin/*"
         element={
           <SaasAdminRoute>
             <Layout>
               <SaasAdmin />
             </Layout>
           </SaasAdminRoute>
+        }
+      />
+      <Route
+        path="/soporte"
+        element={
+          <TenantRoute>
+            <Layout>
+              <Soporte />
+            </Layout>
+          </TenantRoute>
         }
       />
       <Route path="/" element={<HomeRedirect />} />

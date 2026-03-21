@@ -140,14 +140,18 @@ export const SchoolOnboarding = () => {
         <div className="onboarding-header">
           <img src={BRAND_LOGO_URL} alt={BRAND_NAME} className="onboarding-logo" />
           <h1>Registro de nueva escuela</h1>
-          <p>Flujo MVP para crear tenant y usuario administrador.</p>
+          <p>Al finalizar, recibiras el codigo de escuela para iniciar sesion.</p>
         </div>
 
         {success ? (
           <div className="onboarding-success">
             <h2>Escuela creada correctamente</h2>
             <p>
-              Tenant: <strong>{success.tenantSlug}</strong>
+              Codigo de escuela (slug): <strong>{success.tenantSlug}</strong>
+            </p>
+            <p>
+              Enlace directo de acceso:{' '}
+              <strong>{`${window.location.origin}/login?tenant=${encodeURIComponent(success.tenantSlug)}`}</strong>
             </p>
             <p>
               Usuario administrador: <strong>{success.adminEmail}</strong>
@@ -175,8 +179,11 @@ export const SchoolOnboarding = () => {
                 />
               </label>
               <label>
-                Slug (opcional)
+                Codigo de escuela (slug, opcional)
                 <input value={form.slug} onChange={(e) => updateField('slug', e.target.value)} />
+                <small className="onboarding-help">
+                  Este codigo se usa en el login. Si lo dejas vacio, se genera automaticamente.
+                </small>
               </label>
               <label>
                 Nombre comercial

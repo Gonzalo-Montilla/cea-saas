@@ -19,6 +19,9 @@ from app.models.caja import Caja, MovimientoCaja, EstadoCaja, TipoMovimiento, Co
 from app.models.tenant import Tenant, TenantUser, PlanTenant
 from app.models.tenant_service_rule import TenantServiceRule
 from app.models.saas_audit_log import SaasAuditLog
+from app.models.saas_lead import SaasLead
+from app.models.saas_billing_event import SaasBillingEvent
+from app.models.saas_support_ticket import SaasSupportTicket
 
 __all__ = [
     "Usuario", "RolUsuario",
@@ -30,6 +33,9 @@ __all__ = [
     "Tarifa",
     "TenantServiceRule",
     "SaasAuditLog",
+    "SaasLead",
+    "SaasBillingEvent",
+    "SaasSupportTicket",
     "Caja", "MovimientoCaja", "EstadoCaja", "TipoMovimiento", "ConceptoMovimientoCaja",
     "Tenant", "TenantUser", "PlanTenant",
 ]

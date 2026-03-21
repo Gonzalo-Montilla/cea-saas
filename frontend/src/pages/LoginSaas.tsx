@@ -8,6 +8,8 @@ import '../styles/Login.css';
 export const LoginSaas = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
+  const [backupCode, setBackupCode] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -24,7 +26,7 @@ export const LoginSaas = () => {
         setError('No se pudo conectar al servidor. Verifica que el backend esté activo.');
         return;
       }
-      await loginGlobal(email, password);
+      await loginGlobal(email, password, mfaCode.trim() || undefined, backupCode.trim() || undefined);
       navigate('/saas-admin');
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'No fue posible iniciar sesión en backoffice SaaS');
@@ -76,6 +78,31 @@ export const LoginSaas = () => {
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="mfa_code">Código MFA (si aplica)</label>
+            <input
+              id="mfa_code"
+              type="text"
+              value={mfaCode}
+              onChange={(e) => setMfaCode(e.target.value)}
+              disabled={isLoading}
+              placeholder="123456"
+              inputMode="numeric"
+            />
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="backup_code">Backup code (alternativo)</label>
+            <input
+              id="backup_code"
+              type="text"
+              value={backupCode}
+              onChange={(e) => setBackupCode(e.target.value)}
+              disabled={isLoading}
+              placeholder="AB12CD34"
+            />
           </div>
 
           {error && <div className="error-message">{error}</div>}

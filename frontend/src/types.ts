@@ -66,6 +66,8 @@ export interface Usuario {
   permisos_modulos?: string[];
   must_change_password?: boolean;
   password_changed_at?: string | null;
+  mfa_enabled?: boolean;
+  mfa_backup_codes_remaining?: number;
 }
 
 export interface Estudiante {
@@ -98,6 +100,8 @@ export interface Estudiante {
 export interface LoginRequest {
   email: string;
   password: string;
+  mfa_code?: string;
+  backup_code?: string;
 }
 
 export interface RegisterRequest {
@@ -119,8 +123,8 @@ export interface TokenResponse {
 export interface AuthContextType {
   user: Usuario | null;
   token: string | null;
-  login: (email: string, password: string) => Promise<void>;
-  loginGlobal: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, tenantSlug?: string) => Promise<void>;
+  loginGlobal: (email: string, password: string, mfaCode?: string, backupCode?: string) => Promise<void>;
   refreshUser: () => Promise<void>;
   getAuthMode: () => 'tenant' | 'global';
   logout: () => void;

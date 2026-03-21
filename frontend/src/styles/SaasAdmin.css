@@ -23,6 +23,7 @@
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 14px;
+  box-shadow: var(--shadow-sm);
   display: grid;
   gap: 6px;
 }
@@ -42,19 +43,13 @@
 }
 
 .saas-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
   padding: 14px;
   display: grid;
   gap: 12px;
 }
 
 .saas-card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
+  /* uses bo-card-header */
 }
 
 .saas-card h3 {
@@ -71,6 +66,7 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px;
+  background: var(--surface-2);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -85,32 +81,29 @@
   width: 280px;
   padding: 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
+  background: var(--surface);
 }
 
 .saas-search select {
   min-width: 190px;
   padding: 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--surface);
 }
 
 .saas-table-wrap {
-  overflow-x: auto;
+  /* uses bo-table-wrap */
 }
 
 .saas-table {
-  width: 100%;
-  border-collapse: collapse;
   font-size: 14px;
 }
 
 .saas-table th,
 .saas-table td {
-  border-bottom: 1px solid var(--border);
-  padding: 8px 6px;
-  text-align: left;
+  /* base from bo-table */
 }
 
 .saas-table th {
@@ -119,10 +112,41 @@
 
 .saas-table select,
 .saas-table input[type="date"],
-.saas-table input[type="text"] {
-  padding: 6px;
+.saas-table input[type="text"],
+.saas-table input[type="number"],
+.saas-table textarea {
+  width: 100%;
+  padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.saas-table textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 56px;
+}
+
+.saas-support-description-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.saas-support-description-preview span {
+  color: var(--text-primary);
+}
+
+.saas-support-description-body {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  line-height: 1.45;
 }
 
 .saas-user-form {
@@ -145,8 +169,229 @@
   gap: 8px;
 }
 
+.saas-lead-metrics {
+  display: flex;
+  gap: 16px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.saas-lead-form {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr 0.9fr 0.8fr 0.8fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.saas-lead-form input,
+.saas-lead-form select {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.saas-lead-converted {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.14);
+  color: #047857;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.saas-sla-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.saas-sla-badge.overdue {
+  background: rgba(239, 68, 68, 0.12);
+  color: #b91c1c;
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+.saas-sla-badge.due_soon {
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+  border-color: rgba(245, 158, 11, 0.25);
+}
+
+.saas-sla-badge.on_time {
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+  border-color: rgba(16, 185, 129, 0.25);
+}
+
+.saas-sla-badge.closed,
+.saas-sla-badge.no_due_date {
+  background: rgba(100, 116, 139, 0.12);
+  color: #475569;
+  border-color: rgba(100, 116, 139, 0.25);
+}
+
+.saas-inline-status-editor {
+  display: grid;
+  gap: 6px;
+}
+
+.saas-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 90;
+}
+
+.saas-modal {
+  width: min(760px, 92vw);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.saas-modal-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.saas-modal-grid label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.saas-modal-grid input {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.saas-conversion-result {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.saas-conversion-result p {
+  margin: 0;
+}
+
+.saas-conversion-result .btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.saas-card code {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+  background: rgba(148, 163, 184, 0.1);
+}
+
+.saas-charts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.saas-chart-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(148, 163, 184, 0.04);
+}
+
+.saas-chart-card h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.saas-chart-card-wide {
+  grid-column: 1 / -1;
+}
+
+.saas-mfa-codes {
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.saas-mfa-ack {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.saas-mfa-events h4 {
+  margin: 0;
+}
+
+.saas-info-message {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  color: #047857;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  animation: notice-in 180ms ease-out;
+}
+
+.error-message {
+  animation: notice-in 180ms ease-out;
+}
+
+@keyframes notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @media (max-width: 1100px) {
+  .saas-kpi-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .saas-user-form {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .saas-lead-form {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .saas-charts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .saas-modal-grid {
+    grid-template-columns: 1fr;
   }
 }

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Home, 
@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { RolUsuario } from '../types';
 import { BRAND_LOGO_URL, BRAND_NAME } from '../config/branding';
-import { tenantsAPI } from '../services/api';
+import { authAPI, saasAdminAPI, tenantsAPI } from '../services/api';
 import { isSaasAdminUser } from '../utils/saasAdmin';
 import '../styles/Layout.css';
 
@@ -33,9 +33,14 @@ interface LayoutProps {
 export const Layout = ({ children }: LayoutProps) => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [sidebarExpanded, setSidebarExpanded] = useState(true);
   const [tenantDisplayName, setTenantDisplayName] = useState(BRAND_NAME);
   const [tenantLogoUrl, setTenantLogoUrl] = useState(BRAND_LOGO_URL);
+  const [sessionNotice, setSessionNotice] = useState('');
+  const [supportUnreadCount, setSupportUnreadCount] = useState(0);
+  const [supportNotice, setSupportNotice] = useState('');
+  const supportPrevUnreadRef = useRef<number | null>(null);
 
   useEffect(() => {
     const loadTenantBranding = async () => {
@@ -59,12 +64,40 @@ export const Layout = ({ children }: LayoutProps) => {
   }, []);
 
   const handleLogout = () => {
+    const authMode = (localStorage.getItem('auth_mode') || 'tenant').toLowerCase();
     logout();
-    navigate('/login');
+    navigate(authMode === 'global' ? '/login-saas' : '/login');
+  };
+
+  const handleLogoutAllSessions = async () => {
+    const confirmCloseAll = window.confirm(
+      'Se cerrarán todas las sesiones activas de esta cuenta en otros dispositivos. ¿Deseas continuar?'
+    );
+    if (!confirmCloseAll) return;
+    try {
+      await authAPI.logoutAllSessions();
+      setSessionNotice('Todas las sesiones activas se cerraron correctamente.');
+      setTimeout(() => {
+        handleLogout();
+      }, 900);
+    } catch {
+      setSessionNotice('No se pudieron cerrar todas las sesiones. Intenta nuevamente.');
+    } finally {
+      // no-op
+    }
   };
 
   const adminRoles = [RolUsuario.ADMIN, RolUsuario.COORDINADOR, RolUsuario.GERENTE];
   const showSaasAdmin = isSaasAdminUser(user || undefined);
+  const authMode = (localStorage.getItem('auth_mode') || 'tenant').toLowerCase();
+  const isGlobalAuth = authMode === 'global';
+  const saasScopes = (user?.permisos_modulos || []).map((s) => String(s).trim().toLowerCase());
+  const isSaasOwner = saasScopes.includes('saas_admin');
+  const canSeeSaasSupport = isSaasOwner || saasScopes.includes('saas_support_manage');
+  const supportSeenKey = useMemo(
+    () => `saas_support_last_seen_${String(user?.id || 'unknown')}`,
+    [user?.id]
+  );
   const menuItems = [
     { path: '/dashboard', icon: Home, label: 'Dashboard', moduleId: 'dashboard', roles: [RolUsuario.ADMIN, RolUsuario.GERENTE, RolUsuario.CAJERO] },
     { path: '/nuevo-estudiante', icon: UserPlus, label: 'Nuevo Estudiante', moduleId: 'nuevo_estudiante', roles: [RolUsuario.ADMIN, RolUsuario.GERENTE, RolUsuario.CAJERO] },
@@ -80,21 +113,102 @@ export const Layout = ({ children }: LayoutProps) => {
     { path: '/clases', icon: Calendar, label: 'Programar Clases', moduleId: 'clases', roles: [RolUsuario.INSTRUCTOR, RolUsuario.ADMIN, RolUsuario.GERENTE, RolUsuario.COORDINADOR] },
     { path: '/usuarios', icon: Shield, label: 'Usuarios', moduleId: 'usuarios', roles: [RolUsuario.ADMIN, RolUsuario.GERENTE] },
     { path: '/tarifas', icon: GraduationCap, label: 'Tarifas', moduleId: 'tarifas', roles: [RolUsuario.ADMIN, RolUsuario.GERENTE] },
-    { path: '/saas-admin', icon: Building2, label: 'Backoffice SaaS', moduleId: 'saas_admin', roles: [RolUsuario.ADMIN] },
+    { path: '/soporte', icon: Bell, label: 'Soporte', moduleId: 'soporte_tenant', roles: [RolUsuario.ADMIN, RolUsuario.GERENTE, RolUsuario.COORDINADOR, RolUsuario.CAJERO, RolUsuario.INSTRUCTOR, RolUsuario.ESTUDIANTE] },
+    { path: '/saas-admin/resumen', icon: Building2, label: 'Backoffice SaaS', moduleId: 'saas_admin', roles: [RolUsuario.ADMIN] },
+  ];
+  const saasMenuItems = [
+    { path: '/saas-admin/resumen', icon: Home, label: 'Resumen', scope: null },
+    { path: '/saas-admin/tenants', icon: Building2, label: 'Tenants', scope: 'saas_tenants_manage' },
+    { path: '/saas-admin/billing', icon: DollarSign, label: 'Facturación', scope: 'saas_billing_manage' },
+    { path: '/saas-admin/pipeline', icon: ClipboardList, label: 'Pipeline', scope: 'saas_pipeline_manage' },
+    { path: '/saas-admin/support', icon: Bell, label: 'Soporte', scope: 'saas_support_manage' },
+    { path: '/saas-admin/users', icon: Users, label: 'Usuarios SaaS', scope: 'saas_users_manage' },
+    { path: '/saas-admin/audit', icon: FileText, label: 'Auditoría', scope: 'saas_audit_read' },
+    { path: '/saas-admin/security', icon: Shield, label: 'Seguridad', scope: null },
   ];
 
   const allowedItems = menuItems.filter((item) => {
-    if (item.path === '/saas-admin') return showSaasAdmin;
+    if (item.path.startsWith('/saas-admin')) return showSaasAdmin && isGlobalAuth;
+    if (item.moduleId === 'soporte_tenant') return !isGlobalAuth && Boolean(user?.id);
     if (!user?.rol) return false;
     if (user?.permisos_modulos && user.permisos_modulos.length > 0) {
       return user.permisos_modulos.includes(item.moduleId);
     }
     return item.roles.includes(user.rol as RolUsuario);
   });
+  const allowedSaasItems = saasMenuItems.filter((item) => {
+    if (!showSaasAdmin) return false;
+    if (!item.scope) return true;
+    return isSaasOwner || saasScopes.includes(item.scope);
+  });
 
   const isActive = (path: string) => {
-    return window.location.pathname === path;
+    if (path.startsWith('/saas-admin/')) return location.pathname.startsWith(path);
+    return location.pathname === path;
   };
+  const activeLabel = useMemo(() => {
+    const active = (isGlobalAuth ? allowedSaasItems : allowedItems).find((item) => isActive(item.path));
+    return active?.label || 'Panel administrativo';
+  }, [isGlobalAuth, allowedItems, allowedSaasItems, location.pathname]);
+
+  useEffect(() => {
+    if (!(isGlobalAuth && showSaasAdmin && canSeeSaasSupport)) return;
+    let mounted = true;
+    if (!localStorage.getItem(supportSeenKey)) {
+      localStorage.setItem(supportSeenKey, new Date().toISOString());
+    }
+    const loadSupportCounter = async () => {
+      try {
+        const supportTickets = await saasAdminAPI.getSupportTickets({ limit: 200 });
+        const seenRaw = localStorage.getItem(supportSeenKey);
+        const seenAt = seenRaw ? new Date(seenRaw).getTime() : Date.now();
+        const nextUnread = (supportTickets.items || []).filter((ticket) => {
+          const createdAt = ticket.created_at ? new Date(ticket.created_at).getTime() : 0;
+          return createdAt > seenAt && (ticket.status === 'OPEN' || ticket.status === 'IN_PROGRESS');
+        }).length;
+        if (!mounted) return;
+        setSupportUnreadCount(nextUnread);
+        if (
+          supportPrevUnreadRef.current !== null &&
+          nextUnread > supportPrevUnreadRef.current &&
+          !location.pathname.startsWith('/saas-admin/support')
+        ) {
+          const incoming = nextUnread - supportPrevUnreadRef.current;
+          setSupportNotice(
+            incoming === 1
+              ? 'Tienes 1 ticket nuevo de soporte.'
+              : `Tienes ${incoming} tickets nuevos de soporte.`
+          );
+        }
+        supportPrevUnreadRef.current = nextUnread;
+      } catch {
+        // ignore
+      }
+    };
+    void loadSupportCounter();
+    const intervalId = window.setInterval(() => {
+      void loadSupportCounter();
+    }, 20000);
+    return () => {
+      mounted = false;
+      window.clearInterval(intervalId);
+    };
+  }, [isGlobalAuth, showSaasAdmin, canSeeSaasSupport, location.pathname, supportSeenKey]);
+
+  useEffect(() => {
+    if (!(isGlobalAuth && showSaasAdmin && canSeeSaasSupport)) return;
+    if (!location.pathname.startsWith('/saas-admin/support')) return;
+    const nowIso = new Date().toISOString();
+    localStorage.setItem(supportSeenKey, nowIso);
+    setSupportUnreadCount(0);
+    supportPrevUnreadRef.current = 0;
+  }, [isGlobalAuth, showSaasAdmin, canSeeSaasSupport, location.pathname, supportSeenKey]);
+
+  useEffect(() => {
+    if (!supportNotice) return;
+    const timeoutId = window.setTimeout(() => setSupportNotice(''), 5000);
+    return () => window.clearTimeout(timeoutId);
+  }, [supportNotice]);
 
   return (
     <div className="layout-container">
@@ -104,7 +218,7 @@ export const Layout = ({ children }: LayoutProps) => {
         </div>
         
         <nav className="nav-menu">
-          {allowedItems.map((item) => {
+          {(isGlobalAuth ? allowedSaasItems : allowedItems).map((item) => {
             const Icon = item.icon;
             return (
               <a
@@ -118,7 +232,12 @@ export const Layout = ({ children }: LayoutProps) => {
                 }}
               >
                 <span className="nav-icon"><Icon size={22} /></span>
-                <span className="nav-text">{item.label}</span>
+                <span className="nav-text nav-text-row">
+                  <span>{item.label}</span>
+                  {isGlobalAuth && item.path === '/saas-admin/support' && canSeeSaasSupport && supportUnreadCount > 0 && (
+                    <span className="nav-badge">{supportUnreadCount}</span>
+                  )}
+                </span>
               </a>
             );
           })}
@@ -139,18 +258,23 @@ export const Layout = ({ children }: LayoutProps) => {
               </button>
               <div className="header-brand">
                 <h1>{tenantDisplayName}</h1>
-                <span>Panel administrativo</span>
+                <span>{activeLabel}</span>
               </div>
             </div>
             <div className="header-actions">
               <span className="user-role-badge">{user?.rol}</span>
               <span className="user-name">{user?.nombre_completo}</span>
+              <button onClick={() => void handleLogoutAllSessions()} className="icon-button" title="Cerrar todas las sesiones">
+                <Shield size={20} />
+              </button>
               <button onClick={handleLogout} className="icon-button" title="Cerrar sesión">
                 <MoreVertical size={20} />
               </button>
             </div>
           </div>
         </header>
+        {sessionNotice && <div className="layout-session-notice">{sessionNotice}</div>}
+        {supportNotice && <div className="layout-session-notice">{supportNotice}</div>}
 
         <main className="main-content">
           {children}

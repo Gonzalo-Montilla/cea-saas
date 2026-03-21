@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth, estudiantes, caja, reportes, instructores, uploads, vehiculos, tarifas, usuarios, caja_fuerte, tenants, tenant_service_rules, clases, saas_admin
+from app.api.v1.endpoints import auth, estudiantes, caja, reportes, instructores, uploads, vehiculos, tarifas, usuarios, caja_fuerte, tenants, tenant_service_rules, clases, saas_admin, support_tenant
 
 api_router = APIRouter()
 
@@ -18,6 +18,7 @@ api_router.include_router(tenant_service_rules.router, prefix="/tenant-service-r
 api_router.include_router(clases.router, prefix="/clases", tags=["Clases"])
 api_router.include_router(usuarios.router, prefix="/usuarios", tags=["Usuarios"])
 api_router.include_router(saas_admin.router, prefix="/saas-admin", tags=["SaaS Admin"])
+api_router.include_router(support_tenant.router, prefix="/support", tags=["Soporte Tenant"])
 
 # Aquí se agregarán más routers cuando se creen los módulos
 # api_router.include_router(registro.router, prefix="/registro", tags=["Registro"])

@@ -33,7 +33,10 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
-  if (tenantSlug) {
+  const alreadyHasTenantHeader =
+    Boolean((config.headers as any)?.[TENANT_HEADER_NAME]) ||
+    Boolean((config.headers as any)?.[TENANT_HEADER_NAME.toLowerCase()]);
+  if (tenantSlug && !alreadyHasTenantHeader) {
     (config.headers as any)[TENANT_HEADER_NAME] = tenantSlug;
   }
   return config;
@@ -44,26 +47,40 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     if (error.response?.status === 401) {
-      // Token expirado, intentar refrescar
+      const authMode = (localStorage.getItem('auth_mode') || 'tenant').toLowerCase();
+      const originalRequest = error.config || {};
+      const isGlobal = authMode === 'global';
+
+      // En modo global no intentamos refresh tenant; forzamos nuevo login SaaS.
+      if (isGlobal) {
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        localStorage.removeItem('tenant_slug');
+        if (window.location.pathname !== '/login-saas') {
+          window.location.href = '/login-saas';
+        }
+        return Promise.reject(error);
+      }
+
+      // Token expirado en modo tenant: intentar refresh (una sola vez)
       const refreshToken = localStorage.getItem('refresh_token');
-      if (refreshToken) {
+      if (refreshToken && !originalRequest._retry) {
+        originalRequest._retry = true;
         try {
-          const tenantSlug = resolveTenantSlug();
-          const response = await axios.post(`${API_URL}/auth/refresh`, {
-            refresh_token: refreshToken,
-          }, {
-            headers: tenantSlug ? { [TENANT_HEADER_NAME]: tenantSlug } : undefined
-          });
-          const { access_token } = response.data;
+          const response = await axios.post(`${API_URL}/auth/refresh?refresh_token_str=${encodeURIComponent(refreshToken)}`);
+          const { access_token, refresh_token } = response.data;
           localStorage.setItem('access_token', access_token);
+          if (refresh_token) localStorage.setItem('refresh_token', refresh_token);
           
           // Reintentar la petición original
-          error.config.headers.Authorization = `Bearer ${access_token}`;
-          return axios(error.config);
+          originalRequest.headers = originalRequest.headers || {};
+          originalRequest.headers.Authorization = `Bearer ${access_token}`;
+          return axios(originalRequest);
         } catch (refreshError) {
           // Si falla el refresh, limpiar tokens y redirigir al login
           localStorage.removeItem('access_token');
           localStorage.removeItem('refresh_token');
+          localStorage.removeItem('tenant_slug');
           window.location.href = '/login';
         }
       }
@@ -74,13 +91,47 @@ api.interceptors.response.use(
 
 // Auth endpoints
 export const authAPI = {
-  login: async (data: LoginRequest): Promise<TokenResponse> => {
-    const response = await api.post<TokenResponse>('/auth/login', data);
+  login: async (data: LoginRequest, tenantSlug?: string): Promise<TokenResponse> => {
+    const normalizedTenant = (tenantSlug || '').trim().toLowerCase();
+    const response = await api.post<TokenResponse>('/auth/login', data, {
+      headers: normalizedTenant ? { [TENANT_HEADER_NAME]: normalizedTenant } : undefined,
+    });
     return response.data;
   },
   loginGlobal: async (data: LoginRequest): Promise<TokenResponse> => {
     const response = await axios.post<TokenResponse>(`${API_URL}/auth/login-global`, data, {
       headers: { 'Content-Type': 'application/json' },
+      timeout: 15000,
+    });
+    return response.data;
+  },
+  setupMfaGlobal: async (): Promise<{ secret: string; otpauth_url: string; qr_url: string; issuer: string }> => {
+    const token = localStorage.getItem('access_token');
+    const response = await axios.post(`${API_URL}/auth/mfa-global/setup`, {}, {
+      headers: token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' },
+      timeout: 15000,
+    });
+    return response.data;
+  },
+  enableMfaGlobal: async (code: string): Promise<{ backup_codes: string[]; message: string }> => {
+    const token = localStorage.getItem('access_token');
+    const response = await axios.post(`${API_URL}/auth/mfa-global/enable`, { code }, {
+      headers: token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' },
+      timeout: 15000,
+    });
+    return response.data;
+  },
+  disableMfaGlobal: async (data: { password: string; code: string }): Promise<void> => {
+    const token = localStorage.getItem('access_token');
+    await axios.post(`${API_URL}/auth/mfa-global/disable`, data, {
+      headers: token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' },
+      timeout: 15000,
+    });
+  },
+  regenerateMfaBackupCodesGlobal: async (data: { password: string; code: string }): Promise<{ backup_codes: string[]; message: string }> => {
+    const token = localStorage.getItem('access_token');
+    const response = await axios.post(`${API_URL}/auth/mfa-global/backup-codes/regenerate`, data, {
+      headers: token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' },
       timeout: 15000,
     });
     return response.data;
@@ -114,6 +165,15 @@ export const authAPI = {
   changePasswordGlobal: async (data: { current_password: string; new_password: string }): Promise<void> => {
     const token = localStorage.getItem('access_token');
     await axios.post(`${API_URL}/auth/change-password-global`, data, {
+      headers: token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' },
+      timeout: 15000,
+    });
+  },
+  logoutAllSessions: async (): Promise<void> => {
+    const token = localStorage.getItem('access_token');
+    const authMode = (localStorage.getItem('auth_mode') || 'tenant').toLowerCase();
+    const endpoint = authMode === 'global' ? '/auth/logout-all-global' : '/auth/logout-all';
+    await axios.post(`${API_URL}${endpoint}`, {}, {
       headers: token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' },
       timeout: 15000,
     });
@@ -609,6 +669,11 @@ export interface SaasTenantItem {
   is_demo: boolean;
   demo_ends_at?: string | null;
   contacto_email?: string | null;
+  subscription_status?: 'TRIAL' | 'ACTIVE' | 'PAST_DUE' | 'CANCELED';
+  billing_cycle?: 'MONTHLY' | 'QUARTERLY' | 'YEARLY';
+  monthly_fee?: number;
+  next_billing_at?: string | null;
+  last_payment_at?: string | null;
   created_at: string;
 }
 
@@ -641,6 +706,67 @@ export interface SaasAuditLogItem {
   created_at: string;
 }
 
+export interface SaasLeadItem {
+  id: number;
+  escuela_nombre: string;
+  contacto_nombre: string;
+  contacto_email?: string | null;
+  contacto_telefono?: string | null;
+  ciudad?: string | null;
+  source: string;
+  plan_interes?: string | null;
+  estado: string;
+  valor_estimado_mrr?: number | null;
+  owner_email: string;
+  proxima_accion_at?: string | null;
+  converted_tenant_id?: number | null;
+  converted_admin_user_id?: number | null;
+  converted_at?: string | null;
+  notas?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface SaasSupportTicketItem {
+  id: number;
+  tenant_id: number;
+  tenant_slug?: string | null;
+  tenant_nombre?: string | null;
+  status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  category: string;
+  subject: string;
+  description?: string | null;
+  owner_email?: string | null;
+  requester_name?: string | null;
+  requester_email?: string | null;
+  requester_phone?: string | null;
+  resolution_notes?: string | null;
+  due_at?: string | null;
+  due_in_hours?: number | null;
+  sla_state?: 'NO_DUE_DATE' | 'ON_TIME' | 'DUE_SOON' | 'OVERDUE' | 'CLOSED';
+  resolved_at?: string | null;
+  last_sla_alert_at?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface SaasBillingEventItem {
+  id: number;
+  tenant_id: number;
+  tenant_slug?: string | null;
+  tenant_nombre?: string | null;
+  event_type: string;
+  status: string;
+  amount: number;
+  currency: string;
+  paid_at?: string | null;
+  due_at?: string | null;
+  reference?: string | null;
+  notes?: string | null;
+  created_at: string;
+}
+
 export const saasAdminAPI = {
   getSummary: async (): Promise<{
     total_tenants: number;
@@ -650,6 +776,9 @@ export const saasAdminAPI = {
     demos_por_vencer: number;
     plan_counts: Record<string, number>;
     mrr_estimado: number;
+    mrr_real: number;
+    overdue_tenants: number;
+    overdue_amount: number;
   }> => {
     const response = await api.get('/saas-admin/summary');
     return response.data;
@@ -675,9 +804,149 @@ export const saasAdminAPI = {
   },
   updateTenant: async (
     tenantId: number,
-    data: { plan?: string; is_active?: boolean; is_demo?: boolean; demo_ends_at?: string | null }
+    data: {
+      plan?: string;
+      is_active?: boolean;
+      is_demo?: boolean;
+      demo_ends_at?: string | null;
+      subscription_status?: string;
+      billing_cycle?: string;
+      monthly_fee?: number;
+      next_billing_at?: string | null;
+      last_payment_at?: string | null;
+    }
   ): Promise<SaasTenantItem> => {
     const response = await api.put(`/saas-admin/tenants/${tenantId}`, data);
+    return response.data;
+  },
+  resendTenantAccessLink: async (
+    tenantId: number
+  ): Promise<{ sent: boolean; to_email: string; access_link: string }> => {
+    const response = await api.post(`/saas-admin/tenants/${tenantId}/resend-access-link`);
+    return response.data;
+  },
+  getBillingEvents: async (params?: {
+    skip?: number;
+    limit?: number;
+    tenant_id?: number;
+    status?: string;
+    event_type?: string;
+    search?: string;
+  }): Promise<{ items: SaasBillingEventItem[]; total: number; skip: number; limit: number }> => {
+    const queryParams = new URLSearchParams();
+    if (params?.skip !== undefined) queryParams.append('skip', params.skip.toString());
+    if (params?.limit !== undefined) queryParams.append('limit', params.limit.toString());
+    if (params?.tenant_id !== undefined) queryParams.append('tenant_id', params.tenant_id.toString());
+    if (params?.status) queryParams.append('status', params.status);
+    if (params?.event_type) queryParams.append('event_type', params.event_type);
+    if (params?.search) queryParams.append('search', params.search);
+    const query = queryParams.toString();
+    const response = await api.get(`/saas-admin/billing/events${query ? `?${query}` : ''}`);
+    return response.data;
+  },
+  recordTenantPayment: async (
+    tenantId: number,
+    data: {
+      amount?: number;
+      paid_at?: string | null;
+      reference?: string | null;
+      notes?: string | null;
+      next_billing_at?: string | null;
+      set_status_active?: boolean;
+    }
+  ): Promise<{ tenant: Partial<SaasTenantItem>; event: SaasBillingEventItem }> => {
+    const response = await api.post(`/saas-admin/billing/tenants/${tenantId}/record-payment`, data);
+    return response.data;
+  },
+  runBillingOverdueCheck: async (): Promise<{ updated_tenants: number }> => {
+    const response = await api.post('/saas-admin/billing/run-overdue-check');
+    return response.data;
+  },
+  runBillingCycleCharges: async (): Promise<{ created_events: number }> => {
+    const response = await api.post('/saas-admin/billing/run-cycle-charges');
+    return response.data;
+  },
+  sendBillingOverdueReminders: async (): Promise<{ evaluated: number; sent: number }> => {
+    const response = await api.post('/saas-admin/billing/send-overdue-reminders');
+    return response.data;
+  },
+  getBillingAgingSummary: async (): Promise<{
+    generated_at: string;
+    total_past_due_tenants: number;
+    total_past_due_amount: number;
+    buckets: {
+      '0_30': { tenants: number; amount: number };
+      '31_60': { tenants: number; amount: number };
+      '61_plus': { tenants: number; amount: number };
+    };
+  }> => {
+    const response = await api.get('/saas-admin/billing/aging-summary');
+    return response.data;
+  },
+  getSupportSummary: async (): Promise<{
+    status_counts: Record<string, number>;
+    priority_counts: Record<string, number>;
+    open_total: number;
+    overdue_open: number;
+    due_soon_open: number;
+  }> => {
+    const response = await api.get('/saas-admin/support/summary');
+    return response.data;
+  },
+  getSupportTickets: async (params?: {
+    skip?: number;
+    limit?: number;
+    search?: string;
+    status?: string;
+    priority?: string;
+    tenant_id?: number;
+  }): Promise<{ items: SaasSupportTicketItem[]; total: number; skip: number; limit: number }> => {
+    const queryParams = new URLSearchParams();
+    if (params?.skip !== undefined) queryParams.append('skip', params.skip.toString());
+    if (params?.limit !== undefined) queryParams.append('limit', params.limit.toString());
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.status) queryParams.append('status', params.status);
+    if (params?.priority) queryParams.append('priority', params.priority);
+    if (params?.tenant_id !== undefined) queryParams.append('tenant_id', params.tenant_id.toString());
+    const query = queryParams.toString();
+    const response = await api.get(`/saas-admin/support/tickets${query ? `?${query}` : ''}`);
+    return response.data;
+  },
+  createSupportTicket: async (data: {
+    tenant_id: number;
+    subject: string;
+    description?: string | null;
+    category?: string;
+    priority?: string;
+    requester_name?: string | null;
+    requester_email?: string | null;
+    requester_phone?: string | null;
+    due_at?: string | null;
+  }): Promise<SaasSupportTicketItem> => {
+    const response = await api.post('/saas-admin/support/tickets', data);
+    return response.data;
+  },
+  updateSupportTicket: async (
+    ticketId: number,
+    data: {
+      status?: string;
+      priority?: string;
+      category?: string;
+      subject?: string;
+      description?: string | null;
+      owner_email?: string | null;
+      requester_name?: string | null;
+      requester_email?: string | null;
+      requester_phone?: string | null;
+      due_at?: string | null;
+      resolution_notes?: string | null;
+    }
+  ): Promise<SaasSupportTicketItem> => {
+    const response = await api.put(`/saas-admin/support/tickets/${ticketId}`, data);
+    return response.data;
+  },
+  runSupportSlaAlerts: async (): Promise<{ evaluated: number; sent: number }> => {
+    const response = await api.post('/saas-admin/support/run-sla-alerts');
     return response.data;
   },
   getUsers: async (params?: {
@@ -738,6 +1007,134 @@ export const saasAdminAPI = {
     if (params?.search) queryParams.append('search', params.search);
     const query = queryParams.toString();
     const response = await api.get(`/saas-admin/audit-logs${query ? `?${query}` : ''}`);
+    return response.data;
+  },
+  exportAuditLogsCsv: async (params?: { action?: string; search?: string }): Promise<Blob> => {
+    const queryParams = new URLSearchParams();
+    if (params?.action) queryParams.append('action', params.action);
+    if (params?.search) queryParams.append('search', params.search);
+    const query = queryParams.toString();
+    const response = await api.get(`/saas-admin/audit-logs/export.csv${query ? `?${query}` : ''}`, {
+      responseType: 'blob',
+    });
+    return response.data;
+  },
+  getPipelineSummary: async (): Promise<{
+    total_leads: number;
+    stage_counts: Record<string, number>;
+    mrr_potencial: number;
+    mrr_cerrado: number;
+    overdue_followups: number;
+  }> => {
+    const response = await api.get('/saas-admin/pipeline/summary');
+    return response.data;
+  },
+  getLeads: async (params?: {
+    skip?: number;
+    limit?: number;
+    search?: string;
+    estado?: string;
+  }): Promise<{ items: SaasLeadItem[]; total: number; skip: number; limit: number }> => {
+    const queryParams = new URLSearchParams();
+    if (params?.skip !== undefined) queryParams.append('skip', params.skip.toString());
+    if (params?.limit !== undefined) queryParams.append('limit', params.limit.toString());
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.estado) queryParams.append('estado', params.estado);
+    const query = queryParams.toString();
+    const response = await api.get(`/saas-admin/pipeline/leads${query ? `?${query}` : ''}`);
+    return response.data;
+  },
+  createLead: async (data: {
+    escuela_nombre: string;
+    contacto_nombre: string;
+    contacto_email?: string | null;
+    contacto_telefono?: string | null;
+    ciudad?: string | null;
+    source?: string;
+    plan_interes?: string | null;
+    estado?: string;
+    valor_estimado_mrr?: number | null;
+    proxima_accion_at?: string | null;
+    notas?: string | null;
+  }): Promise<SaasLeadItem> => {
+    const response = await api.post('/saas-admin/pipeline/leads', data);
+    return response.data;
+  },
+  updateLead: async (
+    leadId: number,
+    data: {
+      escuela_nombre?: string;
+      contacto_nombre?: string;
+      contacto_email?: string | null;
+      contacto_telefono?: string | null;
+      ciudad?: string | null;
+      source?: string;
+      plan_interes?: string | null;
+      estado?: string;
+      valor_estimado_mrr?: number | null;
+      proxima_accion_at?: string | null;
+      notas?: string | null;
+    }
+  ): Promise<SaasLeadItem> => {
+    const response = await api.put(`/saas-admin/pipeline/leads/${leadId}`, data);
+    return response.data;
+  },
+  convertLeadToTenant: async (
+    leadId: number,
+    data: {
+      admin_email: string;
+      admin_nombre_completo: string;
+      admin_cedula: string;
+      admin_telefono?: string | null;
+      admin_password?: string | null;
+    }
+  ): Promise<{
+    lead: SaasLeadItem;
+    tenant: {
+      id: number;
+      slug: string;
+      nombre: string;
+      plan: string;
+      is_demo: boolean;
+      demo_ends_at?: string | null;
+    };
+    admin_user: {
+      id: number;
+      email: string;
+      must_change_password: boolean;
+      temporary_password: string;
+    };
+  }> => {
+    const response = await api.post(`/saas-admin/pipeline/leads/${leadId}/convert-to-tenant`, data);
+    return response.data;
+  },
+};
+
+export const tenantSupportAPI = {
+  getMyTickets: async (params?: {
+    skip?: number;
+    limit?: number;
+    search?: string;
+    status?: string;
+    priority?: string;
+  }): Promise<{ items: SaasSupportTicketItem[]; total: number; skip: number; limit: number; requester_email?: string }> => {
+    const queryParams = new URLSearchParams();
+    if (params?.skip !== undefined) queryParams.append('skip', params.skip.toString());
+    if (params?.limit !== undefined) queryParams.append('limit', params.limit.toString());
+    if (params?.search) queryParams.append('search', params.search);
+    if (params?.status) queryParams.append('status', params.status);
+    if (params?.priority) queryParams.append('priority', params.priority);
+    const query = queryParams.toString();
+    const response = await api.get(`/support/my-tickets${query ? `?${query}` : ''}`);
+    return response.data;
+  },
+  createMyTicket: async (data: {
+    subject: string;
+    description?: string | null;
+    category?: string | null;
+    priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  }): Promise<SaasSupportTicketItem> => {
+    const response = await api.post('/support/my-tickets', data);
     return response.data;
   },
 };

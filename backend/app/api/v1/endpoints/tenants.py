@@ -79,17 +79,21 @@ def _ensure_public_signup_enabled() -> None:
 
 def _send_onboarding_welcome_email(
     school_name: str,
+    school_slug: str,
     login_email: str,
     admin_name: str,
 ) -> bool:
-    login_url = f"{settings.APP_URL.rstrip('/')}/login"
+    base_portal = (settings.PORTAL_URL or "").strip().rstrip("/")
+    login_url = f"{base_portal}/login?tenant={school_slug}" if base_portal else f"/login?tenant={school_slug}"
     subject = f"Bienvenido a {settings.BRAND_SHORT_NAME}: tu escuela ya esta activa"
     body = (
         f"Hola {admin_name},\n\n"
         f"Bienvenido a {settings.BRAND_SHORT_NAME}. Tu escuela {school_name} ya fue creada y activada.\n\n"
         "Datos de acceso inicial:\n"
+        f"- Codigo de escuela: {school_slug}\n"
         f"- Correo: {login_email}\n"
         f"- URL de ingreso: {login_url}\n\n"
+        "Guarda este enlace en favoritos para ingresar siempre con tu marca.\n\n"
         "Recomendaciones de seguridad:\n"
         "- Inicia sesion y cambia la contrasena temporal cuanto antes.\n"
         "- Registra el logo y datos de contacto de la escuela en configuracion.\n\n"
@@ -242,6 +246,7 @@ def onboarding_school(
     if payload.send_welcome_email:
         welcome_email_sent = _send_onboarding_welcome_email(
             school_name=tenant.display_name or tenant.nombre,
+            school_slug=tenant.slug,
             login_email=admin_user.email,
             admin_name=admin_user.nombre_completo,
         )
@@ -271,6 +276,7 @@ def public_school_signup(
     if payload.send_welcome_email:
         welcome_email_sent = _send_onboarding_welcome_email(
             school_name=tenant.display_name or tenant.nombre,
+            school_slug=tenant.slug,
             login_email=admin_user.email,
             admin_name=admin_user.nombre_completo,
         )

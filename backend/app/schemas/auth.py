@@ -8,6 +8,8 @@ class UserLogin(BaseModel):
     """Schema para login de usuario"""
     email: EmailStr
     password: str
+    mfa_code: Optional[str] = None
+    backup_code: Optional[str] = None
 
 
 class UserRegister(BaseModel):
@@ -33,6 +35,7 @@ class TokenData(BaseModel):
     user_id: int
     tenant_id: Optional[int] = None
     tenant_slug: Optional[str] = None
+    session_version: Optional[int] = None
 
 
 class UserResponse(BaseModel):
@@ -51,6 +54,8 @@ class UserResponse(BaseModel):
     permisos_modulos: Optional[list[str]] = None
     must_change_password: bool = False
     password_changed_at: Optional[datetime] = None
+    mfa_enabled: bool = False
+    mfa_backup_codes_remaining: int = 0
 
     class Config:
         from_attributes = True
@@ -66,3 +71,17 @@ class GlobalPasswordChangeRequest(BaseModel):
         if not value or len(value) < 6:
             raise ValueError("La nueva contraseña debe tener al menos 6 caracteres")
         return value
+
+
+class GlobalMfaEnableRequest(BaseModel):
+    code: str
+
+
+class GlobalMfaDisableRequest(BaseModel):
+    password: str
+    code: str
+
+
+class GlobalMfaRegenerateBackupCodesRequest(BaseModel):
+    password: str
+    code: str

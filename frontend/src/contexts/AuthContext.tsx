@@ -57,8 +57,13 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     loadUser();
   }, []);
 
-  const login = async (email: string, password: string) => {
-    const response = await authAPI.login({ email, password });
+  const login = async (email: string, password: string, tenantSlug?: string) => {
+    const normalizedTenant = (tenantSlug || '').trim().toLowerCase();
+    if (normalizedTenant) {
+      localStorage.setItem('tenant_slug', normalizedTenant);
+    }
+    localStorage.setItem('auth_mode', 'tenant');
+    const response = await authAPI.login({ email, password }, normalizedTenant || undefined);
     localStorage.setItem('auth_mode', 'tenant');
     localStorage.setItem('access_token', response.access_token);
     localStorage.setItem('refresh_token', response.refresh_token);
@@ -68,9 +73,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     setUser(userData);
   };
 
-  const loginGlobal = async (email: string, password: string) => {
+  const loginGlobal = async (email: string, password: string, mfaCode?: string, backupCode?: string) => {
     localStorage.removeItem('tenant_slug');
-    const response = await authAPI.loginGlobal({ email, password });
+    const response = await authAPI.loginGlobal({ email, password, mfa_code: mfaCode, backup_code: backupCode });
     localStorage.setItem('auth_mode', 'global');
     localStorage.setItem('access_token', response.access_token);
     localStorage.setItem('refresh_token', response.refresh_token);

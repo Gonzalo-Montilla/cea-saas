@@ -34,6 +34,13 @@ class Usuario(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     is_verified = Column(Boolean, default=False)
     must_change_password = Column(Boolean, default=False, nullable=False)
+    failed_login_attempts = Column(Integer, default=0, nullable=False)
+    lockout_until = Column(DateTime)
+    last_failed_login_at = Column(DateTime)
+    session_version = Column(Integer, default=1, nullable=False)
+    mfa_enabled = Column(Boolean, default=False, nullable=False)
+    mfa_secret = Column(String(255))
+    mfa_backup_codes_hashes = Column(JSON, default=list)
     
     # Auditoría
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

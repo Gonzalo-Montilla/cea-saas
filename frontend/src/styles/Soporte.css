@@ -1,0 +1,121 @@
+.soporte-tenant-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.soporte-tenant-grid {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 16px;
+}
+
+.soporte-tenant-card {
+  padding: 14px;
+}
+
+.soporte-tenant-card h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.soporte-tenant-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.soporte-tenant-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.soporte-tenant-form input,
+.soporte-tenant-form select,
+.soporte-tenant-form textarea,
+.soporte-tenant-filters input,
+.soporte-tenant-filters select {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 10px 12px;
+  font-size: 14px;
+}
+
+.soporte-tenant-form button,
+.soporte-tenant-filters button {
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+.soporte-tenant-form button:disabled,
+.soporte-tenant-filters button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.soporte-tenant-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.soporte-tenant-list-header span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.soporte-tenant-filters {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr auto;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.soporte-tenant-table-wrap {
+  overflow: auto;
+}
+
+.soporte-tenant-table {
+  font-size: 14px;
+}
+
+.soporte-tenant-table th,
+.soporte-tenant-table td {
+  vertical-align: top;
+}
+
+.soporte-tenant-table .empty {
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 14px;
+}
+
+.soporte-tenant-muted {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 3px;
+}
+
+.soporte-tenant-error,
+.soporte-tenant-info {
+  /* kept for compatibility; base styles now from bo-alert classes */
+}
+
+.soporte-tenant-error {
+  /* color from bo-alert-error */
+}
+
+.soporte-tenant-info {
+  /* color from bo-alert-info */
+}
+
+@media (max-width: 1100px) {
+  .soporte-tenant-grid {
+    grid-template-columns: 1fr;
+  }
+}

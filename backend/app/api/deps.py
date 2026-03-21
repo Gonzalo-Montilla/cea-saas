@@ -77,10 +77,12 @@ def get_current_user(
         user_id: int = int(user_id_str)
         token_tenant_slug = payload.get("tslug")
         token_tenant_id = payload.get("tid")
+        token_session_version = payload.get("sv")
         token_data = TokenData(
             user_id=user_id,
             tenant_slug=token_tenant_slug,
             tenant_id=token_tenant_id,
+            session_version=int(token_session_version) if token_session_version is not None else None,
         )
     except (JWTError, ValueError):
         raise credentials_exception
@@ -88,6 +90,14 @@ def get_current_user(
     user = db.query(Usuario).filter(Usuario.id == token_data.user_id).first()
     if user is None:
         raise credentials_exception
+    token_sv = int(token_data.session_version or 1)
+    current_sv = int(getattr(user, "session_version", 1) or 1)
+    if token_sv != current_sv:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sesión expirada. Inicia sesión nuevamente",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     if current_tenant:
         if user.tenant_id is not None and user.tenant_id != current_tenant.id:
@@ -151,12 +161,20 @@ def get_current_user_global(
         if user_id_str is None:
             raise credentials_exception
         user_id = int(user_id_str)
+        token_sv = int(payload.get("sv") or 1)
     except (JWTError, ValueError):
         raise credentials_exception
 
     user = db.query(Usuario).filter(Usuario.id == user_id).first()
     if user is None:
         raise credentials_exception
+    current_sv = int(getattr(user, "session_version", 1) or 1)
+    if token_sv != current_sv:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sesión expirada. Inicia sesión nuevamente",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return user
 
 
@@ -198,7 +216,7 @@ def get_saas_admin_user(
     current_email = (current_user.email or "").strip().lower()
     user_permisos = current_user.permisos_modulos or []
     has_scope = isinstance(user_permisos, list) and any(
-        str(p).strip().lower() == "saas_admin" for p in user_permisos
+        str(p).strip().lower().startswith("saas_") for p in user_permisos
     )
     is_allowed_email = bool(allowed) and current_email in allowed
     if not (is_allowed_email or has_scope):

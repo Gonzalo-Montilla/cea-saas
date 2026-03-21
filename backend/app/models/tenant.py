@@ -1,7 +1,7 @@
 from datetime import datetime
 import enum
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -24,6 +24,11 @@ class Tenant(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     is_demo = Column(Boolean, default=False, nullable=False)
     demo_ends_at = Column(DateTime)
+    subscription_status = Column(String(30), default="TRIAL", nullable=False)
+    billing_cycle = Column(String(20), default="MONTHLY", nullable=False)
+    monthly_fee = Column(Numeric(12, 2), default=0, nullable=False)
+    next_billing_at = Column(DateTime)
+    last_payment_at = Column(DateTime)
 
     # Branding y contacto (base para white-label)
     display_name = Column(String(255))

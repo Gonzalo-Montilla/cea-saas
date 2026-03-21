@@ -14,6 +14,11 @@ from app.schemas.usuario import UsuarioCreate, UsuarioUpdate, UsuarioPasswordUpd
 router = APIRouter()
 
 
+def _bump_session_version(user: Usuario) -> None:
+    current = int(getattr(user, "session_version", 1) or 1)
+    user.session_version = current + 1
+
+
 @router.get("/", response_model=List[UsuarioResponse])
 def listar_usuarios(
     search: Optional[str] = None,
@@ -158,5 +163,6 @@ def reset_password(
     if not usuario:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
     usuario.password_hash = get_password_hash(payload.new_password)
+    _bump_session_version(usuario)
     db.commit()
     return None

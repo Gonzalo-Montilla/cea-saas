@@ -52,17 +52,18 @@ export const Login = () => {
     try {
       const normalizedTenant = tenantSlug.trim().toLowerCase();
       if (!normalizedTenant) {
-        setError('Ingresa el codigo de tu escuela (tenant).');
+        setError('Ingresa el codigo de tu escuela.');
         return;
       }
       localStorage.setItem('tenant_slug', normalizedTenant);
+      localStorage.setItem('auth_mode', 'tenant');
 
       const healthy = await authAPI.checkHealth();
       if (!healthy) {
         setError('No se pudo conectar al servidor. Verifica que el backend esté activo.');
         return;
       }
-      await login(email, password);
+      await login(email, password, normalizedTenant);
       navigate('/dashboard');
     } catch (err: any) {
       console.error('Error al iniciar sesión:', err);
@@ -95,7 +96,7 @@ export const Login = () => {
           </div>
 
           <div className="form-group">
-            <label htmlFor="tenantSlug">Codigo de escuela (tenant)</label>
+            <label htmlFor="tenantSlug">Codigo de escuela (slug)</label>
             <input
               id="tenantSlug"
               type="text"
@@ -112,6 +113,7 @@ export const Login = () => {
               disabled={isLoading}
               placeholder="ejemplo: conduce-bien"
             />
+            <small className="onboarding-help">Es el mismo codigo de escuela que se genera en el registro.</small>
           </div>
 
           <div className="form-group">
