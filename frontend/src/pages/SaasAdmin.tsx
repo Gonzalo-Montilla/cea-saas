@@ -41,6 +41,7 @@ const SAAS_PERMISSION_PROFILES: Record<string, { label: string; scopes: string[]
 };
 const AUDIT_ACTIONS = [
   '',
+  'tenant.created',
   'tenant.updated',
   'saas_user.created',
   'saas_user.updated',
@@ -197,6 +198,7 @@ export const SaasAdmin = () => {
   const [error, setError] = useState('');
   const [infoMessage, setInfoMessage] = useState('');
   const [conversionModalLead, setConversionModalLead] = useState<SaasLeadItem | null>(null);
+  const [createTenantModalOpen, setCreateTenantModalOpen] = useState(false);
   const [paymentModalTenant, setPaymentModalTenant] = useState<SaasTenantItem | null>(null);
   const [supportDescriptionModal, setSupportDescriptionModal] = useState<null | {
     ticketId: number;
@@ -212,6 +214,14 @@ export const SaasAdmin = () => {
   }>(null);
   const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
   const [credentialsCopied, setCredentialsCopied] = useState(false);
+  const [creatingTenant, setCreatingTenant] = useState(false);
+  const [createTenantResult, setCreateTenantResult] = useState<null | {
+    tenantSlug: string;
+    adminEmail: string;
+    temporaryPassword: string;
+  }>(null);
+  const [createTenantLogoFileName, setCreateTenantLogoFileName] = useState('');
+  const [processingCreateTenantLogo, setProcessingCreateTenantLogo] = useState(false);
   const [conversionForm, setConversionForm] = useState({
     admin_email: '',
     admin_nombre_completo: '',
@@ -261,6 +271,65 @@ export const SaasAdmin = () => {
     proxima_accion_at: '',
     notas: '',
   });
+  const [createTenantForm, setCreateTenantForm] = useState({
+    nombre_escuela: '',
+    slug: '',
+    display_name: '',
+    plan: 'FREE',
+    contacto_email: '',
+    contacto_telefono: '',
+    nit: '',
+    logo_url: '',
+    admin_email: '',
+    admin_password: '',
+    admin_nombre_completo: '',
+    admin_cedula: '',
+    admin_telefono: '',
+    send_welcome_email: true,
+    activate_tenant: true,
+  });
+
+  const fileToDataUrl = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = typeof reader.result === 'string' ? reader.result : '';
+        if (!result.startsWith('data:image')) {
+          reject(new Error('No se pudo procesar la imagen del logo'));
+          return;
+        }
+        resolve(result);
+      };
+      reader.onerror = () => reject(new Error('No se pudo leer el archivo del logo'));
+      reader.readAsDataURL(file);
+    });
+
+  const handleCreateTenantLogoFileChange = async (file: File | null) => {
+    if (!file) {
+      setCreateTenantLogoFileName('');
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      setError('El archivo del logo debe ser una imagen');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setError('El logo no puede superar 2MB');
+      return;
+    }
+    try {
+      setProcessingCreateTenantLogo(true);
+      const dataUrl = await fileToDataUrl(file);
+      setError('');
+      setCreateTenantLogoFileName(file.name);
+      setCreateTenantForm((prev) => ({ ...prev, logo_url: dataUrl }));
+    } catch (err: any) {
+      setError(err?.message || 'No se pudo procesar la imagen del logo');
+      setCreateTenantLogoFileName('');
+    } finally {
+      setProcessingCreateTenantLogo(false);
+    }
+  };
 
   const loadData = async () => {
     try {
@@ -604,6 +673,80 @@ export const SaasAdmin = () => {
       setError(err?.response?.data?.detail || 'No se pudo actualizar el tenant');
     } finally {
       setSavingTenantId(null);
+    }
+  };
+
+  const openCreateTenantModal = () => {
+    setCreateTenantResult(null);
+    setCreateTenantLogoFileName('');
+    setError('');
+    setCreateTenantModalOpen(true);
+  };
+
+  const closeCreateTenantModal = () => {
+    if (creatingTenant) return;
+    setCreateTenantModalOpen(false);
+  };
+
+  const onCreateTenant = async () => {
+    if (!createTenantForm.nombre_escuela || !createTenantForm.contacto_email || !createTenantForm.admin_email || !createTenantForm.admin_nombre_completo || !createTenantForm.admin_cedula) {
+      setError('Completa nombre de escuela, correo contacto, correo admin, nombre admin y cédula admin');
+      return;
+    }
+    try {
+      setCreatingTenant(true);
+      setError('');
+      setCreateTenantResult(null);
+      const result = await saasAdminAPI.createTenant({
+        nombre_escuela: createTenantForm.nombre_escuela.trim(),
+        slug: createTenantForm.slug.trim() || null,
+        display_name: createTenantForm.display_name.trim() || null,
+        plan: createTenantForm.plan as 'FREE' | 'BASIC' | 'PRO' | 'ENTERPRISE',
+        contacto_email: createTenantForm.contacto_email.trim().toLowerCase(),
+        contacto_telefono: createTenantForm.contacto_telefono.trim() || null,
+        nit: createTenantForm.nit.trim() || null,
+        logo_url: createTenantForm.logo_url.trim() || null,
+        admin_email: createTenantForm.admin_email.trim().toLowerCase(),
+        admin_password: createTenantForm.admin_password.trim() || null,
+        admin_nombre_completo: createTenantForm.admin_nombre_completo.trim(),
+        admin_cedula: createTenantForm.admin_cedula.trim(),
+        admin_telefono: createTenantForm.admin_telefono.trim() || null,
+        send_welcome_email: createTenantForm.send_welcome_email,
+        activate_tenant: createTenantForm.activate_tenant,
+      });
+      setCreateTenantResult({
+        tenantSlug: result.tenant_slug,
+        adminEmail: result.admin_email,
+        temporaryPassword: result.temporary_password,
+      });
+      setInfoMessage(
+        `Escuela creada: ${result.tenant_slug}. ` +
+        (result.welcome_email_sent ? 'Se envió correo de acceso.' : 'No se pudo enviar correo de acceso.')
+      );
+      setCreateTenantForm({
+        nombre_escuela: '',
+        slug: '',
+        display_name: '',
+        plan: 'FREE',
+        contacto_email: '',
+        contacto_telefono: '',
+        nit: '',
+        logo_url: '',
+        admin_email: '',
+        admin_password: '',
+        admin_nombre_completo: '',
+        admin_cedula: '',
+        admin_telefono: '',
+        send_welcome_email: true,
+        activate_tenant: true,
+      });
+      setCreateTenantLogoFileName('');
+      if (canTenants || canBilling) await loadData();
+      if (canAudit) await loadAuditLogs();
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'No se pudo crear la escuela');
+    } finally {
+      setCreatingTenant(false);
     }
   };
 
@@ -1894,6 +2037,11 @@ export const SaasAdmin = () => {
             <button type="button" className="btn-primary" onClick={() => void loadData()} disabled={loading}>
               Buscar
             </button>
+            {canTenants && (
+              <button type="button" className="btn-secondary" onClick={openCreateTenantModal}>
+                Nueva escuela
+              </button>
+            )}
           </div>
         </div>
 
@@ -2534,6 +2682,168 @@ export const SaasAdmin = () => {
           </button>
         </div>
       </div>
+      )}
+
+      {createTenantModalOpen && (
+        <div className="saas-modal-backdrop" onClick={closeCreateTenantModal}>
+          <div className="saas-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Nueva escuela (alta interna)</h3>
+            <div className="saas-modal-grid">
+              <label>
+                Nombre escuela
+                <input
+                  type="text"
+                  value={createTenantForm.nombre_escuela}
+                  onChange={(e) => setCreateTenantForm((prev) => ({ ...prev, nombre_escuela: e.target.value }))}
+                />
+              </label>
+              <label>
+                Código escuela (opcional)
+                <input
+                  type="text"
+                  value={createTenantForm.slug}
+                  onChange={(e) => setCreateTenantForm((prev) => ({ ...prev, slug: e.target.value }))}
+                />
+              </label>
+              <label>
+                Nombre comercial (opcional)
+                <input
+                  type="text"
+                  value={createTenantForm.display_name}
+                  onChange={(e) => setCreateTenantForm((prev) => ({ ...prev, display_name: e.target.value }))}
+                />
+              </label>
+              <label>
+                Plan
+                <select
+                  value={createTenantForm.plan}
+                  onChange={(e) => setCreateTenantForm((prev) => ({ ...prev, plan: e.target.value }))}
+                >
+                  {PLANS.map((plan) => (
+                    <option key={plan} value={plan}>
+                      {plan}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Correo contacto
+                <input
+                  type="email"
+                  value={createTenantForm.contacto_email}
+                  onChange={(e) => setCreateTenantForm((prev) => ({ ...prev, contacto_email: e.target.value }))}
+                />
+              </label>
+              <label>
+                Teléfono contacto (opcional)
+                <input
+                  type="text"
+                  value={createTenantForm.contacto_telefono}
+                  onChange={(e) => setCreateTenantForm((prev) => ({ ...prev, contacto_telefono: e.target.value }))}
+                />
+              </label>
+              <label>
+                NIT (opcional)
+                <input
+                  type="text"
+                  value={createTenantForm.nit}
+                  onChange={(e) => setCreateTenantForm((prev) => ({ ...prev, nit: e.target.value }))}
+                />
+              </label>
+              <label>
+                URL logo (opcional)
+                <input
+                  type="text"
+                  value={createTenantForm.logo_url}
+                  onChange={(e) => setCreateTenantForm((prev) => ({ ...prev, logo_url: e.target.value }))}
+                />
+              </label>
+              <label>
+                Explorar archivo de logo (opcional)
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  onChange={(e) => {
+                    void handleCreateTenantLogoFileChange(e.target.files?.[0] || null);
+                  }}
+                />
+                {createTenantLogoFileName && <small>Logo cargado: {createTenantLogoFileName}</small>}
+                {processingCreateTenantLogo && <small>Procesando logo...</small>}
+              </label>
+              <label>
+                Correo admin
+                <input
+                  type="email"
+                  value={createTenantForm.admin_email}
+                  onChange={(e) => setCreateTenantForm((prev) => ({ ...prev, admin_email: e.target.value }))}
+                />
+              </label>
+              <label>
+                Nombre admin
+                <input
+                  type="text"
+                  value={createTenantForm.admin_nombre_completo}
+                  onChange={(e) => setCreateTenantForm((prev) => ({ ...prev, admin_nombre_completo: e.target.value }))}
+                />
+              </label>
+              <label>
+                Cédula admin
+                <input
+                  type="text"
+                  value={createTenantForm.admin_cedula}
+                  onChange={(e) => setCreateTenantForm((prev) => ({ ...prev, admin_cedula: e.target.value }))}
+                />
+              </label>
+              <label>
+                Teléfono admin (opcional)
+                <input
+                  type="text"
+                  value={createTenantForm.admin_telefono}
+                  onChange={(e) => setCreateTenantForm((prev) => ({ ...prev, admin_telefono: e.target.value }))}
+                />
+              </label>
+              <label>
+                Contraseña temporal admin (opcional)
+                <input
+                  type="text"
+                  value={createTenantForm.admin_password}
+                  onChange={(e) => setCreateTenantForm((prev) => ({ ...prev, admin_password: e.target.value }))}
+                />
+              </label>
+            </div>
+            <label className="saas-mfa-ack">
+              <input
+                type="checkbox"
+                checked={createTenantForm.send_welcome_email}
+                onChange={(e) => setCreateTenantForm((prev) => ({ ...prev, send_welcome_email: e.target.checked }))}
+              />
+              Enviar correo de bienvenida/acceso al admin
+            </label>
+            <label className="saas-mfa-ack">
+              <input
+                type="checkbox"
+                checked={createTenantForm.activate_tenant}
+                onChange={(e) => setCreateTenantForm((prev) => ({ ...prev, activate_tenant: e.target.checked }))}
+              />
+              Activar escuela al crear
+            </label>
+            {createTenantResult && (
+              <div className="saas-conversion-result">
+                <p><strong>Escuela:</strong> {createTenantResult.tenantSlug}</p>
+                <p><strong>Admin:</strong> {createTenantResult.adminEmail}</p>
+                <p><strong>Password temporal:</strong> {createTenantResult.temporaryPassword}</p>
+              </div>
+            )}
+            <div className="saas-user-actions">
+              <button type="button" className="btn-secondary" onClick={closeCreateTenantModal} disabled={creatingTenant}>
+                Cerrar
+              </button>
+              <button type="button" className="btn-primary" onClick={() => void onCreateTenant()} disabled={creatingTenant}>
+                {creatingTenant ? 'Creando...' : 'Crear escuela'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {paymentModalTenant && (

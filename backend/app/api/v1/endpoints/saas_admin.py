@@ -67,6 +67,24 @@ class TenantAdminUpdate(BaseModel):
     last_payment_at: Optional[datetime] = None
 
 
+class SaasTenantCreate(BaseModel):
+    nombre_escuela: str
+    slug: Optional[str] = None
+    display_name: Optional[str] = None
+    plan: Optional[str] = PlanTenant.FREE.value
+    contacto_email: EmailStr
+    contacto_telefono: Optional[str] = None
+    nit: Optional[str] = None
+    logo_url: Optional[str] = None
+    admin_email: EmailStr
+    admin_password: Optional[str] = None
+    admin_nombre_completo: str
+    admin_cedula: str
+    admin_telefono: Optional[str] = None
+    send_welcome_email: bool = True
+    activate_tenant: bool = True
+
+
 class SaasUserCreate(BaseModel):
     email: EmailStr
     password: str
@@ -605,6 +623,142 @@ def list_tenants_admin(
         "total": int(total),
         "skip": skip,
         "limit": limit,
+    }
+
+
+@router.post("/tenants", status_code=status.HTTP_201_CREATED)
+def create_tenant_admin(
+    payload: SaasTenantCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_saas_admin_user),
+):
+    _require_saas_module(admin, MODULE_TENANTS, "crear tenant")
+
+    school_name = _normalize_text(payload.nombre_escuela)
+    if not school_name or len(school_name) < 3:
+        raise HTTPException(status_code=400, detail="Nombre de escuela inválido")
+
+    raw_slug = _normalize_text(payload.slug)
+    if raw_slug:
+        slug_candidate = _slugify(raw_slug)
+        if not re.fullmatch(r"[a-z0-9-]{3,100}", slug_candidate):
+            raise HTTPException(
+                status_code=400,
+                detail="Slug inválido: usa solo minúsculas, números y guiones (3-100 caracteres)",
+            )
+        if db.query(Tenant).filter(Tenant.slug == slug_candidate).first():
+            raise HTTPException(status_code=409, detail="El código de escuela ya existe")
+    else:
+        slug_candidate = _ensure_unique_tenant_slug(db, school_name)
+
+    plan_value = str(payload.plan or PlanTenant.FREE.value).strip().upper()
+    valid_plans = {p.value for p in PlanTenant}
+    if plan_value not in valid_plans:
+        raise HTTPException(status_code=400, detail="Plan inválido")
+
+    tenant_contact_email = str(payload.contacto_email).strip().lower()
+    admin_email = str(payload.admin_email).strip().lower()
+    if db.query(Usuario).filter(Usuario.email == admin_email).first():
+        raise HTTPException(status_code=409, detail="El correo del administrador ya existe")
+
+    admin_cedula = str(payload.admin_cedula or "").strip()
+    if len(admin_cedula) < 5:
+        raise HTTPException(status_code=400, detail="La cédula del administrador es obligatoria")
+    if db.query(Usuario).filter(Usuario.cedula == admin_cedula).first():
+        raise HTTPException(status_code=409, detail="La cédula del administrador ya existe")
+    admin_full_name = str(payload.admin_nombre_completo or "").strip()
+    if len(admin_full_name) < 3:
+        raise HTTPException(status_code=400, detail="Nombre del administrador inválido")
+
+    temporary_password = (payload.admin_password or "").strip() or f"Siaec#{secrets.token_hex(4)}"
+    if len(temporary_password) < 8:
+        raise HTTPException(status_code=400, detail="La contraseña temporal debe tener mínimo 8 caracteres")
+
+    tenant = Tenant(
+        slug=slug_candidate,
+        nombre=school_name,
+        display_name=_normalize_text(payload.display_name) or school_name,
+        plan=plan_value,
+        is_active=bool(payload.activate_tenant),
+        is_demo=(plan_value == PlanTenant.FREE.value),
+        demo_ends_at=(
+            datetime.utcnow() + timedelta(days=max(1, settings.DEFAULT_DEMO_DAYS))
+            if plan_value == PlanTenant.FREE.value
+            else None
+        ),
+        contacto_email=tenant_contact_email,
+        contacto_telefono=_normalize_text(payload.contacto_telefono),
+        nit=_normalize_text(payload.nit),
+        logo_url=_normalize_text(payload.logo_url),
+        subscription_status="TRIAL" if plan_value == PlanTenant.FREE.value else "ACTIVE",
+    )
+    db.add(tenant)
+    db.flush()
+
+    tenant_admin_user = Usuario(
+        email=admin_email,
+        password_hash=get_password_hash(temporary_password),
+        nombre_completo=admin_full_name,
+        cedula=admin_cedula,
+        telefono=_normalize_text(payload.admin_telefono),
+        rol=RolUsuario.ADMIN,
+        tenant_id=tenant.id,
+        is_active=True,
+        is_verified=True,
+        must_change_password=True,
+    )
+    db.add(tenant_admin_user)
+    db.flush()
+
+    membership = TenantUser(
+        tenant_id=tenant.id,
+        user_id=tenant_admin_user.id,
+        rol=RolUsuario.ADMIN.value,
+        is_active=True,
+    )
+    db.add(membership)
+
+    welcome_email_sent = False
+    if payload.send_welcome_email:
+        try:
+            welcome_email_sent = send_email(
+                tenant_admin_user.email,
+                f"[{settings.SMTP_FROM_NAME}] Enlace de acceso - {tenant.display_name or tenant.nombre or tenant.slug}",
+                _build_school_access_email_body(tenant, tenant_admin_user.nombre_completo),
+            )
+        except Exception:
+            welcome_email_sent = False
+
+    _write_audit_log(
+        db=db,
+        actor=admin,
+        request=request,
+        action="tenant.created",
+        entity_type="tenant",
+        entity_id=str(tenant.id),
+        summary=f"Creó tenant {tenant.slug} desde backoffice",
+        payload={
+            "tenant_slug": tenant.slug,
+            "plan": tenant.plan,
+            "admin_email": tenant_admin_user.email,
+            "welcome_email_sent": bool(welcome_email_sent),
+        },
+    )
+    db.commit()
+    db.refresh(tenant)
+
+    return {
+        "tenant_id": tenant.id,
+        "tenant_slug": tenant.slug,
+        "tenant_nombre": tenant.nombre,
+        "tenant_display_name": tenant.display_name,
+        "tenant_plan": tenant.plan,
+        "tenant_activo": tenant.is_active,
+        "admin_user_id": tenant_admin_user.id,
+        "admin_email": tenant_admin_user.email,
+        "temporary_password": temporary_password,
+        "welcome_email_sent": bool(welcome_email_sent),
     }
 
 

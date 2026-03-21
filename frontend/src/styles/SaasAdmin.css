@@ -344,17 +344,21 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 16px;
+  overflow-y: auto;
   z-index: 90;
 }
 
 .saas-modal {
   width: min(760px, 92vw);
+  max-height: calc(100vh - 32px);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 16px;
   display: grid;
   gap: 12px;
+  overflow-y: auto;
 }
 
 .saas-modal-grid {
@@ -539,6 +543,16 @@
 }
 
 @media (max-width: 720px) {
+  .saas-modal-backdrop {
+    align-items: flex-start;
+    padding: 10px;
+  }
+
+  .saas-modal {
+    width: 100%;
+    max-height: calc(100vh - 20px);
+  }
+
   .saas-kpi-grid {
     grid-template-columns: 1fr;
   }

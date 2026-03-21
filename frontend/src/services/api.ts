@@ -732,7 +732,7 @@ export interface SaasSupportTicketItem {
   tenant_id: number;
   tenant_slug?: string | null;
   tenant_nombre?: string | null;
-  status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+  status: 'OPEN' | 'IN_PROGRESS' | 'WAITING_CUSTOMER' | 'RESOLVED' | 'CLOSED';
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   category: string;
   subject: string;
@@ -800,6 +800,37 @@ export const saasAdminAPI = {
     if (params?.is_active !== undefined) queryParams.append('is_active', String(params.is_active));
     const query = queryParams.toString();
     const response = await api.get(`/saas-admin/tenants${query ? `?${query}` : ''}`);
+    return response.data;
+  },
+  createTenant: async (data: {
+    nombre_escuela: string;
+    slug?: string | null;
+    display_name?: string | null;
+    plan?: 'FREE' | 'BASIC' | 'PRO' | 'ENTERPRISE';
+    contacto_email: string;
+    contacto_telefono?: string | null;
+    nit?: string | null;
+    logo_url?: string | null;
+    admin_email: string;
+    admin_password?: string | null;
+    admin_nombre_completo: string;
+    admin_cedula: string;
+    admin_telefono?: string | null;
+    send_welcome_email?: boolean;
+    activate_tenant?: boolean;
+  }): Promise<{
+    tenant_id: number;
+    tenant_slug: string;
+    tenant_nombre: string;
+    tenant_display_name: string;
+    tenant_plan: string;
+    tenant_activo: boolean;
+    admin_user_id: number;
+    admin_email: string;
+    temporary_password: string;
+    welcome_email_sent: boolean;
+  }> => {
+    const response = await api.post('/saas-admin/tenants', data);
     return response.data;
   },
   updateTenant: async (
