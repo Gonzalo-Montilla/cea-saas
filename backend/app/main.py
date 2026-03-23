@@ -63,14 +63,16 @@ def health_check():
 def readiness_check():
     db_ok = False
     db_error = None
-    db = SessionLocal()
+    db = None
     try:
+        db = SessionLocal()
         db.execute(text("SELECT 1"))
         db_ok = True
     except Exception as exc:
         db_error = str(exc)
     finally:
-        db.close()
+        if db is not None:
+            db.close()
 
     env_checks = {
         "secret_key_configured": bool(settings.SECRET_KEY and "change-in-production" not in settings.SECRET_KEY.lower()),

@@ -1,7 +1,23 @@
 import axios from 'axios';
 import type { LoginRequest, RegisterRequest, TokenResponse, Usuario, Estudiante } from '../types';
 
-const RAW_API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v1';
+const isLocalHost = (host: string): boolean => {
+  const normalized = (host || '').trim().toLowerCase();
+  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1';
+};
+
+const resolveApiUrl = (): string => {
+  const configured = (import.meta.env.VITE_API_URL || '').trim();
+  if (configured) return configured;
+
+  // Safe-by-default in production: browser hits same origin and nginx proxies /api.
+  if (typeof window !== 'undefined' && !isLocalHost(window.location.hostname)) {
+    return '/api/v1';
+  }
+  return 'http://127.0.0.1:8000/api/v1';
+};
+
+const RAW_API_URL = resolveApiUrl();
 const TENANT_HEADER_NAME = 'X-Tenant-Slug';
 const ONBOARDING_HEADER_NAME = 'X-Onboarding-Key';
 const TENANT_SLUG_STORAGE_KEY = 'tenant_slug';
@@ -11,7 +27,29 @@ const API_URL = RAW_API_URL.endsWith('/api/v1')
   : `${RAW_API_URL.replace(/\/$/, '')}/api/v1`;
 const HEALTH_URL = API_URL.replace(/\/api\/v1$/, '') + '/health';
 
+const decodeJwtPayload = (token: string | null): Record<string, any> | null => {
+  if (!token || !token.includes('.')) return null;
+  try {
+    const payloadPart = token.split('.')[1];
+    const padded = payloadPart.padEnd(payloadPart.length + (4 - (payloadPart.length % 4 || 4)) % 4, '=');
+    const normalized = padded.replace(/-/g, '+').replace(/_/g, '/');
+    const json = atob(normalized);
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+};
+
+const resolveTenantFromToken = (): string | null => {
+  const accessToken = localStorage.getItem('access_token');
+  const payload = decodeJwtPayload(accessToken);
+  const tokenTenant = String(payload?.tslug || '').trim();
+  return tokenTenant || null;
+};
+
 const resolveTenantSlug = (): string | null => {
+  const tokenTenant = resolveTenantFromToken();
+  if (tokenTenant) return tokenTenant;
   const savedSlug = localStorage.getItem(TENANT_SLUG_STORAGE_KEY);
   if (savedSlug?.trim()) return savedSlug.trim();
   if (ENV_TENANT_SLUG) return ENV_TENANT_SLUG;
@@ -64,17 +102,32 @@ api.interceptors.response.use(
 
       // Token expirado en modo tenant: intentar refresh (una sola vez)
       const refreshToken = localStorage.getItem('refresh_token');
-      if (refreshToken && !originalRequest._retry) {
+      const tenantSlug = resolveTenantSlug();
+      const isRefreshCall = String(originalRequest?.url || '').includes('/auth/refresh');
+      if (refreshToken && !originalRequest._retry && !isRefreshCall) {
         originalRequest._retry = true;
         try {
-          const response = await axios.post(`${API_URL}/auth/refresh?refresh_token_str=${encodeURIComponent(refreshToken)}`);
+          const refreshUrl = `${API_URL}/auth/refresh?refresh_token_str=${encodeURIComponent(refreshToken)}`;
+          const response = await axios.post(
+            refreshUrl,
+            {},
+            {
+              headers: tenantSlug ? { [TENANT_HEADER_NAME]: tenantSlug } : undefined,
+              timeout: 15000,
+            }
+          );
           const { access_token, refresh_token } = response.data;
           localStorage.setItem('access_token', access_token);
           if (refresh_token) localStorage.setItem('refresh_token', refresh_token);
+          const freshTenant = resolveTenantFromToken() || tenantSlug;
+          if (freshTenant) localStorage.setItem(TENANT_SLUG_STORAGE_KEY, freshTenant);
           
           // Reintentar la petición original
           originalRequest.headers = originalRequest.headers || {};
           originalRequest.headers.Authorization = `Bearer ${access_token}`;
+          if (freshTenant) {
+            originalRequest.headers[TENANT_HEADER_NAME] = freshTenant;
+          }
           return axios(originalRequest);
         } catch (refreshError) {
           // Si falla el refresh, limpiar tokens y redirigir al login

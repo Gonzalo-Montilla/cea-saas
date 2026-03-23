@@ -215,10 +215,11 @@ export const SaasAdmin = () => {
   const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
   const [credentialsCopied, setCredentialsCopied] = useState(false);
   const [creatingTenant, setCreatingTenant] = useState(false);
-  const [createTenantResult, setCreateTenantResult] = useState<null | {
+  const [createTenantSuccessModal, setCreateTenantSuccessModal] = useState<null | {
     tenantSlug: string;
     adminEmail: string;
     temporaryPassword: string;
+    welcomeEmailSent: boolean;
   }>(null);
   const [createTenantLogoFileName, setCreateTenantLogoFileName] = useState('');
   const [processingCreateTenantLogo, setProcessingCreateTenantLogo] = useState(false);
@@ -677,7 +678,6 @@ export const SaasAdmin = () => {
   };
 
   const openCreateTenantModal = () => {
-    setCreateTenantResult(null);
     setCreateTenantLogoFileName('');
     setError('');
     setCreateTenantModalOpen(true);
@@ -696,7 +696,6 @@ export const SaasAdmin = () => {
     try {
       setCreatingTenant(true);
       setError('');
-      setCreateTenantResult(null);
       const result = await saasAdminAPI.createTenant({
         nombre_escuela: createTenantForm.nombre_escuela.trim(),
         slug: createTenantForm.slug.trim() || null,
@@ -714,10 +713,11 @@ export const SaasAdmin = () => {
         send_welcome_email: createTenantForm.send_welcome_email,
         activate_tenant: createTenantForm.activate_tenant,
       });
-      setCreateTenantResult({
+      setCreateTenantSuccessModal({
         tenantSlug: result.tenant_slug,
         adminEmail: result.admin_email,
         temporaryPassword: result.temporary_password,
+        welcomeEmailSent: Boolean(result.welcome_email_sent),
       });
       setInfoMessage(
         `Escuela creada: ${result.tenant_slug}. ` +
@@ -741,6 +741,7 @@ export const SaasAdmin = () => {
         activate_tenant: true,
       });
       setCreateTenantLogoFileName('');
+      setCreateTenantModalOpen(false);
       if (canTenants || canBilling) await loadData();
       if (canAudit) await loadAuditLogs();
     } catch (err: any) {
@@ -2827,19 +2828,34 @@ export const SaasAdmin = () => {
               />
               Activar escuela al crear
             </label>
-            {createTenantResult && (
-              <div className="saas-conversion-result">
-                <p><strong>Escuela:</strong> {createTenantResult.tenantSlug}</p>
-                <p><strong>Admin:</strong> {createTenantResult.adminEmail}</p>
-                <p><strong>Password temporal:</strong> {createTenantResult.temporaryPassword}</p>
-              </div>
-            )}
             <div className="saas-user-actions">
               <button type="button" className="btn-secondary" onClick={closeCreateTenantModal} disabled={creatingTenant}>
                 Cerrar
               </button>
               <button type="button" className="btn-primary" onClick={() => void onCreateTenant()} disabled={creatingTenant}>
                 {creatingTenant ? 'Creando...' : 'Crear escuela'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {createTenantSuccessModal && (
+        <div className="saas-modal-backdrop" onClick={() => setCreateTenantSuccessModal(null)}>
+          <div className="saas-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Escuela creada correctamente</h3>
+            <div className="saas-conversion-result">
+              <p><strong>Escuela:</strong> {createTenantSuccessModal.tenantSlug}</p>
+              <p><strong>Admin:</strong> {createTenantSuccessModal.adminEmail}</p>
+              <p><strong>Password temporal:</strong> {createTenantSuccessModal.temporaryPassword}</p>
+              <p>
+                <strong>Correo de acceso:</strong>{' '}
+                {createTenantSuccessModal.welcomeEmailSent ? 'Enviado' : 'No enviado'}
+              </p>
+            </div>
+            <div className="saas-user-actions">
+              <button type="button" className="btn-primary" onClick={() => setCreateTenantSuccessModal(null)}>
+                Cerrar
               </button>
             </div>
           </div>

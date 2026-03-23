@@ -1751,19 +1751,7 @@ def _draw_signature_lines(c: canvas.Canvas, y: int) -> int:
     c.drawString(320, y - 12, "FIRMA REPRESENTANTE LEGAL CEA")
     c.drawString(60, y - 62, "FIRMA DE ACUDIENTE O PADRE DE FAMILIA")
     _draw_rect(c, 480, y - 80, 50, 50)
-    _draw_rep_signature(c, 330, y + 4, 150, 30)
     return y - 90
-
-
-def _draw_rep_signature(c: canvas.Canvas, x: int, y: int, w: int, h: int) -> None:
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", ".."))
-    assets_dir = os.path.join(repo_root, "frontend", "src", "assets")
-    signature_path = os.path.join(assets_dir, "firma jerson.png")
-    if signature_path and os.path.exists(signature_path):
-        try:
-            c.drawImage(ImageReader(signature_path), x, y, width=w, height=h, preserveAspectRatio=True, mask="auto")
-        except Exception:
-            return
 
 
 def _ensure_space_contrato(c: canvas.Canvas, y: int, min_y: int, tenant: Optional[Tenant] = None) -> int:
