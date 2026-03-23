@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.email import send_email
 from app.core.security import get_password_hash
+from app.models.tenant_branch import TenantBranch, TenantUserBranch
 from app.models.usuario import RolUsuario, Usuario
 from app.models.tenant import PlanTenant, Tenant, TenantUser
 
@@ -104,6 +105,45 @@ def _send_onboarding_welcome_email(
     return send_email(login_email, subject, body)
 
 
+def _ensure_primary_branch_for_tenant(db: Session, tenant: Tenant) -> TenantBranch:
+    branch = db.query(TenantBranch).filter(
+        TenantBranch.tenant_id == tenant.id,
+        TenantBranch.is_primary.is_(True),
+    ).first()
+    if branch:
+        return branch
+    branch = TenantBranch(
+        tenant_id=tenant.id,
+        nombre=(tenant.display_name or tenant.nombre or "Sede Principal").strip(),
+        codigo="PRINCIPAL",
+        is_active=True,
+        is_primary=True,
+        contacto_email=tenant.contacto_email,
+        contacto_telefono=tenant.contacto_telefono,
+    )
+    db.add(branch)
+    db.flush()
+    return branch
+
+
+def _ensure_user_branch_access(db: Session, tenant: Tenant, user: Usuario) -> None:
+    primary = _ensure_primary_branch_for_tenant(db, tenant)
+    existing = db.query(TenantUserBranch).filter(
+        TenantUserBranch.tenant_id == tenant.id,
+        TenantUserBranch.user_id == user.id,
+        TenantUserBranch.branch_id == primary.id,
+    ).first()
+    if existing:
+        existing.is_active = True
+        return
+    db.add(TenantUserBranch(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        branch_id=primary.id,
+        is_active=True,
+    ))
+
+
 def _create_school_and_admin(db: Session, payload: SchoolOnboardingRequest) -> tuple[Tenant, Usuario]:
     normalized_nombre = _normalize_str(payload.nombre_escuela)
     if not normalized_nombre:
@@ -176,12 +216,21 @@ def _create_school_and_admin(db: Session, payload: SchoolOnboardingRequest) -> t
         is_active=True,
     )
     db.add(membership)
+    _ensure_user_branch_access(db, tenant, admin_user)
     db.commit()
     return tenant, admin_user
 
 
 @router.get("/context")
-def get_tenant_context(current_tenant: Tenant = Depends(get_required_tenant)):
+def get_tenant_context(
+    db: Session = Depends(get_db),
+    current_tenant: Tenant = Depends(get_required_tenant),
+):
+    primary_branch = _ensure_primary_branch_for_tenant(db, current_tenant)
+    branches = db.query(TenantBranch).filter(
+        TenantBranch.tenant_id == current_tenant.id,
+    ).order_by(TenantBranch.is_primary.desc(), TenantBranch.created_at.asc()).all()
+    db.commit()
     return {
         "id": current_tenant.id,
         "slug": current_tenant.slug,
@@ -193,6 +242,17 @@ def get_tenant_context(current_tenant: Tenant = Depends(get_required_tenant)):
         "contacto_email": current_tenant.contacto_email,
         "contacto_telefono": current_tenant.contacto_telefono,
         "nit": current_tenant.nit,
+        "branch_primary_id": primary_branch.id,
+        "branches": [
+            {
+                "id": b.id,
+                "nombre": b.nombre,
+                "codigo": b.codigo,
+                "is_active": b.is_active,
+                "is_primary": b.is_primary,
+            }
+            for b in branches
+        ],
     }
 
 

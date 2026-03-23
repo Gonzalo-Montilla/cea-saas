@@ -21,6 +21,7 @@ from app.models.saas_audit_log import SaasAuditLog
 from app.models.saas_billing_event import SaasBillingEvent
 from app.models.saas_lead import SaasLead
 from app.models.saas_support_ticket import SaasSupportTicket
+from app.models.tenant_branch import TenantBranch, TenantUserBranch
 from app.models.tenant import PlanTenant, Tenant, TenantUser
 from app.models.usuario import RolUsuario, Usuario
 
@@ -51,6 +52,7 @@ MODULE_USERS = "saas_users_manage"
 MODULE_AUDIT = "saas_audit_read"
 MODULE_PIPELINE = "saas_pipeline_manage"
 MODULE_SUPPORT = "saas_support_manage"
+MODULE_BRANCHES = "saas_branches_manage"
 SUPPORT_STATUSES = {"OPEN", "IN_PROGRESS", "WAITING_CUSTOMER", "RESOLVED", "CLOSED"}
 SUPPORT_PRIORITIES = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
 
@@ -60,6 +62,9 @@ class TenantAdminUpdate(BaseModel):
     is_active: Optional[bool] = None
     is_demo: Optional[bool] = None
     demo_ends_at: Optional[datetime] = None
+    contacto_nombre: Optional[str] = None
+    contacto_email: Optional[EmailStr] = None
+    contacto_telefono: Optional[str] = None
     subscription_status: Optional[str] = None
     billing_cycle: Optional[str] = None
     monthly_fee: Optional[float] = None
@@ -72,6 +77,7 @@ class SaasTenantCreate(BaseModel):
     slug: Optional[str] = None
     display_name: Optional[str] = None
     plan: Optional[str] = PlanTenant.FREE.value
+    contacto_nombre: Optional[str] = None
     contacto_email: EmailStr
     contacto_telefono: Optional[str] = None
     nit: Optional[str] = None
@@ -121,6 +127,35 @@ class SaasUserPasswordReset(BaseModel):
         if not value or len(value) < 6:
             raise ValueError("La contraseña debe tener al menos 6 caracteres")
         return value
+
+
+class SaasBranchCreate(BaseModel):
+    nombre: str
+    codigo: Optional[str] = None
+    direccion: Optional[str] = None
+    ciudad: Optional[str] = None
+    contacto_telefono: Optional[str] = None
+    contacto_email: Optional[EmailStr] = None
+    observaciones: Optional[str] = None
+    is_active: bool = True
+    is_primary: bool = False
+
+
+class SaasBranchUpdate(BaseModel):
+    nombre: Optional[str] = None
+    codigo: Optional[str] = None
+    direccion: Optional[str] = None
+    ciudad: Optional[str] = None
+    contacto_telefono: Optional[str] = None
+    contacto_email: Optional[EmailStr] = None
+    observaciones: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class SaasTenantUserBranchUpdate(BaseModel):
+    branch_ids: list[int]
+    is_active: bool = True
+    mode: str = "replace"
 
 
 class SaasLeadCreate(BaseModel):
@@ -315,6 +350,86 @@ def _normalize_text(value: Optional[str]) -> Optional[str]:
         return None
     cleaned = str(value).strip()
     return cleaned or None
+
+
+def _normalize_branch_code(value: Optional[str], fallback_name: str) -> str:
+    seed = value or fallback_name
+    code = re.sub(r"[^A-Z0-9]+", "-", str(seed or "").strip().upper()).strip("-")
+    code = code[:50]
+    return code or "SUCURSAL"
+
+
+def _serialize_branch(branch: TenantBranch) -> dict:
+    return {
+        "id": branch.id,
+        "tenant_id": branch.tenant_id,
+        "nombre": branch.nombre,
+        "codigo": branch.codigo,
+        "is_active": branch.is_active,
+        "is_primary": branch.is_primary,
+        "direccion": branch.direccion,
+        "ciudad": branch.ciudad,
+        "contacto_telefono": branch.contacto_telefono,
+        "contacto_email": branch.contacto_email,
+        "observaciones": branch.observaciones,
+        "created_at": branch.created_at,
+        "updated_at": branch.updated_at,
+    }
+
+
+def _ensure_primary_branch(db: Session, tenant: Tenant) -> TenantBranch:
+    primary = db.query(TenantBranch).filter(
+        TenantBranch.tenant_id == tenant.id,
+        TenantBranch.is_primary.is_(True),
+    ).first()
+    if primary:
+        return primary
+    fallback = db.query(TenantBranch).filter(
+        TenantBranch.tenant_id == tenant.id,
+    ).order_by(TenantBranch.id.asc()).first()
+    if fallback:
+        fallback.is_primary = True
+        fallback.is_active = True
+        return fallback
+    created = TenantBranch(
+        tenant_id=tenant.id,
+        nombre=(tenant.display_name or tenant.nombre or "Sede Principal").strip(),
+        codigo="PRINCIPAL",
+        is_active=True,
+        is_primary=True,
+        direccion=None,
+        ciudad=None,
+        contacto_telefono=tenant.contacto_telefono,
+        contacto_email=tenant.contacto_email,
+    )
+    db.add(created)
+    db.flush()
+    return created
+
+
+def _ensure_user_primary_branch_access(
+    db: Session,
+    tenant: Tenant,
+    user_id: int,
+) -> TenantUserBranch:
+    primary = _ensure_primary_branch(db, tenant)
+    access = db.query(TenantUserBranch).filter(
+        TenantUserBranch.tenant_id == tenant.id,
+        TenantUserBranch.user_id == user_id,
+        TenantUserBranch.branch_id == primary.id,
+    ).first()
+    if access:
+        access.is_active = True
+        return access
+    access = TenantUserBranch(
+        tenant_id=tenant.id,
+        user_id=user_id,
+        branch_id=primary.id,
+        is_active=True,
+    )
+    db.add(access)
+    db.flush()
+    return access
 
 
 def _slugify(value: str) -> str:
@@ -598,6 +713,22 @@ def list_tenants_admin(
 
     total = query.count()
     items = query.order_by(Tenant.created_at.desc()).offset(skip).limit(limit).all()
+    tenant_ids = [int(t.id) for t in items]
+    admin_contacts: dict[int, dict[str, Optional[str]]] = {}
+    if tenant_ids:
+        admin_users = db.query(Usuario).filter(
+            Usuario.tenant_id.in_(tenant_ids),
+            Usuario.rol == RolUsuario.ADMIN,
+        ).order_by(Usuario.tenant_id.asc(), Usuario.id.asc()).all()
+        for admin_user in admin_users:
+            tid = int(admin_user.tenant_id or 0)
+            if not tid or tid in admin_contacts:
+                continue
+            admin_contacts[tid] = {
+                "admin_nombre_contacto": admin_user.nombre_completo,
+                "admin_email_contacto": admin_user.email,
+                "admin_telefono_contacto": admin_user.telefono,
+            }
 
     return {
         "items": [
@@ -606,17 +737,23 @@ def list_tenants_admin(
                 "slug": t.slug,
                 "nombre": t.nombre,
                 "display_name": t.display_name,
+                "logo_url": t.logo_url,
                 "plan": t.plan,
                 "is_active": t.is_active,
                 "is_demo": t.is_demo,
                 "demo_ends_at": t.demo_ends_at,
+                "contacto_nombre": t.contacto_nombre,
                 "contacto_email": t.contacto_email,
+                "contacto_telefono": t.contacto_telefono,
                 "subscription_status": t.subscription_status,
                 "billing_cycle": t.billing_cycle,
                 "monthly_fee": float(t.monthly_fee or 0),
                 "next_billing_at": t.next_billing_at,
                 "last_payment_at": t.last_payment_at,
                 "created_at": t.created_at,
+                "admin_nombre_contacto": (admin_contacts.get(int(t.id)) or {}).get("admin_nombre_contacto"),
+                "admin_email_contacto": (admin_contacts.get(int(t.id)) or {}).get("admin_email_contacto"),
+                "admin_telefono_contacto": (admin_contacts.get(int(t.id)) or {}).get("admin_telefono_contacto"),
             }
             for t in items
         ],
@@ -687,6 +824,7 @@ def create_tenant_admin(
             if plan_value == PlanTenant.FREE.value
             else None
         ),
+        contacto_nombre=_normalize_text(payload.contacto_nombre),
         contacto_email=tenant_contact_email,
         contacto_telefono=_normalize_text(payload.contacto_telefono),
         nit=_normalize_text(payload.nit),
@@ -718,6 +856,7 @@ def create_tenant_admin(
         is_active=True,
     )
     db.add(membership)
+    _ensure_user_primary_branch_access(db, tenant, tenant_admin_user.id)
 
     welcome_email_sent = False
     if payload.send_welcome_email:
@@ -776,7 +915,7 @@ def update_tenant_admin(
 
     data = payload.model_dump(exclude_unset=True)
     billing_fields = {"subscription_status", "billing_cycle", "monthly_fee", "next_billing_at", "last_payment_at"}
-    tenant_fields = {"plan", "is_active", "is_demo", "demo_ends_at"}
+    tenant_fields = {"plan", "is_active", "is_demo", "demo_ends_at", "contacto_nombre", "contacto_email", "contacto_telefono"}
     if any(k in data for k in tenant_fields):
         _require_saas_module(admin, MODULE_TENANTS, "actualizar tenant")
     if any(k in data for k in billing_fields):
@@ -831,6 +970,12 @@ def update_tenant_admin(
         tenant.monthly_fee = fee
     if "next_billing_at" in data:
         tenant.next_billing_at = data["next_billing_at"]
+    if "contacto_nombre" in data:
+        tenant.contacto_nombre = _normalize_text(data["contacto_nombre"])
+    if "contacto_email" in data:
+        tenant.contacto_email = (str(data["contacto_email"]).strip().lower() if data["contacto_email"] else None)
+    if "contacto_telefono" in data:
+        tenant.contacto_telefono = _normalize_text(data["contacto_telefono"])
     if tenant.is_demo and tenant.subscription_status != "TRIAL":
         tenant.subscription_status = "TRIAL"
     if not tenant.is_demo and tenant.subscription_status == "TRIAL":
@@ -855,12 +1000,331 @@ def update_tenant_admin(
         "plan": tenant.plan,
         "is_active": tenant.is_active,
         "is_demo": tenant.is_demo,
+        "contacto_nombre": tenant.contacto_nombre,
+        "contacto_email": tenant.contacto_email,
+        "contacto_telefono": tenant.contacto_telefono,
         "demo_ends_at": tenant.demo_ends_at,
         "subscription_status": tenant.subscription_status,
         "billing_cycle": tenant.billing_cycle,
         "monthly_fee": float(tenant.monthly_fee or 0),
         "next_billing_at": tenant.next_billing_at,
         "last_payment_at": tenant.last_payment_at,
+    }
+
+
+@router.get("/tenants/{tenant_id}/branches")
+def list_tenant_branches_admin(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    _admin: Usuario = Depends(get_saas_admin_user),
+):
+    _require_any_saas_module(_admin, [MODULE_BRANCHES, MODULE_TENANTS], "listar sucursales")
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    _ensure_primary_branch(db, tenant)
+    db.commit()
+    rows = db.query(TenantBranch).filter(
+        TenantBranch.tenant_id == tenant.id,
+    ).order_by(TenantBranch.is_primary.desc(), TenantBranch.created_at.asc()).all()
+    return {"items": [_serialize_branch(row) for row in rows], "total": len(rows)}
+
+
+@router.post("/tenants/{tenant_id}/branches", status_code=status.HTTP_201_CREATED)
+def create_tenant_branch_admin(
+    tenant_id: int,
+    payload: SaasBranchCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_saas_admin_user),
+):
+    _require_any_saas_module(admin, [MODULE_BRANCHES, MODULE_TENANTS], "crear sucursales")
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    nombre = _normalize_text(payload.nombre)
+    if not nombre or len(nombre) < 2:
+        raise HTTPException(status_code=400, detail="Nombre de sucursal inválido")
+    code = _normalize_branch_code(payload.codigo, nombre)
+    existing = db.query(TenantBranch).filter(
+        TenantBranch.tenant_id == tenant.id,
+        TenantBranch.codigo == code,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="El código de sucursal ya existe para este tenant")
+
+    branch = TenantBranch(
+        tenant_id=tenant.id,
+        nombre=nombre,
+        codigo=code,
+        is_active=bool(payload.is_active),
+        is_primary=False,
+        direccion=_normalize_text(payload.direccion),
+        ciudad=_normalize_text(payload.ciudad),
+        contacto_telefono=_normalize_text(payload.contacto_telefono),
+        contacto_email=(str(payload.contacto_email).strip().lower() if payload.contacto_email else None),
+        observaciones=_normalize_text(payload.observaciones),
+    )
+    db.add(branch)
+    db.flush()
+    if bool(payload.is_primary):
+        db.query(TenantBranch).filter(
+            TenantBranch.tenant_id == tenant.id,
+            TenantBranch.id != branch.id,
+        ).update({"is_primary": False}, synchronize_session=False)
+        branch.is_primary = True
+        branch.is_active = True
+    else:
+        _ensure_primary_branch(db, tenant)
+
+    _write_audit_log(
+        db=db,
+        actor=admin,
+        request=request,
+        action="tenant.branch_created",
+        entity_type="tenant_branch",
+        entity_id=str(branch.id),
+        summary=f"Creó sucursal {branch.codigo} para tenant {tenant.slug}",
+        payload={"tenant_id": tenant.id, "branch_code": branch.codigo},
+    )
+    db.commit()
+    db.refresh(branch)
+    return _serialize_branch(branch)
+
+
+@router.put("/tenants/{tenant_id}/branches/{branch_id}")
+def update_tenant_branch_admin(
+    tenant_id: int,
+    branch_id: int,
+    payload: SaasBranchUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_saas_admin_user),
+):
+    _require_any_saas_module(admin, [MODULE_BRANCHES, MODULE_TENANTS], "actualizar sucursales")
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    branch = db.query(TenantBranch).filter(
+        TenantBranch.id == branch_id,
+        TenantBranch.tenant_id == tenant.id,
+    ).first()
+    if not branch:
+        raise HTTPException(status_code=404, detail="Sucursal no encontrada")
+    data = payload.model_dump(exclude_unset=True)
+    if "nombre" in data and data["nombre"] is not None:
+        nombre = _normalize_text(data["nombre"])
+        if not nombre or len(nombre) < 2:
+            raise HTTPException(status_code=400, detail="Nombre de sucursal inválido")
+        branch.nombre = nombre
+    if "codigo" in data and data["codigo"] is not None:
+        code = _normalize_branch_code(data["codigo"], branch.nombre)
+        exists = db.query(TenantBranch).filter(
+            TenantBranch.tenant_id == tenant.id,
+            TenantBranch.codigo == code,
+            TenantBranch.id != branch.id,
+        ).first()
+        if exists:
+            raise HTTPException(status_code=409, detail="El código de sucursal ya existe para este tenant")
+        branch.codigo = code
+    if "is_active" in data:
+        branch.is_active = bool(data["is_active"])
+        if branch.is_primary and not branch.is_active:
+            raise HTTPException(status_code=400, detail="No puedes inactivar la sucursal principal")
+    if "direccion" in data:
+        branch.direccion = _normalize_text(data["direccion"])
+    if "ciudad" in data:
+        branch.ciudad = _normalize_text(data["ciudad"])
+    if "contacto_telefono" in data:
+        branch.contacto_telefono = _normalize_text(data["contacto_telefono"])
+    if "contacto_email" in data:
+        branch.contacto_email = (str(data["contacto_email"]).strip().lower() if data["contacto_email"] else None)
+    if "observaciones" in data:
+        branch.observaciones = _normalize_text(data["observaciones"])
+    _ensure_primary_branch(db, tenant)
+    _write_audit_log(
+        db=db,
+        actor=admin,
+        request=request,
+        action="tenant.branch_updated",
+        entity_type="tenant_branch",
+        entity_id=str(branch.id),
+        summary=f"Actualizó sucursal {branch.codigo} de tenant {tenant.slug}",
+        payload={"changes": data, "tenant_id": tenant.id},
+    )
+    db.commit()
+    db.refresh(branch)
+    return _serialize_branch(branch)
+
+
+@router.put("/tenants/{tenant_id}/branches/{branch_id}/set-primary")
+def set_primary_tenant_branch_admin(
+    tenant_id: int,
+    branch_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_saas_admin_user),
+):
+    _require_any_saas_module(admin, [MODULE_BRANCHES, MODULE_TENANTS], "definir sucursal principal")
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    branch = db.query(TenantBranch).filter(
+        TenantBranch.id == branch_id,
+        TenantBranch.tenant_id == tenant.id,
+    ).first()
+    if not branch:
+        raise HTTPException(status_code=404, detail="Sucursal no encontrada")
+    db.query(TenantBranch).filter(
+        TenantBranch.tenant_id == tenant.id,
+    ).update({"is_primary": False}, synchronize_session=False)
+    branch.is_primary = True
+    branch.is_active = True
+    _write_audit_log(
+        db=db,
+        actor=admin,
+        request=request,
+        action="tenant.branch_primary_set",
+        entity_type="tenant_branch",
+        entity_id=str(branch.id),
+        summary=f"Definió sucursal principal {branch.codigo} para tenant {tenant.slug}",
+        payload={"tenant_id": tenant.id},
+    )
+    db.commit()
+    db.refresh(branch)
+    return _serialize_branch(branch)
+
+
+@router.get("/tenants/{tenant_id}/branch-users")
+def list_tenant_branch_users_admin(
+    tenant_id: int,
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _admin: Usuario = Depends(get_saas_admin_user),
+):
+    _require_any_saas_module(_admin, [MODULE_BRANCHES, MODULE_TENANTS, MODULE_USERS], "listar accesos por sucursal")
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    _ensure_primary_branch(db, tenant)
+    users_query = db.query(Usuario).filter(
+        Usuario.tenant_id == tenant.id,
+        Usuario.rol != RolUsuario.ESTUDIANTE,
+    )
+    if search:
+        term = f"%{search.strip().lower()}%"
+        users_query = users_query.filter(
+            or_(
+                func.lower(Usuario.nombre_completo).like(term),
+                func.lower(Usuario.email).like(term),
+                func.lower(func.coalesce(Usuario.cedula, "")).like(term),
+            )
+        )
+    users = users_query.order_by(Usuario.nombre_completo.asc()).all()
+    accesses = db.query(TenantUserBranch).filter(
+        TenantUserBranch.tenant_id == tenant.id,
+    ).all()
+    by_user: dict[int, list[TenantUserBranch]] = {}
+    for access in accesses:
+        by_user.setdefault(access.user_id, []).append(access)
+    items = []
+    for user in users:
+        user_access = by_user.get(user.id, [])
+        items.append({
+            "user_id": user.id,
+            "email": user.email,
+            "nombre_completo": user.nombre_completo,
+            "rol": user.rol.value if hasattr(user.rol, "value") else str(user.rol),
+            "is_active": user.is_active,
+            "branch_ids": [int(a.branch_id) for a in user_access if a.is_active],
+            "branch_access": [
+                {"branch_id": int(a.branch_id), "is_active": bool(a.is_active)}
+                for a in user_access
+            ],
+        })
+    db.commit()
+    return {"items": items, "total": len(items)}
+
+
+@router.put("/tenants/{tenant_id}/branch-users/{user_id}")
+def update_tenant_user_branch_access_admin(
+    tenant_id: int,
+    user_id: int,
+    payload: SaasTenantUserBranchUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_saas_admin_user),
+):
+    _require_any_saas_module(admin, [MODULE_BRANCHES, MODULE_TENANTS, MODULE_USERS], "asignar accesos por sucursal")
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+    user = db.query(Usuario).filter(
+        Usuario.id == user_id,
+        Usuario.tenant_id == tenant.id,
+    ).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuario del tenant no encontrado")
+    branch_ids = sorted({int(bid) for bid in (payload.branch_ids or []) if int(bid) > 0})
+    if not branch_ids:
+        raise HTTPException(status_code=400, detail="Debes seleccionar al menos una sucursal")
+    branches = db.query(TenantBranch).filter(
+        TenantBranch.tenant_id == tenant.id,
+        TenantBranch.id.in_(branch_ids),
+    ).all()
+    branch_map = {int(branch.id): branch for branch in branches}
+    missing = [bid for bid in branch_ids if bid not in branch_map]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Sucursales inválidas para tenant: {missing}")
+
+    mode = str(payload.mode or "replace").strip().lower()
+    if mode not in {"replace", "merge"}:
+        raise HTTPException(status_code=400, detail="mode inválido. Usa replace o merge")
+    existing = db.query(TenantUserBranch).filter(
+        TenantUserBranch.tenant_id == tenant.id,
+        TenantUserBranch.user_id == user.id,
+    ).all()
+    existing_by_branch = {int(row.branch_id): row for row in existing}
+    selected = set(branch_ids)
+    if mode == "replace":
+        for row in existing:
+            if int(row.branch_id) not in selected:
+                row.is_active = False
+    for branch_id in branch_ids:
+        row = existing_by_branch.get(branch_id)
+        if row:
+            row.is_active = bool(payload.is_active)
+            continue
+        db.add(TenantUserBranch(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            branch_id=branch_id,
+            is_active=bool(payload.is_active),
+        ))
+    if user.rol in [RolUsuario.ADMIN, RolUsuario.GERENTE]:
+        _ensure_user_primary_branch_access(db, tenant, user.id)
+
+    _write_audit_log(
+        db=db,
+        actor=admin,
+        request=request,
+        action="tenant.branch_access_updated",
+        entity_type="tenant_user_branch",
+        entity_id=f"{tenant.id}:{user.id}",
+        summary=f"Actualizó accesos de sucursal para usuario {user.email} en tenant {tenant.slug}",
+        payload={"branch_ids": branch_ids, "mode": mode, "is_active": bool(payload.is_active)},
+    )
+    db.commit()
+    refreshed = db.query(TenantUserBranch).filter(
+        TenantUserBranch.tenant_id == tenant.id,
+        TenantUserBranch.user_id == user.id,
+        TenantUserBranch.is_active.is_(True),
+    ).all()
+    return {
+        "user_id": user.id,
+        "tenant_id": tenant.id,
+        "branch_ids": [int(row.branch_id) for row in refreshed],
+        "total_active": len(refreshed),
     }
 
 
@@ -1946,6 +2410,7 @@ def convert_lead_to_tenant(
         rol=RolUsuario.ADMIN.value,
         is_active=True,
     ))
+    _ensure_user_primary_branch_access(db, tenant, admin_user.id)
 
     lead.estado = "CERRADO_GANADO"
     lead.converted_tenant_id = tenant.id

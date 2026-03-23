@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.core.security import decode_token
 from app.models.usuario import Usuario, RolUsuario
 from app.models.tenant import Tenant, TenantUser
+from app.models.tenant_branch import TenantBranch, TenantUserBranch
 from app.schemas.auth import TokenData
 from typing import Optional
 
@@ -78,11 +79,13 @@ def get_current_user(
         token_tenant_slug = payload.get("tslug")
         token_tenant_id = payload.get("tid")
         token_session_version = payload.get("sv")
+        token_branch_ids = payload.get("bids")
         token_data = TokenData(
             user_id=user_id,
             tenant_slug=token_tenant_slug,
             tenant_id=token_tenant_id,
             session_version=int(token_session_version) if token_session_version is not None else None,
+            branch_ids=token_branch_ids if isinstance(token_branch_ids, list) else None,
         )
     except (JWTError, ValueError):
         raise credentials_exception
@@ -290,3 +293,79 @@ def get_admin_or_coordinador_or_cajero(current_user: Usuario = Depends(get_curre
             detail="Se requieren permisos de administrador, coordinador o cajero"
         )
     return current_user
+
+
+def _is_branch_manager_role(user: Usuario) -> bool:
+    return user.rol in [RolUsuario.ADMIN, RolUsuario.GERENTE]
+
+
+def get_user_accessible_branch_ids(
+    db: Session,
+    current_tenant: Tenant,
+    current_user: Usuario,
+) -> list[int]:
+    if _is_branch_manager_role(current_user):
+        rows = db.query(TenantBranch.id).filter(
+            TenantBranch.tenant_id == current_tenant.id,
+            TenantBranch.is_active.is_(True),
+        ).all()
+        return [int(row[0]) for row in rows]
+    rows = db.query(TenantUserBranch.branch_id).filter(
+        TenantUserBranch.tenant_id == current_tenant.id,
+        TenantUserBranch.user_id == current_user.id,
+        TenantUserBranch.is_active.is_(True),
+    ).all()
+    return [int(row[0]) for row in rows]
+
+
+def get_current_branch(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_tenant: Tenant = Depends(get_required_tenant),
+    current_user: Usuario = Depends(get_current_active_user),
+) -> Optional[TenantBranch]:
+    raw_branch_id = request.headers.get(settings.BRANCH_HEADER_NAME)
+    if not raw_branch_id:
+        return None
+    try:
+        branch_id = int(str(raw_branch_id).strip())
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Header {settings.BRANCH_HEADER_NAME} inválido",
+        )
+    branch = db.query(TenantBranch).filter(
+        TenantBranch.id == branch_id,
+        TenantBranch.tenant_id == current_tenant.id,
+        TenantBranch.is_active.is_(True),
+    ).first()
+    if not branch:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Sucursal no encontrada o inactiva",
+        )
+    if _is_branch_manager_role(current_user):
+        return branch
+    has_access = db.query(TenantUserBranch.id).filter(
+        TenantUserBranch.tenant_id == current_tenant.id,
+        TenantUserBranch.user_id == current_user.id,
+        TenantUserBranch.branch_id == branch.id,
+        TenantUserBranch.is_active.is_(True),
+    ).first()
+    if not has_access:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Usuario sin acceso a la sucursal seleccionada",
+        )
+    return branch
+
+
+def get_required_branch(
+    current_branch: Optional[TenantBranch] = Depends(get_current_branch),
+) -> TenantBranch:
+    if current_branch is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Sucursal requerida. Envía header {settings.BRANCH_HEADER_NAME}",
+        )
+    return current_branch

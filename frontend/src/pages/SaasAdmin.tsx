@@ -21,9 +21,11 @@ import { authAPI } from '../services/api';
 import {
   saasAdminAPI,
   type SaasAuditLogItem,
+  type SaasBranchItem,
   type SaasBillingEventItem,
   type SaasLeadItem,
   type SaasSupportTicketItem,
+  type SaasTenantBranchUserItem,
   type SaasTenantItem,
   type SaasUserItem,
 } from '../services/api';
@@ -199,6 +201,20 @@ export const SaasAdmin = () => {
   const [infoMessage, setInfoMessage] = useState('');
   const [conversionModalLead, setConversionModalLead] = useState<SaasLeadItem | null>(null);
   const [createTenantModalOpen, setCreateTenantModalOpen] = useState(false);
+  const [branchModalTenant, setBranchModalTenant] = useState<SaasTenantItem | null>(null);
+  const [branchModalLoading, setBranchModalLoading] = useState(false);
+  const [branchModalSaving, setBranchModalSaving] = useState(false);
+  const [savingBranchUserId, setSavingBranchUserId] = useState<number | null>(null);
+  const [tenantBranches, setTenantBranches] = useState<SaasBranchItem[]>([]);
+  const [tenantBranchUsers, setTenantBranchUsers] = useState<SaasTenantBranchUserItem[]>([]);
+  const [newBranchForm, setNewBranchForm] = useState({
+    nombre: '',
+    codigo: '',
+    ciudad: '',
+    direccion: '',
+    contacto_email: '',
+    contacto_telefono: '',
+  });
   const [paymentModalTenant, setPaymentModalTenant] = useState<SaasTenantItem | null>(null);
   const [supportDescriptionModal, setSupportDescriptionModal] = useState<null | {
     ticketId: number;
@@ -223,6 +239,8 @@ export const SaasAdmin = () => {
   }>(null);
   const [createTenantLogoFileName, setCreateTenantLogoFileName] = useState('');
   const [processingCreateTenantLogo, setProcessingCreateTenantLogo] = useState(false);
+  const [tenantProfileId, setTenantProfileId] = useState<number | null>(null);
+  const [tenantProfileBaseline, setTenantProfileBaseline] = useState<SaasTenantItem | null>(null);
   const [conversionForm, setConversionForm] = useState({
     admin_email: '',
     admin_nombre_completo: '',
@@ -277,6 +295,7 @@ export const SaasAdmin = () => {
     slug: '',
     display_name: '',
     plan: 'FREE',
+    contacto_nombre: '',
     contacto_email: '',
     contacto_telefono: '',
     nit: '',
@@ -648,6 +667,82 @@ export const SaasAdmin = () => {
     () => auditLogs.filter((row) => row.action.startsWith('mfa.')).slice(0, 5),
     [auditLogs]
   );
+  const tenantProfile = useMemo(
+    () => tenants.find((tenant) => tenant.id === tenantProfileId) || null,
+    [tenants, tenantProfileId]
+  );
+  const tenantProfileDirty = useMemo(() => {
+    if (!tenantProfile || !tenantProfileBaseline) return false;
+    if (tenantProfile.id !== tenantProfileBaseline.id) return false;
+    const feeDraft = tenantMonthlyFeeDrafts[tenantProfile.id];
+    const currentMonthlyFee =
+      feeDraft !== undefined ? Number(feeDraft || 0) : Number(tenantProfile.monthly_fee || 0);
+    const baselineMonthlyFee = Number(tenantProfileBaseline.monthly_fee || 0);
+    const currentComparable = {
+      plan: tenantProfile.plan || 'FREE',
+      is_active: Boolean(tenantProfile.is_active),
+      is_demo: Boolean(tenantProfile.is_demo),
+      demo_ends_at: tenantProfile.demo_ends_at || null,
+      contacto_nombre: tenantProfile.contacto_nombre || null,
+      contacto_email: tenantProfile.contacto_email || null,
+      contacto_telefono: tenantProfile.contacto_telefono || null,
+      subscription_status: tenantProfile.subscription_status || 'TRIAL',
+      billing_cycle: tenantProfile.billing_cycle || 'MONTHLY',
+      monthly_fee: currentMonthlyFee,
+      next_billing_at: tenantProfile.next_billing_at || null,
+    };
+    const baselineComparable = {
+      plan: tenantProfileBaseline.plan || 'FREE',
+      is_active: Boolean(tenantProfileBaseline.is_active),
+      is_demo: Boolean(tenantProfileBaseline.is_demo),
+      demo_ends_at: tenantProfileBaseline.demo_ends_at || null,
+      contacto_nombre: tenantProfileBaseline.contacto_nombre || null,
+      contacto_email: tenantProfileBaseline.contacto_email || null,
+      contacto_telefono: tenantProfileBaseline.contacto_telefono || null,
+      subscription_status: tenantProfileBaseline.subscription_status || 'TRIAL',
+      billing_cycle: tenantProfileBaseline.billing_cycle || 'MONTHLY',
+      monthly_fee: baselineMonthlyFee,
+      next_billing_at: tenantProfileBaseline.next_billing_at || null,
+    };
+    return JSON.stringify(currentComparable) !== JSON.stringify(baselineComparable);
+  }, [tenantProfile, tenantProfileBaseline, tenantMonthlyFeeDrafts]);
+
+  const updateTenantDraft = (tenantId: number, updater: (current: SaasTenantItem) => SaasTenantItem) => {
+    setTenants((prev) => prev.map((row) => (row.id === tenantId ? updater(row) : row)));
+  };
+
+  const openTenantProfile = (tenant: SaasTenantItem) => {
+    if (tenantProfileId !== null && tenantProfileDirty && tenantProfileId !== tenant.id) {
+      const proceed = window.confirm('Tienes cambios sin guardar en la ficha actual. ¿Deseas descartarlos y abrir otra escuela?');
+      if (!proceed) return;
+    }
+    setTenantProfileId(tenant.id);
+    setTenantProfileBaseline({ ...tenant });
+    setError('');
+    setInfoMessage('');
+  };
+
+  const closeTenantProfile = () => {
+    if (savingTenantId !== null) return;
+    if (tenantProfileDirty) {
+      const proceed = window.confirm('Hay cambios sin guardar. ¿Deseas cerrar la ficha y perder esos cambios?');
+      if (!proceed) return;
+    }
+    setTenantProfileId(null);
+    setTenantProfileBaseline(null);
+  };
+
+  const restoreTenantProfileDraft = () => {
+    if (!tenantProfileBaseline) return;
+    updateTenantDraft(tenantProfileBaseline.id, () => ({ ...tenantProfileBaseline }));
+    setTenantMonthlyFeeDrafts((prev) => {
+      const next = { ...prev };
+      delete next[tenantProfileBaseline.id];
+      return next;
+    });
+    setInfoMessage('Cambios descartados. La ficha volvió al último estado guardado.');
+  };
+
   const onSaveTenant = async (tenant: SaasTenantItem) => {
     try {
       setSavingTenantId(tenant.id);
@@ -658,6 +753,9 @@ export const SaasAdmin = () => {
         is_active: tenant.is_active,
         is_demo: tenant.is_demo,
         demo_ends_at: tenant.demo_ends_at || null,
+        contacto_nombre: tenant.contacto_nombre || null,
+        contacto_email: tenant.contacto_email || null,
+        contacto_telefono: tenant.contacto_telefono || null,
         subscription_status: tenant.subscription_status,
         billing_cycle: tenant.billing_cycle,
         monthly_fee: monthlyFeeValue,
@@ -668,12 +766,155 @@ export const SaasAdmin = () => {
         delete next[tenant.id];
         return next;
       });
+      setTenantProfileBaseline((prev) => {
+        if (!prev || prev.id !== tenant.id) return prev;
+        return {
+          ...tenant,
+          monthly_fee: monthlyFeeValue,
+        };
+      });
       if (canTenants || canBilling) await loadData();
       if (canAudit) await loadAuditLogs();
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'No se pudo actualizar el tenant');
     } finally {
       setSavingTenantId(null);
+    }
+  };
+
+  const loadTenantBranchData = async (tenantId: number) => {
+    const [branchesData, usersData] = await Promise.all([
+      saasAdminAPI.getTenantBranches(tenantId),
+      saasAdminAPI.getTenantBranchUsers(tenantId),
+    ]);
+    setTenantBranches(branchesData.items || []);
+    setTenantBranchUsers(usersData.items || []);
+  };
+
+  const openBranchModal = async (tenant: SaasTenantItem) => {
+    try {
+      setBranchModalTenant(tenant);
+      setBranchModalLoading(true);
+      setError('');
+      setInfoMessage('');
+      setNewBranchForm({
+        nombre: '',
+        codigo: '',
+        ciudad: '',
+        direccion: '',
+        contacto_email: '',
+        contacto_telefono: '',
+      });
+      await loadTenantBranchData(tenant.id);
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'No se pudo cargar la configuración de sucursales');
+    } finally {
+      setBranchModalLoading(false);
+    }
+  };
+
+  const closeBranchModal = () => {
+    if (branchModalSaving || savingBranchUserId !== null) return;
+    setBranchModalTenant(null);
+    setTenantBranches([]);
+    setTenantBranchUsers([]);
+  };
+
+  const createBranchFromModal = async () => {
+    if (!branchModalTenant) return;
+    if (!newBranchForm.nombre.trim()) {
+      setError('El nombre de la sucursal es obligatorio');
+      return;
+    }
+    try {
+      setBranchModalSaving(true);
+      setError('');
+      await saasAdminAPI.createTenantBranch(branchModalTenant.id, {
+        nombre: newBranchForm.nombre.trim(),
+        codigo: newBranchForm.codigo.trim() || null,
+        ciudad: newBranchForm.ciudad.trim() || null,
+        direccion: newBranchForm.direccion.trim() || null,
+        contacto_email: newBranchForm.contacto_email.trim() || null,
+        contacto_telefono: newBranchForm.contacto_telefono.trim() || null,
+      });
+      await loadTenantBranchData(branchModalTenant.id);
+      setNewBranchForm({
+        nombre: '',
+        codigo: '',
+        ciudad: '',
+        direccion: '',
+        contacto_email: '',
+        contacto_telefono: '',
+      });
+      if (canAudit) await loadAuditLogs();
+      setInfoMessage('Sucursal creada correctamente.');
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'No se pudo crear la sucursal');
+    } finally {
+      setBranchModalSaving(false);
+    }
+  };
+
+  const setPrimaryBranchFromModal = async (branchId: number) => {
+    if (!branchModalTenant) return;
+    try {
+      setBranchModalSaving(true);
+      setError('');
+      await saasAdminAPI.setPrimaryTenantBranch(branchModalTenant.id, branchId);
+      await loadTenantBranchData(branchModalTenant.id);
+      if (canAudit) await loadAuditLogs();
+      setInfoMessage('Sucursal principal actualizada.');
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'No se pudo actualizar la sucursal principal');
+    } finally {
+      setBranchModalSaving(false);
+    }
+  };
+
+  const toggleBranchActiveFromModal = async (branch: SaasBranchItem) => {
+    if (!branchModalTenant) return;
+    try {
+      setBranchModalSaving(true);
+      setError('');
+      await saasAdminAPI.updateTenantBranch(branchModalTenant.id, branch.id, {
+        is_active: !branch.is_active,
+      });
+      await loadTenantBranchData(branchModalTenant.id);
+      if (canAudit) await loadAuditLogs();
+      setInfoMessage('Estado de sucursal actualizado.');
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'No se pudo actualizar el estado de la sucursal');
+    } finally {
+      setBranchModalSaving(false);
+    }
+  };
+
+  const toggleUserBranchAccessFromModal = async (user: SaasTenantBranchUserItem, branchId: number) => {
+    if (!branchModalTenant) return;
+    const selected = new Set(user.branch_ids || []);
+    if (selected.has(branchId)) selected.delete(branchId);
+    else selected.add(branchId);
+    const nextIds = Array.from(selected.values()).sort((a, b) => a - b);
+    if (nextIds.length === 0) {
+      setError('Cada usuario debe conservar al menos una sucursal activa.');
+      return;
+    }
+    try {
+      setSavingBranchUserId(user.user_id);
+      setError('');
+      await saasAdminAPI.updateTenantUserBranchAccess(branchModalTenant.id, user.user_id, {
+        branch_ids: nextIds,
+        mode: 'replace',
+        is_active: true,
+      });
+      setTenantBranchUsers((prev) =>
+        prev.map((row) => (row.user_id === user.user_id ? { ...row, branch_ids: nextIds } : row))
+      );
+      if (canAudit) await loadAuditLogs();
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'No se pudo actualizar el acceso por sucursal');
+    } finally {
+      setSavingBranchUserId(null);
     }
   };
 
@@ -701,6 +942,7 @@ export const SaasAdmin = () => {
         slug: createTenantForm.slug.trim() || null,
         display_name: createTenantForm.display_name.trim() || null,
         plan: createTenantForm.plan as 'FREE' | 'BASIC' | 'PRO' | 'ENTERPRISE',
+        contacto_nombre: createTenantForm.contacto_nombre.trim() || null,
         contacto_email: createTenantForm.contacto_email.trim().toLowerCase(),
         contacto_telefono: createTenantForm.contacto_telefono.trim() || null,
         nit: createTenantForm.nit.trim() || null,
@@ -728,6 +970,7 @@ export const SaasAdmin = () => {
         slug: '',
         display_name: '',
         plan: 'FREE',
+        contacto_nombre: '',
         contacto_email: '',
         contacto_telefono: '',
         nit: '',
@@ -2046,215 +2289,66 @@ export const SaasAdmin = () => {
           </div>
         </div>
 
-        <div className="saas-table-wrap bo-table-wrap saas-table-wrap-tenants">
+        <div className="saas-table-wrap bo-table-wrap">
           <table className="saas-table bo-table">
             <thead>
               <tr>
-                <th className="saas-sticky-col">
-                  <div className="saas-sticky-cell saas-sticky-cell-header">Escuela</div>
-                </th>
+                <th>Escuela</th>
                 <th>Codigo de escuela</th>
                 <th>Plan</th>
                 <th>Suscripción</th>
-                <th>Ciclo</th>
-                <th>Tarifa mensual</th>
-                <th>Próx. cobro</th>
-                <th>Últ. pago</th>
                 <th>Demo</th>
-                <th>Vence demo</th>
                 <th>Activa</th>
                 <th>Contacto</th>
-                <th>Acción</th>
+                <th>Acciones</th>
               </tr>
             </thead>
             <tbody>
-              {tenants.map((t, idx) => (
+              {tenants.map((t) => (
                 <tr key={t.id}>
-                  <td className="saas-sticky-col">
-                    <div className="saas-sticky-cell">{t.display_name || t.nombre}</div>
-                  </td>
-                  <td>{t.slug}</td>
                   <td>
-                    <select
-                      value={t.plan}
-                      onChange={(e) =>
-                        setTenants((prev) =>
-                          prev.map((x, i) => (i === idx ? { ...x, plan: e.target.value } : x))
-                        )
-                      }
-                    >
-                      {PLANS.map((p) => (
-                        <option key={p} value={p}>
-                          {p}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <div className="saas-inline-status-editor">
-                      <span className={statusClass(t.subscription_status || 'TRIAL')}>{t.subscription_status || 'TRIAL'}</span>
-                      <select
-                        value={t.subscription_status || 'TRIAL'}
-                        onChange={(e) =>
-                          setTenants((prev) =>
-                            prev.map((x, i) => {
-                              if (i !== idx) return x;
-                              const nextStatus = e.target.value as any;
-                              return {
-                                ...x,
-                                subscription_status: nextStatus,
-                                is_demo: nextStatus === 'TRIAL',
-                              };
-                            })
-                          )
-                        }
-                      >
-                        {SUBSCRIPTION_STATUSES.map((s) => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="saas-tenant-list-cell">
+                      {t.logo_url ? (
+                        <img
+                          src={t.logo_url}
+                          alt={`Logo ${t.display_name || t.nombre}`}
+                          className="saas-tenant-avatar"
+                        />
+                      ) : (
+                        <div className="saas-tenant-avatar saas-tenant-avatar-fallback">
+                          {(t.display_name || t.nombre || '?').slice(0, 1).toUpperCase()}
+                        </div>
+                      )}
+                      <div className="saas-tenant-list-meta">
+                        <strong>{t.display_name || t.nombre}</strong>
+                        <span>{t.nombre}</span>
+                      </div>
                     </div>
                   </td>
-                  <td>
-                    <select
-                      value={t.billing_cycle || 'MONTHLY'}
-                      onChange={(e) =>
-                        setTenants((prev) =>
-                          prev.map((x, i) => (i === idx ? { ...x, billing_cycle: e.target.value as any } : x))
-                        )
-                      }
-                    >
-                      {BILLING_CYCLES.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      value={
-                        tenantMonthlyFeeDrafts[t.id] !== undefined
-                          ? tenantMonthlyFeeDrafts[t.id]
-                          : t.monthly_fee !== undefined && t.monthly_fee !== null
-                          ? String(t.monthly_fee)
-                          : ''
-                      }
-                      onFocus={() => {
-                        const currentDraft = tenantMonthlyFeeDrafts[t.id];
-                        if (currentDraft !== undefined) return;
-                        if (Number(t.monthly_fee || 0) === 0) {
-                          setTenantMonthlyFeeDrafts((prev) => ({ ...prev, [t.id]: '' }));
-                        }
-                      }}
-                      onChange={(e) => {
-                        const raw = e.target.value;
-                        setTenantMonthlyFeeDrafts((prev) => ({ ...prev, [t.id]: raw }));
-                        setTenants((prev) =>
-                          prev.map((x, i) =>
-                            i === idx
-                              ? { ...x, monthly_fee: raw === '' ? undefined : Number(raw) }
-                              : x
-                          )
-                        );
-                      }}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="date"
-                      value={t.next_billing_at ? String(t.next_billing_at).slice(0, 10) : ''}
-                      onChange={(e) =>
-                        setTenants((prev) =>
-                          prev.map((x, i) =>
-                            i === idx ? { ...x, next_billing_at: e.target.value ? `${e.target.value}T23:59:59` : null } : x
-                          )
-                        )
-                      }
-                    />
-                  </td>
-                  <td>
-                    <span>{dateCell(t.last_payment_at)}</span>
-                  </td>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={!!t.is_demo}
-                      onChange={(e) =>
-                        setTenants((prev) =>
-                          prev.map((x, i) => {
-                            if (i !== idx) return x;
-                            const isDemo = e.target.checked;
-                            return {
-                              ...x,
-                              is_demo: isDemo,
-                              subscription_status: isDemo
-                                ? 'TRIAL'
-                                : (x.subscription_status === 'TRIAL' ? 'ACTIVE' : x.subscription_status),
-                            };
-                          })
-                        )
-                      }
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="date"
-                      value={t.demo_ends_at ? String(t.demo_ends_at).slice(0, 10) : ''}
-                      onChange={(e) =>
-                        setTenants((prev) =>
-                          prev.map((x, i) =>
-                            i === idx ? { ...x, demo_ends_at: e.target.value ? `${e.target.value}T23:59:59` : null } : x
-                          )
-                        )
-                      }
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={!!t.is_active}
-                      onChange={(e) =>
-                        setTenants((prev) =>
-                          prev.map((x, i) => (i === idx ? { ...x, is_active: e.target.checked } : x))
-                        )
-                      }
-                    />
-                  </td>
+                  <td>{t.slug}</td>
+                  <td><span className={statusClass(t.plan)}>{t.plan}</span></td>
+                  <td><span className={statusClass(t.subscription_status || 'TRIAL')}>{t.subscription_status || 'TRIAL'}</span></td>
+                  <td><span className={statusClass(t.is_demo ? 'TRIAL' : 'ACTIVE')}>{t.is_demo ? 'Sí' : 'No'}</span></td>
+                  <td><span className={statusClass(t.is_active ? 'ACTIVE' : 'CANCELED')}>{t.is_active ? 'Sí' : 'No'}</span></td>
                   <td>{t.contacto_email || '-'}</td>
                   <td>
                     <div className="saas-user-actions">
                       <button
                         type="button"
                         className="btn-primary"
-                        onClick={() => void onSaveTenant(t)}
-                        disabled={savingTenantId === t.id}
+                        onClick={() => openTenantProfile(t)}
                       >
-                        {savingTenantId === t.id ? 'Guardando...' : 'Guardar'}
-                      </button>
-                      {canBilling && (
-                        <button type="button" className="btn-secondary" onClick={() => openPaymentModal(t)}>
-                          Registrar pago
-                        </button>
-                      )}
-                      <button type="button" className="btn-secondary" onClick={() => void copySchoolAccessLink(t)}>
-                        Copiar enlace acceso
-                      </button>
-                      <button
-                        type="button"
-                        className="btn-secondary"
-                        onClick={() => void resendSchoolAccessLink(t)}
-                        disabled={resendingAccessLinkTenantId === t.id}
-                      >
-                        {resendingAccessLinkTenantId === t.id ? 'Enviando...' : 'Reenviar enlace'}
+                        Ver ficha
                       </button>
                     </div>
                   </td>
                 </tr>
               ))}
+              {tenants.length === 0 && (
+                <tr>
+                  <td colSpan={8}>{loading ? 'Cargando...' : 'No hay escuelas registradas'}</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -2728,6 +2822,14 @@ export const SaasAdmin = () => {
                 </select>
               </label>
               <label>
+                Persona de contacto (opcional)
+                <input
+                  type="text"
+                  value={createTenantForm.contacto_nombre}
+                  onChange={(e) => setCreateTenantForm((prev) => ({ ...prev, contacto_nombre: e.target.value }))}
+                />
+              </label>
+              <label>
                 Correo contacto
                 <input
                   type="email"
@@ -2855,6 +2957,402 @@ export const SaasAdmin = () => {
             </div>
             <div className="saas-user-actions">
               <button type="button" className="btn-primary" onClick={() => setCreateTenantSuccessModal(null)}>
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tenantProfile && (
+        <div className="saas-modal-backdrop" onClick={closeTenantProfile}>
+          <div className="saas-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="saas-tenant-profile-head">
+              {tenantProfile.logo_url ? (
+                <img
+                  src={tenantProfile.logo_url}
+                  alt={`Logo ${tenantProfile.display_name || tenantProfile.nombre}`}
+                  className="saas-tenant-profile-logo"
+                />
+              ) : (
+                <div className="saas-tenant-profile-logo saas-tenant-profile-logo-fallback">
+                  {(tenantProfile.display_name || tenantProfile.nombre || '?').slice(0, 1).toUpperCase()}
+                </div>
+              )}
+              <div className="saas-tenant-profile-meta">
+                <h3>{tenantProfile.display_name || tenantProfile.nombre}</h3>
+                <p>Codigo: <strong>{tenantProfile.slug}</strong></p>
+                <p>Persona de contacto: <strong>{tenantProfile.contacto_nombre || '-'}</strong></p>
+                <p>Email contacto: {tenantProfile.contacto_email || '-'}</p>
+                <p>Teléfono contacto: {tenantProfile.contacto_telefono || '-'}</p>
+              </div>
+            </div>
+
+            <div className="saas-modal-grid">
+              <label>
+                Persona de contacto
+                <input
+                  type="text"
+                  value={tenantProfile.contacto_nombre || ''}
+                  onChange={(e) =>
+                    updateTenantDraft(tenantProfile.id, (current) => ({ ...current, contacto_nombre: e.target.value }))
+                  }
+                />
+              </label>
+              <label>
+                Correo contacto
+                <input
+                  type="email"
+                  value={tenantProfile.contacto_email || ''}
+                  onChange={(e) =>
+                    updateTenantDraft(tenantProfile.id, (current) => ({ ...current, contacto_email: e.target.value }))
+                  }
+                />
+              </label>
+              <label>
+                Teléfono contacto
+                <input
+                  type="text"
+                  value={tenantProfile.contacto_telefono || ''}
+                  onChange={(e) =>
+                    updateTenantDraft(tenantProfile.id, (current) => ({ ...current, contacto_telefono: e.target.value }))
+                  }
+                />
+              </label>
+              <label>
+                Plan
+                <select
+                  value={tenantProfile.plan}
+                  onChange={(e) => updateTenantDraft(tenantProfile.id, (current) => ({ ...current, plan: e.target.value }))}
+                >
+                  {PLANS.map((plan) => (
+                    <option key={plan} value={plan}>
+                      {plan}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Estado suscripción
+                <select
+                  value={tenantProfile.subscription_status || 'TRIAL'}
+                  onChange={(e) =>
+                    updateTenantDraft(tenantProfile.id, (current) => ({
+                      ...current,
+                      subscription_status: e.target.value as any,
+                      is_demo: e.target.value === 'TRIAL',
+                    }))
+                  }
+                >
+                  {SUBSCRIPTION_STATUSES.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Ciclo de facturación
+                <select
+                  value={tenantProfile.billing_cycle || 'MONTHLY'}
+                  onChange={(e) => updateTenantDraft(tenantProfile.id, (current) => ({ ...current, billing_cycle: e.target.value as any }))}
+                >
+                  {BILLING_CYCLES.map((item) => (
+                    <option key={item} value={item}>
+                      {item}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Tarifa mensual (COP)
+                <input
+                  type="number"
+                  value={
+                    tenantMonthlyFeeDrafts[tenantProfile.id] !== undefined
+                      ? tenantMonthlyFeeDrafts[tenantProfile.id]
+                      : tenantProfile.monthly_fee !== undefined && tenantProfile.monthly_fee !== null
+                        ? String(tenantProfile.monthly_fee)
+                        : ''
+                  }
+                  onFocus={() => {
+                    const currentDraft = tenantMonthlyFeeDrafts[tenantProfile.id];
+                    if (currentDraft !== undefined) return;
+                    if (Number(tenantProfile.monthly_fee || 0) === 0) {
+                      setTenantMonthlyFeeDrafts((prev) => ({ ...prev, [tenantProfile.id]: '' }));
+                    }
+                  }}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    setTenantMonthlyFeeDrafts((prev) => ({ ...prev, [tenantProfile.id]: raw }));
+                    updateTenantDraft(tenantProfile.id, (current) => ({
+                      ...current,
+                      monthly_fee: raw === '' ? undefined : Number(raw),
+                    }));
+                  }}
+                />
+              </label>
+              <label>
+                Próximo cobro
+                <input
+                  type="date"
+                  value={tenantProfile.next_billing_at ? String(tenantProfile.next_billing_at).slice(0, 10) : ''}
+                  onChange={(e) =>
+                    updateTenantDraft(tenantProfile.id, (current) => ({
+                      ...current,
+                      next_billing_at: e.target.value ? `${e.target.value}T23:59:59` : null,
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Vence demo
+                <input
+                  type="date"
+                  value={tenantProfile.demo_ends_at ? String(tenantProfile.demo_ends_at).slice(0, 10) : ''}
+                  onChange={(e) =>
+                    updateTenantDraft(tenantProfile.id, (current) => ({
+                      ...current,
+                      demo_ends_at: e.target.value ? `${e.target.value}T23:59:59` : null,
+                    }))
+                  }
+                />
+              </label>
+            </div>
+
+            <div className="saas-user-actions">
+              <label className="saas-mfa-ack">
+                <input
+                  type="checkbox"
+                  checked={!!tenantProfile.is_demo}
+                  onChange={(e) =>
+                    updateTenantDraft(tenantProfile.id, (current) => ({
+                      ...current,
+                      is_demo: e.target.checked,
+                      subscription_status: e.target.checked
+                        ? 'TRIAL'
+                        : (current.subscription_status === 'TRIAL' ? 'ACTIVE' : current.subscription_status),
+                    }))
+                  }
+                />
+                Tenant en modo demo
+              </label>
+              <label className="saas-mfa-ack">
+                <input
+                  type="checkbox"
+                  checked={!!tenantProfile.is_active}
+                  onChange={(e) => updateTenantDraft(tenantProfile.id, (current) => ({ ...current, is_active: e.target.checked }))}
+                />
+                Tenant activo
+              </label>
+            </div>
+
+            <div className="saas-tenant-profile-kpis">
+              <span>Último pago: <strong>{dateCell(tenantProfile.last_payment_at)}</strong></span>
+              <span>Tarifa: <strong>{money(Number(tenantProfile.monthly_fee || 0))}</strong></span>
+              <span>Estado: <strong>{tenantProfile.subscription_status || 'TRIAL'}</strong></span>
+            </div>
+
+            <div className="saas-user-actions">
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => void onSaveTenant(tenantProfile)}
+                disabled={savingTenantId === tenantProfile.id || !tenantProfileDirty}
+              >
+                {savingTenantId === tenantProfile.id ? 'Guardando...' : 'Guardar cambios'}
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={restoreTenantProfileDraft}
+                disabled={savingTenantId === tenantProfile.id || !tenantProfileDirty}
+              >
+                Cancelar cambios
+              </button>
+              {canBilling && (
+                <button type="button" className="btn-secondary" onClick={() => openPaymentModal(tenantProfile)}>
+                  Registrar pago
+                </button>
+              )}
+              {canTenants && (
+                <button type="button" className="btn-secondary" onClick={() => void openBranchModal(tenantProfile)}>
+                  Sucursales y accesos
+                </button>
+              )}
+              <button type="button" className="btn-secondary" onClick={() => void copySchoolAccessLink(tenantProfile)}>
+                Copiar enlace acceso
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => void resendSchoolAccessLink(tenantProfile)}
+                disabled={resendingAccessLinkTenantId === tenantProfile.id}
+              >
+                {resendingAccessLinkTenantId === tenantProfile.id ? 'Enviando...' : 'Reenviar enlace'}
+              </button>
+            </div>
+
+            <div className="saas-user-actions">
+              <button type="button" className="btn-secondary" onClick={closeTenantProfile}>
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {branchModalTenant && (
+        <div className="saas-modal-backdrop" onClick={closeBranchModal}>
+          <div className="saas-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Sucursales - {branchModalTenant.display_name || branchModalTenant.nombre}</h3>
+            {branchModalLoading ? (
+              <p>Cargando configuración de sucursales...</p>
+            ) : (
+              <>
+                <div className="saas-modal-grid">
+                  <label>
+                    Nombre sucursal
+                    <input
+                      type="text"
+                      value={newBranchForm.nombre}
+                      onChange={(e) => setNewBranchForm((prev) => ({ ...prev, nombre: e.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Código (opcional)
+                    <input
+                      type="text"
+                      value={newBranchForm.codigo}
+                      onChange={(e) => setNewBranchForm((prev) => ({ ...prev, codigo: e.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Ciudad (opcional)
+                    <input
+                      type="text"
+                      value={newBranchForm.ciudad}
+                      onChange={(e) => setNewBranchForm((prev) => ({ ...prev, ciudad: e.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Dirección (opcional)
+                    <input
+                      type="text"
+                      value={newBranchForm.direccion}
+                      onChange={(e) => setNewBranchForm((prev) => ({ ...prev, direccion: e.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Email contacto (opcional)
+                    <input
+                      type="email"
+                      value={newBranchForm.contacto_email}
+                      onChange={(e) => setNewBranchForm((prev) => ({ ...prev, contacto_email: e.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    Teléfono contacto (opcional)
+                    <input
+                      type="text"
+                      value={newBranchForm.contacto_telefono}
+                      onChange={(e) => setNewBranchForm((prev) => ({ ...prev, contacto_telefono: e.target.value }))}
+                    />
+                  </label>
+                </div>
+                <div className="saas-user-actions">
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => void createBranchFromModal()}
+                    disabled={branchModalSaving}
+                  >
+                    {branchModalSaving ? 'Guardando...' : 'Crear sucursal'}
+                  </button>
+                </div>
+                <div className="saas-table-wrap bo-table-wrap">
+                  <table className="saas-table bo-table">
+                    <thead>
+                      <tr>
+                        <th>Sucursal</th>
+                        <th>Código</th>
+                        <th>Principal</th>
+                        <th>Activa</th>
+                        <th>Acción</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tenantBranches.map((branch) => (
+                        <tr key={branch.id}>
+                          <td>{branch.nombre}</td>
+                          <td>{branch.codigo}</td>
+                          <td>{branch.is_primary ? 'Sí' : 'No'}</td>
+                          <td>{branch.is_active ? 'Sí' : 'No'}</td>
+                          <td>
+                            <div className="saas-user-actions">
+                              {!branch.is_primary && (
+                                <button
+                                  type="button"
+                                  className="btn-secondary"
+                                  onClick={() => void setPrimaryBranchFromModal(branch.id)}
+                                  disabled={branchModalSaving}
+                                >
+                                  Hacer principal
+                                </button>
+                              )}
+                              {!branch.is_primary && (
+                                <button
+                                  type="button"
+                                  className="btn-secondary"
+                                  onClick={() => void toggleBranchActiveFromModal(branch)}
+                                  disabled={branchModalSaving}
+                                >
+                                  {branch.is_active ? 'Inactivar' : 'Activar'}
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <h4>Acceso de usuarios por sucursal</h4>
+                <div className="saas-table-wrap bo-table-wrap">
+                  <table className="saas-table bo-table">
+                    <thead>
+                      <tr>
+                        <th>Usuario</th>
+                        <th>Rol</th>
+                        {tenantBranches.map((branch) => (
+                          <th key={`h-${branch.id}`}>{branch.codigo}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tenantBranchUsers.map((user) => (
+                        <tr key={user.user_id}>
+                          <td>{user.nombre_completo}</td>
+                          <td>{user.rol}</td>
+                          {tenantBranches.map((branch) => (
+                            <td key={`${user.user_id}-${branch.id}`}>
+                              <input
+                                type="checkbox"
+                                checked={(user.branch_ids || []).includes(branch.id)}
+                                disabled={!user.is_active || savingBranchUserId === user.user_id}
+                                onChange={() => void toggleUserBranchAccessFromModal(user, branch.id)}
+                              />
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+            <div className="saas-user-actions">
+              <button type="button" className="btn-secondary" onClick={closeBranchModal}>
                 Cerrar
               </button>
             </div>

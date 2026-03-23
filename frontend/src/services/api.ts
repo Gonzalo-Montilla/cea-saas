@@ -276,6 +276,14 @@ export interface TenantContextResponse {
   plan: string;
   is_active: boolean;
   logo_url?: string | null;
+  branch_primary_id?: number;
+  branches?: Array<{
+    id: number;
+    nombre: string;
+    codigo: string;
+    is_active: boolean;
+    is_primary: boolean;
+  }>;
 }
 
 export const onboardingAPI = {
@@ -717,17 +725,49 @@ export interface SaasTenantItem {
   slug: string;
   nombre: string;
   display_name?: string | null;
+  logo_url?: string | null;
+  contacto_nombre?: string | null;
   plan: string;
   is_active: boolean;
   is_demo: boolean;
   demo_ends_at?: string | null;
   contacto_email?: string | null;
+  contacto_telefono?: string | null;
+  admin_nombre_contacto?: string | null;
+  admin_email_contacto?: string | null;
+  admin_telefono_contacto?: string | null;
   subscription_status?: 'TRIAL' | 'ACTIVE' | 'PAST_DUE' | 'CANCELED';
   billing_cycle?: 'MONTHLY' | 'QUARTERLY' | 'YEARLY';
   monthly_fee?: number;
   next_billing_at?: string | null;
   last_payment_at?: string | null;
   created_at: string;
+}
+
+export interface SaasBranchItem {
+  id: number;
+  tenant_id: number;
+  nombre: string;
+  codigo: string;
+  is_active: boolean;
+  is_primary: boolean;
+  direccion?: string | null;
+  ciudad?: string | null;
+  contacto_telefono?: string | null;
+  contacto_email?: string | null;
+  observaciones?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface SaasTenantBranchUserItem {
+  user_id: number;
+  email: string;
+  nombre_completo: string;
+  rol: string;
+  is_active: boolean;
+  branch_ids: number[];
+  branch_access: Array<{ branch_id: number; is_active: boolean }>;
 }
 
 export interface SaasUserItem {
@@ -860,6 +900,7 @@ export const saasAdminAPI = {
     slug?: string | null;
     display_name?: string | null;
     plan?: 'FREE' | 'BASIC' | 'PRO' | 'ENTERPRISE';
+    contacto_nombre?: string | null;
     contacto_email: string;
     contacto_telefono?: string | null;
     nit?: string | null;
@@ -893,6 +934,9 @@ export const saasAdminAPI = {
       is_active?: boolean;
       is_demo?: boolean;
       demo_ends_at?: string | null;
+      contacto_nombre?: string | null;
+      contacto_email?: string | null;
+      contacto_telefono?: string | null;
       subscription_status?: string;
       billing_cycle?: string;
       monthly_fee?: number;
@@ -901,6 +945,69 @@ export const saasAdminAPI = {
     }
   ): Promise<SaasTenantItem> => {
     const response = await api.put(`/saas-admin/tenants/${tenantId}`, data);
+    return response.data;
+  },
+  getTenantBranches: async (tenantId: number): Promise<{ items: SaasBranchItem[]; total: number }> => {
+    const response = await api.get(`/saas-admin/tenants/${tenantId}/branches`);
+    return response.data;
+  },
+  createTenantBranch: async (
+    tenantId: number,
+    data: {
+      nombre: string;
+      codigo?: string | null;
+      direccion?: string | null;
+      ciudad?: string | null;
+      contacto_telefono?: string | null;
+      contacto_email?: string | null;
+      observaciones?: string | null;
+      is_active?: boolean;
+      is_primary?: boolean;
+    }
+  ): Promise<SaasBranchItem> => {
+    const response = await api.post(`/saas-admin/tenants/${tenantId}/branches`, data);
+    return response.data;
+  },
+  updateTenantBranch: async (
+    tenantId: number,
+    branchId: number,
+    data: {
+      nombre?: string;
+      codigo?: string;
+      direccion?: string | null;
+      ciudad?: string | null;
+      contacto_telefono?: string | null;
+      contacto_email?: string | null;
+      observaciones?: string | null;
+      is_active?: boolean;
+    }
+  ): Promise<SaasBranchItem> => {
+    const response = await api.put(`/saas-admin/tenants/${tenantId}/branches/${branchId}`, data);
+    return response.data;
+  },
+  setPrimaryTenantBranch: async (
+    tenantId: number,
+    branchId: number
+  ): Promise<SaasBranchItem> => {
+    const response = await api.put(`/saas-admin/tenants/${tenantId}/branches/${branchId}/set-primary`);
+    return response.data;
+  },
+  getTenantBranchUsers: async (
+    tenantId: number,
+    params?: { search?: string }
+  ): Promise<{ items: SaasTenantBranchUserItem[]; total: number }> => {
+    const queryParams = new URLSearchParams();
+    if (params?.search) queryParams.append('search', params.search);
+    const query = queryParams.toString();
+    const response = await api.get(`/saas-admin/tenants/${tenantId}/branch-users${query ? `?${query}` : ''}`);
+    return response.data;
+  },
+  updateTenantUserBranchAccess: async (
+    tenantId: number,
+    userId: number,
+    data: { branch_ids: number[]; is_active?: boolean; mode?: 'replace' | 'merge' }
+  ): Promise<{ user_id: number; tenant_id: number; branch_ids: number[]; total_active: number }> => {
+    const response = await api.put(`/saas-admin/tenants/${tenantId}/branch-users/${userId}`, data);
     return response.data;
   },
   resendTenantAccessLink: async (

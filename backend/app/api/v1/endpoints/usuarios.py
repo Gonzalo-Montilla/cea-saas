@@ -6,6 +6,7 @@ from typing import List, Optional
 from app.core.database import get_db
 from app.core.security import get_password_hash
 from app.api.deps import get_admin_or_gerente, get_required_tenant
+from app.models.tenant_branch import TenantBranch, TenantUserBranch
 from app.models.usuario import Usuario, RolUsuario
 from app.models.tenant import Tenant, TenantUser
 from app.schemas.usuario import UsuarioCreate, UsuarioUpdate, UsuarioPasswordUpdate, UsuarioResponse
@@ -17,6 +18,27 @@ router = APIRouter()
 def _bump_session_version(user: Usuario) -> None:
     current = int(getattr(user, "session_version", 1) or 1)
     user.session_version = current + 1
+
+
+def _ensure_primary_branch_for_tenant(db: Session, tenant: Tenant) -> TenantBranch:
+    branch = db.query(TenantBranch).filter(
+        TenantBranch.tenant_id == tenant.id,
+        TenantBranch.is_primary.is_(True),
+    ).first()
+    if branch:
+        return branch
+    branch = TenantBranch(
+        tenant_id=tenant.id,
+        nombre=(tenant.display_name or tenant.nombre or "Sede Principal").strip(),
+        codigo="PRINCIPAL",
+        is_active=True,
+        is_primary=True,
+        contacto_email=tenant.contacto_email,
+        contacto_telefono=tenant.contacto_telefono,
+    )
+    db.add(branch)
+    db.flush()
+    return branch
 
 
 @router.get("/", response_model=List[UsuarioResponse])
@@ -95,6 +117,13 @@ def crear_usuario(
             is_active=bool(nuevo.is_active),
         )
     )
+    primary_branch = _ensure_primary_branch_for_tenant(db, current_tenant)
+    db.add(TenantUserBranch(
+        tenant_id=current_tenant.id,
+        user_id=nuevo.id,
+        branch_id=primary_branch.id,
+        is_active=bool(nuevo.is_active),
+    ))
     db.commit()
     db.refresh(nuevo)
     return nuevo
@@ -142,6 +171,28 @@ def actualizar_usuario(
     if membership:
         membership.rol = usuario.rol.value
         membership.is_active = bool(usuario.is_active)
+    if "is_active" in update_data:
+        if not bool(usuario.is_active):
+            db.query(TenantUserBranch).filter(
+                TenantUserBranch.tenant_id == current_tenant.id,
+                TenantUserBranch.user_id == usuario.id,
+            ).update({"is_active": False}, synchronize_session=False)
+        else:
+            primary_branch = _ensure_primary_branch_for_tenant(db, current_tenant)
+            existing_branch = db.query(TenantUserBranch).filter(
+                TenantUserBranch.tenant_id == current_tenant.id,
+                TenantUserBranch.user_id == usuario.id,
+                TenantUserBranch.branch_id == primary_branch.id,
+            ).first()
+            if existing_branch:
+                existing_branch.is_active = True
+            else:
+                db.add(TenantUserBranch(
+                    tenant_id=current_tenant.id,
+                    user_id=usuario.id,
+                    branch_id=primary_branch.id,
+                    is_active=True,
+                ))
 
     db.commit()
     db.refresh(usuario)

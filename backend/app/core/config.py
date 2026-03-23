@@ -36,6 +36,7 @@ class Settings(BaseSettings):
 
     # Tenancy
     TENANT_HEADER_NAME: str = "X-Tenant-Slug"
+    BRANCH_HEADER_NAME: str = "X-Branch-Id"
     DEFAULT_TENANT_SLUG: Optional[str] = None
     DEFAULT_TENANT_NAME: Optional[str] = None
     TENANT_STRICT_MODE: bool = False

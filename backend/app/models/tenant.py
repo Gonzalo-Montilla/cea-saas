@@ -33,6 +33,7 @@ class Tenant(Base):
     # Branding y contacto (base para white-label)
     display_name = Column(String(255))
     logo_url = Column(Text)
+    contacto_nombre = Column(String(255))
     contacto_email = Column(String(255))
     contacto_telefono = Column(String(50))
     nit = Column(String(50))

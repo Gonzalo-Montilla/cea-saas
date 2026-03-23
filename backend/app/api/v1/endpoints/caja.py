@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func
+from sqlalchemy.exc import SQLAlchemyError
 from typing import List, Optional
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -177,27 +178,37 @@ def _registrar_ingresos_caja_fuerte_por_cierre(
     db: Session,
     current_user: Usuario
 ):
-    caja_fuerte = _get_or_create_caja_fuerte(db, caja.tenant_id)
+    try:
+        # Aisla caja_fuerte en SAVEPOINT para no romper el cierre
+        # si falta tabla/índice por desalineación de esquema.
+        with db.begin_nested():
+            caja_fuerte = _get_or_create_caja_fuerte(db, caja.tenant_id)
 
-    def registrar(metodo: MetodoPago, monto: Decimal, concepto: str):
-        if monto is None or Decimal(str(monto)) <= 0:
-            return
-        mov = MovimientoCajaFuerte(
-            caja_fuerte_id=caja_fuerte.id,
-            caja_id=caja.id,
-            tipo=TipoMovimiento.INGRESO,
-            metodo_pago=metodo,
-            concepto=concepto,
-            categoria="CIERRE_CAJA",
-            monto=Decimal(str(monto)),
-            fecha=datetime.utcnow(),
-            observaciones=f"Ingreso automático por cierre de caja #{caja.id}",
-            usuario_id=current_user.id,
+            def registrar(metodo: MetodoPago, monto: Decimal, concepto: str):
+                if monto is None or Decimal(str(monto)) <= 0:
+                    return
+                mov = MovimientoCajaFuerte(
+                    caja_fuerte_id=caja_fuerte.id,
+                    caja_id=caja.id,
+                    tipo=TipoMovimiento.INGRESO,
+                    metodo_pago=metodo,
+                    concepto=concepto,
+                    categoria="CIERRE_CAJA",
+                    monto=Decimal(str(monto)),
+                    fecha=datetime.utcnow(),
+                    observaciones=f"Ingreso automático por cierre de caja #{caja.id}",
+                    usuario_id=current_user.id,
+                )
+                _apply_caja_fuerte_delta(caja_fuerte, metodo, Decimal(str(monto)))
+                db.add(mov)
+
+            registrar(MetodoPago.EFECTIVO, efectivo_entregado, f"CIERRE CAJA #{caja.id} - EFECTIVO")
+    except SQLAlchemyError:
+        logger.exception(
+            "No se pudo registrar movimiento en caja_fuerte durante cierre de caja id=%s tenant=%s",
+            caja.id,
+            caja.tenant_id,
         )
-        _apply_caja_fuerte_delta(caja_fuerte, metodo, Decimal(str(monto)))
-        db.add(mov)
-
-    registrar(MetodoPago.EFECTIVO, efectivo_entregado, f"CIERRE CAJA #{caja.id} - EFECTIVO")
 
 
 def _registrar_ingreso_caja_fuerte_por_pago(
@@ -209,22 +220,33 @@ def _registrar_ingreso_caja_fuerte_por_pago(
 ):
     if metodo == MetodoPago.EFECTIVO:
         return
-    caja_fuerte = _get_or_create_caja_fuerte(db, pago.tenant_id)
-    concepto = f"PAGO #{pago.id} - {metodo.value}"
-    mov = MovimientoCajaFuerte(
-        caja_fuerte_id=caja_fuerte.id,
-        caja_id=pago.caja_id,
-        tipo=TipoMovimiento.INGRESO,
-        metodo_pago=metodo,
-        concepto=concepto,
-        categoria="PAGO_ESTUDIANTE",
-        monto=Decimal(str(monto)),
-        fecha=datetime.utcnow(),
-        observaciones=f"Ingreso digital por pago estudiante #{pago.estudiante_id}",
-        usuario_id=current_user.id,
-    )
-    _apply_caja_fuerte_delta(caja_fuerte, metodo, Decimal(str(monto)))
-    db.add(mov)
+    try:
+        # Aisla caja_fuerte en SAVEPOINT para no bloquear pagos (incluido mixto)
+        # por problemas puntuales de esquema en producción.
+        with db.begin_nested():
+            caja_fuerte = _get_or_create_caja_fuerte(db, pago.tenant_id)
+            concepto = f"PAGO #{pago.id} - {metodo.value}"
+            mov = MovimientoCajaFuerte(
+                caja_fuerte_id=caja_fuerte.id,
+                caja_id=pago.caja_id,
+                tipo=TipoMovimiento.INGRESO,
+                metodo_pago=metodo,
+                concepto=concepto,
+                categoria="PAGO_ESTUDIANTE",
+                monto=Decimal(str(monto)),
+                fecha=datetime.utcnow(),
+                observaciones=f"Ingreso digital por pago estudiante #{pago.estudiante_id}",
+                usuario_id=current_user.id,
+            )
+            _apply_caja_fuerte_delta(caja_fuerte, metodo, Decimal(str(monto)))
+            db.add(mov)
+    except SQLAlchemyError:
+        logger.exception(
+            "No se pudo registrar movimiento en caja_fuerte para pago id=%s tenant=%s metodo=%s",
+            pago.id,
+            pago.tenant_id,
+            metodo.value if metodo else None,
+        )
 
 
 @router.get("/dashboard", response_model=DashboardCaja)

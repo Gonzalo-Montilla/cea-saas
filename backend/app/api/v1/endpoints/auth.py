@@ -21,7 +21,7 @@ from app.schemas.auth import (
     Token,
     UserResponse,
 )
-from app.api.deps import get_current_active_user, get_current_active_user_global, get_required_tenant
+from app.api.deps import get_current_active_user, get_current_active_user_global, get_required_tenant, get_user_accessible_branch_ids
 
 router = APIRouter()
 
@@ -300,12 +300,14 @@ def login(
     db.commit()
     
     # Crear tokens (sub debe ser string)
+    branch_ids = get_user_accessible_branch_ids(db, current_tenant, user)
     token_payload = {
         "sub": str(user.id),
         "email": user.email,
         "tid": current_tenant.id,
         "tslug": current_tenant.slug,
         "sv": int(getattr(user, "session_version", 1) or 1),
+        "bids": branch_ids,
     }
     access_token = create_access_token(data=token_payload)
     refresh_token = create_refresh_token(data={
@@ -313,6 +315,7 @@ def login(
         "tid": current_tenant.id,
         "tslug": current_tenant.slug,
         "sv": int(getattr(user, "session_version", 1) or 1),
+        "bids": branch_ids,
     })
     
     return {
@@ -658,12 +661,14 @@ def refresh_token(
         )
 
     # Crear nuevos tokens
+    branch_ids = get_user_accessible_branch_ids(db, current_tenant, user)
     token_payload = {
         "sub": str(user.id),
         "email": user.email,
         "tid": current_tenant.id,
         "tslug": current_tenant.slug,
         "sv": int(getattr(user, "session_version", 1) or 1),
+        "bids": branch_ids,
     }
     access_token = create_access_token(data=token_payload)
     new_refresh_token = create_refresh_token(data={
@@ -671,6 +676,7 @@ def refresh_token(
         "tid": current_tenant.id,
         "tslug": current_tenant.slug,
         "sv": int(getattr(user, "session_version", 1) or 1),
+        "bids": branch_ids,
     })
     
     return {

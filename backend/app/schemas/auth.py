@@ -36,6 +36,7 @@ class TokenData(BaseModel):
     tenant_id: Optional[int] = None
     tenant_slug: Optional[str] = None
     session_version: Optional[int] = None
+    branch_ids: Optional[list[int]] = None
 
 
 class UserResponse(BaseModel):
