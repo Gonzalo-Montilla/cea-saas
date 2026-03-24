@@ -32,8 +32,32 @@ import {
 import '../styles/SaasAdmin.css';
 
 const PLANS = ['FREE', 'BASIC', 'PRO', 'ENTERPRISE'];
+const PLAN_LABELS: Record<string, string> = {
+  FREE: 'DEMO (15 días)',
+  BASIC: 'BASICO (3 meses)',
+  PRO: 'EMPRENDEDOR (6 meses)',
+  ENTERPRISE: 'EMPRESA (12 meses)',
+};
 const SUBSCRIPTION_STATUSES = ['TRIAL', 'ACTIVE', 'PAST_DUE', 'CANCELED'];
-const BILLING_CYCLES = ['MONTHLY', 'QUARTERLY', 'YEARLY'];
+const BILLING_CYCLES = ['QUARTERLY', 'SEMIANNUAL', 'YEARLY'];
+const BILLING_CYCLE_LABELS: Record<string, string> = {
+  QUARTERLY: 'Trimestral (3 meses)',
+  SEMIANNUAL: 'Semestral (6 meses)',
+  YEARLY: 'Anual (12 meses)',
+};
+const PLAN_BASE_FEES: Record<string, number> = {
+  FREE: 0,
+  BASIC: 450000,
+  PRO: 850000,
+  ENTERPRISE: 1500000,
+};
+const PLAN_BRANCH_FEES: Record<string, number> = {
+  FREE: 0,
+  BASIC: 250000,
+  PRO: 450000,
+  ENTERPRISE: 650000,
+};
+const VAT_RATE_DEFAULT = 0.19;
 const SAAS_ROLES = ['ADMIN', 'GERENTE'];
 const SAAS_PERMISSION_PROFILES: Record<string, { label: string; scopes: string[] }> = {
   OWNER: { label: 'Owner (acceso total)', scopes: ['saas_admin'] },
@@ -82,6 +106,42 @@ const RESUMEN_PERIODS = [
 
 const money = (value: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(value || 0);
+
+const planLabel = (plan?: string | null) => PLAN_LABELS[String(plan || '').toUpperCase()] || String(plan || '-');
+const normalizeBillingCycle = (value?: string | null) =>
+  String(value || '').toUpperCase() === 'MONTHLY' ? 'QUARTERLY' : (value || 'QUARTERLY');
+const toPlanCode = (value?: string | null) => String(value || '').trim().toUpperCase() || 'FREE';
+const FREE_INCLUDED_ADDITIONAL_BRANCHES = 1;
+const computeTenantPricingPreview = (tenant: SaasTenantItem) => {
+  const planCode = toPlanCode(tenant.plan);
+  const activeTotal = Number(tenant.active_additional_branches ?? (tenant as any).active_branches_total ?? 0);
+  const freeIncluded = Number(tenant.included_free_branches_used ?? Math.min(activeTotal, FREE_INCLUDED_ADDITIONAL_BRANCHES));
+  const billable = Math.max(0, activeTotal - freeIncluded);
+  const baseFee = Number(
+    tenant.base_fee_effective ?? tenant.monthly_fee ?? PLAN_BASE_FEES[planCode] ?? 0
+  );
+  const extraBranchFee = Number(tenant.extra_branch_fee ?? PLAN_BRANCH_FEES[planCode] ?? 0);
+  const branchAmount = Number(tenant.branch_amount ?? (billable * extraBranchFee));
+  const subtotal = Number(tenant.period_subtotal ?? (baseFee + branchAmount));
+  const ivaRate = Number(tenant.iva_rate ?? VAT_RATE_DEFAULT);
+  const ivaAmount = Number(tenant.iva_amount ?? (subtotal * ivaRate));
+  const total = Number(tenant.period_total ?? (subtotal + ivaAmount));
+  const durationDays = Number(tenant.period_duration_days ?? 30);
+  return {
+    planCode,
+    activeTotal,
+    freeIncluded,
+    billable,
+    baseFee,
+    extraBranchFee,
+    branchAmount,
+    subtotal,
+    ivaRate,
+    ivaAmount,
+    total,
+    durationDays,
+  };
+};
 
 const dateCell = (value?: string | null) => (value ? new Date(value).toLocaleDateString('es-CO') : '-');
 const statusClass = (value?: string | null) => `bo-status bo-status-${String(value || 'info').toLowerCase()}`;
@@ -360,7 +420,10 @@ export const SaasAdmin = () => {
         saasAdminAPI.getTenants({ limit: 200, search: search.trim() || undefined }),
       ]);
       setSummary(summaryData);
-      setTenants(tenantsData.items || []);
+      setTenants((tenantsData.items || []).map((tenant) => ({
+        ...tenant,
+        billing_cycle: normalizeBillingCycle(tenant.billing_cycle),
+      })));
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'No se pudo cargar el backoffice SaaS');
     } finally {
@@ -671,13 +734,13 @@ export const SaasAdmin = () => {
     () => tenants.find((tenant) => tenant.id === tenantProfileId) || null,
     [tenants, tenantProfileId]
   );
+  const tenantProfilePricing = useMemo(
+    () => (tenantProfile ? computeTenantPricingPreview(tenantProfile) : null),
+    [tenantProfile]
+  );
   const tenantProfileDirty = useMemo(() => {
     if (!tenantProfile || !tenantProfileBaseline) return false;
     if (tenantProfile.id !== tenantProfileBaseline.id) return false;
-    const feeDraft = tenantMonthlyFeeDrafts[tenantProfile.id];
-    const currentMonthlyFee =
-      feeDraft !== undefined ? Number(feeDraft || 0) : Number(tenantProfile.monthly_fee || 0);
-    const baselineMonthlyFee = Number(tenantProfileBaseline.monthly_fee || 0);
     const currentComparable = {
       plan: tenantProfile.plan || 'FREE',
       is_active: Boolean(tenantProfile.is_active),
@@ -687,8 +750,7 @@ export const SaasAdmin = () => {
       contacto_email: tenantProfile.contacto_email || null,
       contacto_telefono: tenantProfile.contacto_telefono || null,
       subscription_status: tenantProfile.subscription_status || 'TRIAL',
-      billing_cycle: tenantProfile.billing_cycle || 'MONTHLY',
-      monthly_fee: currentMonthlyFee,
+      billing_cycle: normalizeBillingCycle(tenantProfile.billing_cycle),
       next_billing_at: tenantProfile.next_billing_at || null,
     };
     const baselineComparable = {
@@ -700,12 +762,11 @@ export const SaasAdmin = () => {
       contacto_email: tenantProfileBaseline.contacto_email || null,
       contacto_telefono: tenantProfileBaseline.contacto_telefono || null,
       subscription_status: tenantProfileBaseline.subscription_status || 'TRIAL',
-      billing_cycle: tenantProfileBaseline.billing_cycle || 'MONTHLY',
-      monthly_fee: baselineMonthlyFee,
+      billing_cycle: normalizeBillingCycle(tenantProfileBaseline.billing_cycle),
       next_billing_at: tenantProfileBaseline.next_billing_at || null,
     };
     return JSON.stringify(currentComparable) !== JSON.stringify(baselineComparable);
-  }, [tenantProfile, tenantProfileBaseline, tenantMonthlyFeeDrafts]);
+  }, [tenantProfile, tenantProfileBaseline]);
 
   const updateTenantDraft = (tenantId: number, updater: (current: SaasTenantItem) => SaasTenantItem) => {
     setTenants((prev) => prev.map((row) => (row.id === tenantId ? updater(row) : row)));
@@ -746,8 +807,6 @@ export const SaasAdmin = () => {
   const onSaveTenant = async (tenant: SaasTenantItem) => {
     try {
       setSavingTenantId(tenant.id);
-      const feeDraft = tenantMonthlyFeeDrafts[tenant.id];
-      const monthlyFeeValue = feeDraft !== undefined ? Number(feeDraft || 0) : Number(tenant.monthly_fee || 0);
       await saasAdminAPI.updateTenant(tenant.id, {
         plan: tenant.plan,
         is_active: tenant.is_active,
@@ -757,20 +816,13 @@ export const SaasAdmin = () => {
         contacto_email: tenant.contacto_email || null,
         contacto_telefono: tenant.contacto_telefono || null,
         subscription_status: tenant.subscription_status,
-        billing_cycle: tenant.billing_cycle,
-        monthly_fee: monthlyFeeValue,
+        billing_cycle: normalizeBillingCycle(tenant.billing_cycle),
         next_billing_at: tenant.next_billing_at || null,
-      });
-      setTenantMonthlyFeeDrafts((prev) => {
-        const next = { ...prev };
-        delete next[tenant.id];
-        return next;
       });
       setTenantProfileBaseline((prev) => {
         if (!prev || prev.id !== tenant.id) return prev;
         return {
           ...tenant,
-          monthly_fee: monthlyFeeValue,
         };
       });
       if (canTenants || canBilling) await loadData();
@@ -789,6 +841,11 @@ export const SaasAdmin = () => {
     ]);
     setTenantBranches(branchesData.items || []);
     setTenantBranchUsers(usersData.items || []);
+  };
+
+  const refreshTenantAggregates = async () => {
+    if (!(canTenants || canBilling)) return;
+    await loadData();
   };
 
   const openBranchModal = async (tenant: SaasTenantItem) => {
@@ -813,8 +870,9 @@ export const SaasAdmin = () => {
     }
   };
 
-  const closeBranchModal = () => {
+  const closeBranchModal = async () => {
     if (branchModalSaving || savingBranchUserId !== null) return;
+    await refreshTenantAggregates();
     setBranchModalTenant(null);
     setTenantBranches([]);
     setTenantBranchUsers([]);
@@ -838,6 +896,7 @@ export const SaasAdmin = () => {
         contacto_telefono: newBranchForm.contacto_telefono.trim() || null,
       });
       await loadTenantBranchData(branchModalTenant.id);
+      await refreshTenantAggregates();
       setNewBranchForm({
         nombre: '',
         codigo: '',
@@ -862,6 +921,7 @@ export const SaasAdmin = () => {
       setError('');
       await saasAdminAPI.setPrimaryTenantBranch(branchModalTenant.id, branchId);
       await loadTenantBranchData(branchModalTenant.id);
+      await refreshTenantAggregates();
       if (canAudit) await loadAuditLogs();
       setInfoMessage('Sucursal principal actualizada.');
     } catch (err: any) {
@@ -880,6 +940,7 @@ export const SaasAdmin = () => {
         is_active: !branch.is_active,
       });
       await loadTenantBranchData(branchModalTenant.id);
+      await refreshTenantAggregates();
       if (canAudit) await loadAuditLogs();
       setInfoMessage('Estado de sucursal actualizado.');
     } catch (err: any) {
@@ -995,7 +1056,8 @@ export const SaasAdmin = () => {
   };
 
   const openPaymentModal = (tenant: SaasTenantItem) => {
-    const suggestedAmount = Number(tenant.monthly_fee || 0);
+    const pricing = computeTenantPricingPreview(tenant);
+    const suggestedAmount = Number(pricing.total || 0);
     setPaymentModalTenant(tenant);
     setPaymentForm({
       amount: suggestedAmount > 0 ? String(suggestedAmount) : '',
@@ -1065,6 +1127,7 @@ export const SaasAdmin = () => {
       setInfoMessage('');
       const result = await saasAdminAPI.runBillingCycleCharges();
       if (canBilling) await loadBillingEvents();
+      if (canTenants || canBilling) await loadData();
       if (canAudit) await loadAuditLogs();
       setInfoMessage(`Cargos por ciclo generados: ${Number(result.created_events || 0)}.`);
     } catch (err: any) {
@@ -2150,7 +2213,7 @@ export const SaasAdmin = () => {
           >
             {PLANS.map((plan) => (
               <option key={plan} value={plan}>
-                {plan}
+                {planLabel(plan)}
               </option>
             ))}
           </select>
@@ -2203,7 +2266,7 @@ export const SaasAdmin = () => {
                     >
                       {PLANS.map((plan) => (
                         <option key={plan} value={plan}>
-                          {plan}
+                          {planLabel(plan)}
                         </option>
                       ))}
                     </select>
@@ -2816,7 +2879,7 @@ export const SaasAdmin = () => {
                 >
                   {PLANS.map((plan) => (
                     <option key={plan} value={plan}>
-                      {plan}
+                      {planLabel(plan)}
                     </option>
                   ))}
                 </select>
@@ -2966,7 +3029,7 @@ export const SaasAdmin = () => {
 
       {tenantProfile && (
         <div className="saas-modal-backdrop" onClick={closeTenantProfile}>
-          <div className="saas-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="saas-modal saas-modal-profile" onClick={(e) => e.stopPropagation()}>
             <div className="saas-tenant-profile-head">
               {tenantProfile.logo_url ? (
                 <img
@@ -2982,9 +3045,26 @@ export const SaasAdmin = () => {
               <div className="saas-tenant-profile-meta">
                 <h3>{tenantProfile.display_name || tenantProfile.nombre}</h3>
                 <p>Codigo: <strong>{tenantProfile.slug}</strong></p>
+                <p>Plan comercial: <strong>{planLabel(tenantProfile.plan || tenantProfile.plan_label)}</strong></p>
                 <p>Persona de contacto: <strong>{tenantProfile.contacto_nombre || '-'}</strong></p>
                 <p>Email contacto: {tenantProfile.contacto_email || '-'}</p>
                 <p>Teléfono contacto: {tenantProfile.contacto_telefono || '-'}</p>
+                <p>
+                  Cobro estimado periodo: <strong>{money(Number(tenantProfilePricing?.total || 0))}</strong>
+                  {' '}({Number(tenantProfilePricing?.durationDays || 30)} días)
+                </p>
+                <p>
+                  Subtotal: <strong>{money(Number(tenantProfilePricing?.subtotal || 0))}</strong>
+                  {' '}| IVA ({Math.round(Number(tenantProfilePricing?.ivaRate || 0) * 100)}%): <strong>{money(Number(tenantProfilePricing?.ivaAmount || 0))}</strong>
+                </p>
+                <p>
+                  Sucursales activas (total): <strong>{Number((tenantProfilePricing?.activeTotal || 0) + 1)}</strong>
+                  {' '}| adicionales activas: <strong>{Number(tenantProfilePricing?.activeTotal || 0)}</strong>
+                </p>
+                <p>
+                  Incluidas sin costo: <strong>{Number(tenantProfilePricing?.freeIncluded || 0)}</strong>
+                  {' '}| cobrables: <strong>{Number(tenantProfilePricing?.billable || 0)}</strong>
+                </p>
               </div>
             </div>
 
@@ -3023,11 +3103,25 @@ export const SaasAdmin = () => {
                 Plan
                 <select
                   value={tenantProfile.plan}
-                  onChange={(e) => updateTenantDraft(tenantProfile.id, (current) => ({ ...current, plan: e.target.value }))}
+                  onChange={(e) =>
+                    updateTenantDraft(tenantProfile.id, (current) => {
+                      const nextPlan = toPlanCode(e.target.value);
+                      const nextCycle =
+                        nextPlan === 'PRO' ? 'SEMIANNUAL' : nextPlan === 'ENTERPRISE' ? 'YEARLY' : 'QUARTERLY';
+                      return {
+                        ...current,
+                        plan: nextPlan,
+                        billing_cycle: nextCycle,
+                        base_fee_effective: PLAN_BASE_FEES[nextPlan] ?? 0,
+                        extra_branch_fee: PLAN_BRANCH_FEES[nextPlan] ?? 0,
+                        monthly_fee: PLAN_BASE_FEES[nextPlan] ?? 0,
+                      };
+                    })
+                  }
                 >
                   {PLANS.map((plan) => (
                     <option key={plan} value={plan}>
-                      {plan}
+                      {planLabel(plan)}
                     </option>
                   ))}
                 </select>
@@ -3040,7 +3134,6 @@ export const SaasAdmin = () => {
                     updateTenantDraft(tenantProfile.id, (current) => ({
                       ...current,
                       subscription_status: e.target.value as any,
-                      is_demo: e.target.value === 'TRIAL',
                     }))
                   }
                 >
@@ -3054,43 +3147,39 @@ export const SaasAdmin = () => {
               <label>
                 Ciclo de facturación
                 <select
-                  value={tenantProfile.billing_cycle || 'MONTHLY'}
+                  value={normalizeBillingCycle(tenantProfile.billing_cycle)}
                   onChange={(e) => updateTenantDraft(tenantProfile.id, (current) => ({ ...current, billing_cycle: e.target.value as any }))}
                 >
                   {BILLING_CYCLES.map((item) => (
                     <option key={item} value={item}>
-                      {item}
+                      {BILLING_CYCLE_LABELS[item] || item}
                     </option>
                   ))}
                 </select>
               </label>
               <label>
-                Tarifa mensual (COP)
+                Tarifa base del plan (COP por período)
                 <input
                   type="number"
                   value={
-                    tenantMonthlyFeeDrafts[tenantProfile.id] !== undefined
-                      ? tenantMonthlyFeeDrafts[tenantProfile.id]
-                      : tenantProfile.monthly_fee !== undefined && tenantProfile.monthly_fee !== null
-                        ? String(tenantProfile.monthly_fee)
-                        : ''
+                    tenantProfilePricing ? String(Number(tenantProfilePricing.baseFee || 0)) : ''
                   }
-                  onFocus={() => {
-                    const currentDraft = tenantMonthlyFeeDrafts[tenantProfile.id];
-                    if (currentDraft !== undefined) return;
-                    if (Number(tenantProfile.monthly_fee || 0) === 0) {
-                      setTenantMonthlyFeeDrafts((prev) => ({ ...prev, [tenantProfile.id]: '' }));
-                    }
-                  }}
-                  onChange={(e) => {
-                    const raw = e.target.value;
-                    setTenantMonthlyFeeDrafts((prev) => ({ ...prev, [tenantProfile.id]: raw }));
-                    updateTenantDraft(tenantProfile.id, (current) => ({
-                      ...current,
-                      monthly_fee: raw === '' ? undefined : Number(raw),
-                    }));
-                  }}
+                  disabled
+                  readOnly
                 />
+                <small>Valor fijo segun plan comercial. Se actualiza automaticamente al cambiar de plan.</small>
+              </label>
+              <label>
+                Cobro por sucursales (COP por período)
+                <input
+                  type="number"
+                  value={String(Number(tenantProfilePricing?.branchAmount || 0))}
+                  disabled
+                  readOnly
+                />
+                <small>
+                  {money(Number(tenantProfilePricing?.extraBranchFee || 0))} por sucursal cobrable x {Number(tenantProfilePricing?.billable || 0)}
+                </small>
               </label>
               <label>
                 Próximo cobro
@@ -3104,6 +3193,7 @@ export const SaasAdmin = () => {
                     }))
                   }
                 />
+                <small>Se calcula automáticamente al registrar pago (según ciclo); puedes ajustarlo manualmente si aplica.</small>
               </label>
               <label>
                 Vence demo
@@ -3204,7 +3294,7 @@ export const SaasAdmin = () => {
 
       {branchModalTenant && (
         <div className="saas-modal-backdrop" onClick={closeBranchModal}>
-          <div className="saas-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="saas-modal saas-modal-branches" onClick={(e) => e.stopPropagation()}>
             <h3>Sucursales - {branchModalTenant.display_name || branchModalTenant.nombre}</h3>
             {branchModalLoading ? (
               <p>Cargando configuración de sucursales...</p>
@@ -3363,6 +3453,10 @@ export const SaasAdmin = () => {
       {paymentModalTenant && (
         <div className="saas-modal-backdrop" onClick={closePaymentModal}>
           <div className="saas-modal" onClick={(e) => e.stopPropagation()}>
+            {(() => {
+              const paymentPricing = computeTenantPricingPreview(paymentModalTenant);
+              return (
+                <>
             <h3>Registrar pago SaaS</h3>
             <p>
               Tenant: <strong>{paymentModalTenant.display_name || paymentModalTenant.nombre}</strong> ({paymentModalTenant.slug})
@@ -3381,6 +3475,21 @@ export const SaasAdmin = () => {
                   }}
                   onChange={(e) => setPaymentForm((prev) => ({ ...prev, amount: e.target.value }))}
                 />
+                <small>
+                  Sugerido: {money(Number(paymentPricing.total || 0))} (total del período actual)
+                </small>
+              </label>
+              <label>
+                Desglose del período
+                <input
+                  type="text"
+                  value={`Subtotal ${money(Number(paymentPricing.subtotal || 0))} + IVA ${money(Number(paymentPricing.ivaAmount || 0))}`}
+                  disabled
+                  readOnly
+                />
+                <small>
+                  Total sugerido: {money(Number(paymentPricing.total || 0))}
+                </small>
               </label>
               <label>
                 Fecha/hora pago (opcional)
@@ -3423,6 +3532,9 @@ export const SaasAdmin = () => {
                 {recordingPayment ? 'Registrando...' : 'Confirmar pago'}
               </button>
             </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}

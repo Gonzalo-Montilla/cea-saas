@@ -28,11 +28,53 @@ from app.models.usuario import RolUsuario, Usuario
 router = APIRouter()
 
 
+PLAN_ALIASES = {
+    "DEMO": PlanTenant.FREE.value,
+    "FREE": PlanTenant.FREE.value,
+    "BASIC": PlanTenant.BASIC.value,
+    "BASICO": PlanTenant.BASIC.value,
+    "PRO": PlanTenant.PRO.value,
+    "EMPRENDEDOR": PlanTenant.PRO.value,
+    "ENTERPRISE": PlanTenant.ENTERPRISE.value,
+    "EMPRESA": PlanTenant.ENTERPRISE.value,
+}
+PLAN_PUBLIC_LABELS = {
+    PlanTenant.FREE.value: "DEMO",
+    PlanTenant.BASIC.value: "BASICO",
+    PlanTenant.PRO.value: "EMPRENDEDOR",
+    PlanTenant.ENTERPRISE.value: "EMPRESA",
+}
+PLAN_BILLING_POLICY = {
+    PlanTenant.FREE.value: {
+        "duration_days": 15,
+        "billing_cycle": "QUARTERLY",
+        "base_fee": 0.0,
+        "extra_branch_fee": 0.0,
+    },
+    PlanTenant.BASIC.value: {
+        "duration_days": 90,
+        "billing_cycle": "QUARTERLY",
+        "base_fee": 450000.0,
+        "extra_branch_fee": 250000.0,
+    },
+    PlanTenant.PRO.value: {
+        "duration_days": 180,
+        "billing_cycle": "SEMIANNUAL",
+        "base_fee": 850000.0,
+        "extra_branch_fee": 450000.0,
+    },
+    PlanTenant.ENTERPRISE.value: {
+        "duration_days": 365,
+        "billing_cycle": "YEARLY",
+        "base_fee": 1500000.0,
+        "extra_branch_fee": 650000.0,
+    },
+}
+FREE_BRANCHES_PER_TENANT = 1
+VAT_RATE = 0.19
 PLAN_MRR_ESTIMATE = {
-    PlanTenant.FREE.value: 0,
-    PlanTenant.BASIC.value: 199000,
-    PlanTenant.PRO.value: 399000,
-    PlanTenant.ENTERPRISE.value: 799000,
+    code: int((float(meta.get("base_fee", 0.0)) / max(1, float(meta.get("duration_days", 30))) * 30.0))
+    for code, meta in PLAN_BILLING_POLICY.items()
 }
 
 LEAD_STAGES = {
@@ -45,7 +87,7 @@ LEAD_STAGES = {
 }
 
 SUBSCRIPTION_STATUSES = {"TRIAL", "ACTIVE", "PAST_DUE", "CANCELED"}
-BILLING_CYCLES = {"MONTHLY", "QUARTERLY", "YEARLY"}
+BILLING_CYCLES = {"QUARTERLY", "SEMIANNUAL", "YEARLY"}
 MODULE_TENANTS = "saas_tenants_manage"
 MODULE_BILLING = "saas_billing_manage"
 MODULE_USERS = "saas_users_manage"
@@ -352,6 +394,63 @@ def _normalize_text(value: Optional[str]) -> Optional[str]:
     return cleaned or None
 
 
+def _resolve_plan_code(plan_value: Optional[str]) -> str:
+    raw = str(plan_value or PlanTenant.FREE.value).strip().upper()
+    resolved = PLAN_ALIASES.get(raw)
+    if not resolved:
+        raise HTTPException(status_code=400, detail="Plan inválido")
+    return resolved
+
+
+def _plan_policy_for(plan_code: str) -> dict:
+    return PLAN_BILLING_POLICY.get(plan_code, PLAN_BILLING_POLICY[PlanTenant.FREE.value])
+
+
+def _plan_public_label(plan_code: str) -> str:
+    return PLAN_PUBLIC_LABELS.get(plan_code, plan_code)
+
+
+def _get_active_branches_count(db: Session, tenant_id: int) -> int:
+    active_count = db.query(func.count(TenantBranch.id)).filter(
+        TenantBranch.tenant_id == tenant_id,
+        TenantBranch.is_active.is_(True),
+    ).scalar() or 0
+    return int(active_count)
+
+
+def _tenant_period_amounts(db: Session, tenant: Tenant) -> dict:
+    plan_code = str(tenant.plan or PlanTenant.FREE.value).strip().upper()
+    policy = _plan_policy_for(plan_code)
+    base_fee = float(tenant.monthly_fee or policy.get("base_fee", 0.0) or 0.0)
+    active_branches_total = _get_active_branches_count(db, int(tenant.id))
+    active_additional_branches = max(0, active_branches_total - 1)
+    billable_branches = max(0, active_branches_total - FREE_BRANCHES_PER_TENANT)
+    included_free_branches_used = min(active_branches_total, FREE_BRANCHES_PER_TENANT)
+    extra_branch_fee = float(policy.get("extra_branch_fee", 0.0) or 0.0)
+    branch_amount = float(billable_branches) * extra_branch_fee
+    subtotal = max(0.0, base_fee + branch_amount)
+    iva_amount = round(subtotal * VAT_RATE, 2) if subtotal > 0 else 0.0
+    total = round(subtotal + iva_amount, 2)
+    return {
+        "plan_code": plan_code,
+        "plan_label": _plan_public_label(plan_code),
+        "duration_days": int(policy.get("duration_days", 30) or 30),
+        "billing_cycle": str(policy.get("billing_cycle", tenant.billing_cycle or "QUARTERLY")).upper(),
+        "base_fee": round(base_fee, 2),
+        "free_branches": FREE_BRANCHES_PER_TENANT,
+        "included_free_branches_used": included_free_branches_used,
+        "active_branches_total": active_branches_total,
+        "active_additional_branches": active_additional_branches,
+        "billable_branches": billable_branches,
+        "extra_branch_fee": round(extra_branch_fee, 2),
+        "branch_amount": round(branch_amount, 2),
+        "subtotal": round(subtotal, 2),
+        "iva_rate": VAT_RATE,
+        "iva_amount": iva_amount,
+        "total": total,
+    }
+
+
 def _normalize_branch_code(value: Optional[str], fallback_name: str) -> str:
     seed = value or fallback_name
     code = re.sub(r"[^A-Z0-9]+", "-", str(seed or "").strip().upper()).strip("-")
@@ -529,26 +628,31 @@ def _serialize_support_ticket(ticket: SaasSupportTicket) -> dict:
 
 
 def _cycle_days(cycle: Optional[str]) -> int:
-    value = str(cycle or "MONTHLY").strip().upper()
+    value = str(cycle or "QUARTERLY").strip().upper()
     if value == "YEARLY":
         return 365
+    if value == "SEMIANNUAL":
+        return 180
+    # Backward compatibility for legacy tenants not yet normalized.
+    if value == "MONTHLY":
+        return 30
     if value == "QUARTERLY":
         return 90
-    return 30
+    return 90
 
 
 def _billing_currency(amount: float) -> str:
     return f"${amount:,.0f} COP".replace(",", ".")
 
 
-def _build_overdue_email_body(tenant: Tenant, days_overdue: int) -> str:
+def _build_overdue_email_body(tenant: Tenant, days_overdue: int, pending_amount: Optional[float] = None) -> str:
     tenant_name = tenant.display_name or tenant.nombre or tenant.slug
     due_text = tenant.next_billing_at.strftime("%Y-%m-%d") if tenant.next_billing_at else "N/A"
-    fee = float(tenant.monthly_fee or 0)
+    fee = float(pending_amount if pending_amount is not None else (tenant.monthly_fee or 0))
     return (
         f"Hola equipo de {tenant_name},\n\n"
         f"Este es un recordatorio de facturación de {settings.SMTP_FROM_NAME}.\n"
-        f"Tienen un cobro pendiente por {_billing_currency(fee)} con fecha {due_text}.\n"
+        f"Tienen un cobro pendiente por {_billing_currency(fee)} (IVA incluido) con fecha {due_text}.\n"
         f"Días de atraso: {max(1, int(days_overdue))}.\n\n"
         "Por favor coordinar el pago para evitar interrupciones en el servicio.\n"
         "Si ya realizaron el pago, ignoren este mensaje.\n\n"
@@ -644,6 +748,7 @@ def get_saas_summary(
 
     by_plan = (
         db.query(Tenant.plan, func.count(Tenant.id).label("total"))
+        .filter(Tenant.is_active.is_(True))
         .group_by(Tenant.plan)
         .all()
     )
@@ -651,10 +756,18 @@ def get_saas_summary(
     mrr_estimado = 0
     for plan, count in plan_counts.items():
         mrr_estimado += int(PLAN_MRR_ESTIMATE.get(plan, 0)) * int(count)
-    mrr_real = db.query(func.coalesce(func.sum(Tenant.monthly_fee), 0)).filter(
+    mrr_real = 0.0
+    overdue_amount = 0.0
+    active_billable_tenants = db.query(Tenant).filter(
         Tenant.subscription_status.in_(["ACTIVE", "PAST_DUE"]),
         Tenant.is_active.is_(True),
-    ).scalar() or 0
+    ).all()
+    for tenant in active_billable_tenants:
+        pricing = _tenant_period_amounts(db, tenant)
+        duration_days = max(1, int(pricing["duration_days"]))
+        mrr_real += (float(pricing["total"]) / duration_days) * 30.0
+        if tenant.subscription_status == "PAST_DUE":
+            overdue_amount += float(pricing["total"])
 
     demos_por_vencer = db.query(func.count(Tenant.id)).filter(
         Tenant.is_demo.is_(True),
@@ -665,11 +778,6 @@ def get_saas_summary(
         Tenant.subscription_status == "PAST_DUE",
         Tenant.is_active.is_(True),
     ).scalar() or 0
-    overdue_amount = db.query(func.coalesce(func.sum(Tenant.monthly_fee), 0)).filter(
-        Tenant.subscription_status == "PAST_DUE",
-        Tenant.is_active.is_(True),
-    ).scalar() or 0
-
     return {
         "total_tenants": int(total_tenants),
         "active_tenants": int(active_tenants),
@@ -705,7 +813,7 @@ def list_tenants_admin(
             func.lower(func.coalesce(Tenant.contacto_email, "")).like(term)
         )
     if plan:
-        query = query.filter(Tenant.plan == plan)
+        query = query.filter(Tenant.plan == _resolve_plan_code(plan))
     if is_demo is not None:
         query = query.filter(Tenant.is_demo.is_(is_demo))
     if is_active is not None:
@@ -729,6 +837,9 @@ def list_tenants_admin(
                 "admin_email_contacto": admin_user.email,
                 "admin_telefono_contacto": admin_user.telefono,
             }
+    pricing_by_tenant: dict[int, dict] = {}
+    for tenant in items:
+        pricing_by_tenant[int(tenant.id)] = _tenant_period_amounts(db, tenant)
 
     return {
         "items": [
@@ -739,6 +850,7 @@ def list_tenants_admin(
                 "display_name": t.display_name,
                 "logo_url": t.logo_url,
                 "plan": t.plan,
+                "plan_label": _plan_public_label(t.plan),
                 "is_active": t.is_active,
                 "is_demo": t.is_demo,
                 "demo_ends_at": t.demo_ends_at,
@@ -748,6 +860,18 @@ def list_tenants_admin(
                 "subscription_status": t.subscription_status,
                 "billing_cycle": t.billing_cycle,
                 "monthly_fee": float(t.monthly_fee or 0),
+                "base_fee_effective": float((pricing_by_tenant.get(int(t.id)) or {}).get("base_fee", float(t.monthly_fee or 0))),
+                "period_duration_days": int((pricing_by_tenant.get(int(t.id)) or {}).get("duration_days", 30)),
+                "period_total": float((pricing_by_tenant.get(int(t.id)) or {}).get("total", float(t.monthly_fee or 0))),
+                "period_subtotal": float((pricing_by_tenant.get(int(t.id)) or {}).get("subtotal", float(t.monthly_fee or 0))),
+                "iva_rate": float((pricing_by_tenant.get(int(t.id)) or {}).get("iva_rate", VAT_RATE)),
+                "iva_amount": float((pricing_by_tenant.get(int(t.id)) or {}).get("iva_amount", 0.0)),
+                "active_branches_total": int((pricing_by_tenant.get(int(t.id)) or {}).get("active_branches_total", 0)),
+                "active_additional_branches": int((pricing_by_tenant.get(int(t.id)) or {}).get("active_additional_branches", 0)),
+                "included_free_branches_used": int((pricing_by_tenant.get(int(t.id)) or {}).get("included_free_branches_used", 0)),
+                "billable_branches": int((pricing_by_tenant.get(int(t.id)) or {}).get("billable_branches", 0)),
+                "extra_branch_fee": float((pricing_by_tenant.get(int(t.id)) or {}).get("extra_branch_fee", 0.0)),
+                "branch_amount": float((pricing_by_tenant.get(int(t.id)) or {}).get("branch_amount", 0.0)),
                 "next_billing_at": t.next_billing_at,
                 "last_payment_at": t.last_payment_at,
                 "created_at": t.created_at,
@@ -789,10 +913,8 @@ def create_tenant_admin(
     else:
         slug_candidate = _ensure_unique_tenant_slug(db, school_name)
 
-    plan_value = str(payload.plan or PlanTenant.FREE.value).strip().upper()
-    valid_plans = {p.value for p in PlanTenant}
-    if plan_value not in valid_plans:
-        raise HTTPException(status_code=400, detail="Plan inválido")
+    plan_value = _resolve_plan_code(payload.plan)
+    plan_policy = _plan_policy_for(plan_value)
 
     tenant_contact_email = str(payload.contacto_email).strip().lower()
     admin_email = str(payload.admin_email).strip().lower()
@@ -820,7 +942,7 @@ def create_tenant_admin(
         is_active=bool(payload.activate_tenant),
         is_demo=(plan_value == PlanTenant.FREE.value),
         demo_ends_at=(
-            datetime.utcnow() + timedelta(days=max(1, settings.DEFAULT_DEMO_DAYS))
+            datetime.utcnow() + timedelta(days=int(plan_policy.get("duration_days", max(1, settings.DEFAULT_DEMO_DAYS))))
             if plan_value == PlanTenant.FREE.value
             else None
         ),
@@ -830,6 +952,13 @@ def create_tenant_admin(
         nit=_normalize_text(payload.nit),
         logo_url=_normalize_text(payload.logo_url),
         subscription_status="TRIAL" if plan_value == PlanTenant.FREE.value else "ACTIVE",
+        billing_cycle=str(plan_policy.get("billing_cycle", "QUARTERLY")).upper(),
+        monthly_fee=float(plan_policy.get("base_fee", 0.0) or 0.0),
+        next_billing_at=(
+            datetime.utcnow() + timedelta(days=int(plan_policy.get("duration_days", 30)))
+            if plan_value != PlanTenant.FREE.value
+            else None
+        ),
     )
     db.add(tenant)
     db.flush()
@@ -879,7 +1008,7 @@ def create_tenant_admin(
         summary=f"Creó tenant {tenant.slug} desde backoffice",
         payload={
             "tenant_slug": tenant.slug,
-            "plan": tenant.plan,
+            "plan": _plan_public_label(tenant.plan),
             "admin_email": tenant_admin_user.email,
             "welcome_email_sent": bool(welcome_email_sent),
         },
@@ -893,6 +1022,7 @@ def create_tenant_admin(
         "tenant_nombre": tenant.nombre,
         "tenant_display_name": tenant.display_name,
         "tenant_plan": tenant.plan,
+        "tenant_plan_label": _plan_public_label(tenant.plan),
         "tenant_activo": tenant.is_active,
         "admin_user_id": tenant_admin_user.id,
         "admin_email": tenant_admin_user.email,
@@ -945,11 +1075,13 @@ def update_tenant_admin(
             requested_status = "ACTIVE"
 
     if "plan" in data and data["plan"]:
-        plan_value = str(data["plan"]).strip().upper()
-        valid = {p.value for p in PlanTenant}
-        if plan_value not in valid:
-            raise HTTPException(status_code=400, detail="Plan inválido")
+        plan_value = _resolve_plan_code(data["plan"])
         tenant.plan = plan_value
+        policy = _plan_policy_for(plan_value)
+        if "billing_cycle" not in data or data["billing_cycle"] is None:
+            tenant.billing_cycle = str(policy.get("billing_cycle", tenant.billing_cycle or "QUARTERLY")).upper()
+        if "monthly_fee" not in data or data["monthly_fee"] is None:
+            tenant.monthly_fee = float(policy.get("base_fee", 0.0) or 0.0)
     if "is_active" in data:
         tenant.is_active = bool(data["is_active"])
     if requested_is_demo is not None:
@@ -976,9 +1108,9 @@ def update_tenant_admin(
         tenant.contacto_email = (str(data["contacto_email"]).strip().lower() if data["contacto_email"] else None)
     if "contacto_telefono" in data:
         tenant.contacto_telefono = _normalize_text(data["contacto_telefono"])
-    if tenant.is_demo and tenant.subscription_status != "TRIAL":
+    if "is_demo" in data and tenant.is_demo and tenant.subscription_status != "TRIAL":
         tenant.subscription_status = "TRIAL"
-    if not tenant.is_demo and tenant.subscription_status == "TRIAL":
+    if "is_demo" in data and (not tenant.is_demo) and tenant.subscription_status == "TRIAL":
         tenant.subscription_status = "ACTIVE"
 
     _write_audit_log(
@@ -993,11 +1125,13 @@ def update_tenant_admin(
     )
     db.commit()
     db.refresh(tenant)
+    pricing = _tenant_period_amounts(db, tenant)
     return {
         "id": tenant.id,
         "slug": tenant.slug,
         "nombre": tenant.nombre,
         "plan": tenant.plan,
+        "plan_label": _plan_public_label(tenant.plan),
         "is_active": tenant.is_active,
         "is_demo": tenant.is_demo,
         "contacto_nombre": tenant.contacto_nombre,
@@ -1007,6 +1141,18 @@ def update_tenant_admin(
         "subscription_status": tenant.subscription_status,
         "billing_cycle": tenant.billing_cycle,
         "monthly_fee": float(tenant.monthly_fee or 0),
+        "base_fee_effective": float(pricing["base_fee"]),
+        "period_duration_days": int(pricing["duration_days"]),
+        "period_total": float(pricing["total"]),
+        "period_subtotal": float(pricing["subtotal"]),
+        "iva_rate": float(pricing["iva_rate"]),
+        "iva_amount": float(pricing["iva_amount"]),
+        "active_branches_total": int(pricing["active_branches_total"]),
+        "active_additional_branches": int(pricing["active_additional_branches"]),
+        "included_free_branches_used": int(pricing["included_free_branches_used"]),
+        "billable_branches": int(pricing["billable_branches"]),
+        "extra_branch_fee": float(pricing["extra_branch_fee"]),
+        "branch_amount": float(pricing["branch_amount"]),
         "next_billing_at": tenant.next_billing_at,
         "last_payment_at": tenant.last_payment_at,
     }
@@ -1430,7 +1576,8 @@ def record_tenant_payment(
     tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
-    amount = float(payload.amount if payload.amount is not None else (tenant.monthly_fee or 0))
+    pricing = _tenant_period_amounts(db, tenant)
+    amount = float(payload.amount if payload.amount is not None else pricing["total"])
     if amount <= 0:
         raise HTTPException(status_code=400, detail="El monto de pago debe ser mayor a 0")
     paid_at = payload.paid_at or datetime.utcnow()
@@ -1498,16 +1645,17 @@ def run_billing_overdue_check(
         Tenant.is_active.is_(True),
         Tenant.next_billing_at.isnot(None),
         Tenant.next_billing_at < now,
-        Tenant.subscription_status.in_(["ACTIVE", "TRIAL"]),
+        Tenant.subscription_status == "ACTIVE",
     ).all()
     updated = 0
     for tenant in candidates:
         tenant.subscription_status = "PAST_DUE"
+        pricing = _tenant_period_amounts(db, tenant)
         db.add(SaasBillingEvent(
             tenant_id=tenant.id,
             event_type="STATUS_CHANGED",
             status="OVERDUE",
-            amount=float(tenant.monthly_fee or 0),
+            amount=float(pricing["total"]),
             currency="COP",
             due_at=tenant.next_billing_at,
             notes="Marcado automáticamente como vencido por fecha de cobro.",
@@ -1538,7 +1686,7 @@ def run_billing_cycle_charges(
     now = datetime.utcnow()
     candidates = db.query(Tenant).filter(
         Tenant.is_active.is_(True),
-        Tenant.subscription_status.in_(["ACTIVE", "TRIAL", "PAST_DUE"]),
+        Tenant.subscription_status.in_(["ACTIVE", "PAST_DUE"]),
         Tenant.next_billing_at.isnot(None),
         Tenant.next_billing_at <= now,
     ).all()
@@ -1552,11 +1700,12 @@ def run_billing_cycle_charges(
         ).first()
         if existing:
             continue
+        pricing = _tenant_period_amounts(db, tenant)
         db.add(SaasBillingEvent(
             tenant_id=tenant.id,
             event_type="INVOICE_ISSUED",
             status="DUE",
-            amount=float(tenant.monthly_fee or 0),
+            amount=float(pricing["total"]),
             currency="COP",
             due_at=due_at,
             notes=f"Cargo generado por ciclo {tenant.billing_cycle}.",
@@ -1606,17 +1755,18 @@ def send_billing_overdue_reminders(
         if recent:
             continue
         days_overdue = (now.date() - tenant.next_billing_at.date()).days if tenant.next_billing_at else 0
+        pricing = _tenant_period_amounts(db, tenant)
         ok = send_email(
             to_email=email,
             subject=f"[{settings.SMTP_FROM_NAME}] Recordatorio de pago pendiente",
-            body=_build_overdue_email_body(tenant, days_overdue),
+            body=_build_overdue_email_body(tenant, days_overdue, pricing["total"]),
         )
         if ok:
             db.add(SaasBillingEvent(
                 tenant_id=tenant.id,
                 event_type="OVERDUE_REMINDER_SENT",
                 status="INFO",
-                amount=float(tenant.monthly_fee or 0),
+                amount=float(pricing["total"]),
                 currency="COP",
                 due_at=tenant.next_billing_at,
                 notes=f"Recordatorio enviado a {email}.",
@@ -1656,7 +1806,8 @@ def get_billing_aging_summary(
     }
     for t in rows:
         days = max(0, (now.date() - t.next_billing_at.date()).days)
-        fee = float(t.monthly_fee or 0)
+        pricing = _tenant_period_amounts(db, t)
+        fee = float(pricing["total"])
         if days <= 30:
             key = "0_30"
         elif days <= 60:
@@ -2364,12 +2515,10 @@ def convert_lead_to_tenant(
     if db.query(Usuario).filter(Usuario.cedula == cedula).first():
         raise HTTPException(status_code=409, detail="La cédula del administrador ya existe")
 
-    plan_value = str((lead.plan_interes or "FREE")).strip().upper()
-    valid_plans = {p.value for p in PlanTenant}
-    if plan_value not in valid_plans:
-        plan_value = PlanTenant.FREE.value
-    is_demo = True
-    demo_days = max(1, int(settings.DEFAULT_DEMO_DAYS or 14))
+    plan_value = _resolve_plan_code(lead.plan_interes or PlanTenant.FREE.value)
+    plan_policy = _plan_policy_for(plan_value)
+    is_demo = plan_value == PlanTenant.FREE.value
+    duration_days = int(plan_policy.get("duration_days", max(1, int(settings.DEFAULT_DEMO_DAYS or 15))))
     tenant = Tenant(
         slug=_ensure_unique_tenant_slug(db, lead.escuela_nombre),
         nombre=(lead.escuela_nombre or "").strip(),
@@ -2377,11 +2526,12 @@ def convert_lead_to_tenant(
         plan=plan_value,
         is_active=True,
         is_demo=is_demo,
-        demo_ends_at=datetime.utcnow() + timedelta(days=demo_days),
-        subscription_status="TRIAL",
-        billing_cycle="MONTHLY",
-        monthly_fee=float(PLAN_MRR_ESTIMATE.get(plan_value, 0)),
-        next_billing_at=datetime.utcnow() + timedelta(days=demo_days),
+        demo_ends_at=(datetime.utcnow() + timedelta(days=duration_days)) if is_demo else None,
+        subscription_status="TRIAL" if is_demo else "ACTIVE",
+        billing_cycle=str(plan_policy.get("billing_cycle", "QUARTERLY")).upper(),
+        monthly_fee=float(plan_policy.get("base_fee", 0.0) or 0.0),
+        next_billing_at=(datetime.utcnow() + timedelta(days=duration_days)) if not is_demo else None,
+        contacto_nombre=_normalize_text(lead.contacto_nombre),
         contacto_email=(lead.contacto_email or "").strip().lower() or None,
         contacto_telefono=_normalize_text(lead.contacto_telefono),
     )
@@ -2417,14 +2567,15 @@ def convert_lead_to_tenant(
     lead.converted_admin_user_id = admin_user.id
     lead.converted_at = datetime.utcnow()
     lead.updated_at = datetime.utcnow()
+    pricing = _tenant_period_amounts(db, tenant)
     db.add(SaasBillingEvent(
         tenant_id=tenant.id,
         event_type="STATUS_CHANGED",
         status="INFO",
-        amount=float(tenant.monthly_fee or 0),
+        amount=float(pricing["total"]),
         currency="COP",
         due_at=tenant.next_billing_at,
-        notes="Tenant creado desde lead en modo demo/trial.",
+        notes="Tenant creado desde lead con política comercial vigente.",
     ))
 
     _write_audit_log(

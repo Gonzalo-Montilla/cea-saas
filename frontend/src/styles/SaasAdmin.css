@@ -434,6 +434,18 @@
   overflow-y: auto;
 }
 
+.saas-modal.saas-modal-branches {
+  width: min(1160px, 96vw);
+}
+
+.saas-modal.saas-modal-profile {
+  width: min(1040px, 95vw);
+}
+
+.saas-modal.saas-modal-branches .saas-modal-grid {
+  grid-template-columns: repeat(3, minmax(210px, 1fr));
+}
+
 .saas-modal-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -613,6 +625,18 @@
   .saas-modal-grid {
     grid-template-columns: 1fr;
   }
+
+  .saas-modal.saas-modal-branches {
+    width: min(980px, 96vw);
+  }
+
+  .saas-modal.saas-modal-profile {
+    width: min(940px, 96vw);
+  }
+
+  .saas-modal.saas-modal-branches .saas-modal-grid {
+    grid-template-columns: repeat(2, minmax(200px, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
@@ -624,6 +648,10 @@
   .saas-modal {
     width: 100%;
     max-height: calc(100vh - 20px);
+  }
+
+  .saas-modal.saas-modal-branches .saas-modal-grid {
+    grid-template-columns: 1fr;
   }
 
   .saas-kpi-grid {

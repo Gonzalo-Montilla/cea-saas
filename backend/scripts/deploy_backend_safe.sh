@@ -28,6 +28,7 @@ echo "== [3/5] Custom migrations caja_fuerte + sucursales =="
 "${VENV_BIN}/python" migrations/add_inventario_detalle_movimientos_caja_fuerte.py
 "${VENV_BIN}/python" migrations/create_tenant_branches.py
 "${VENV_BIN}/python" migrations/add_contacto_nombre_to_tenants.py
+"${VENV_BIN}/python" migrations/normalize_tenant_billing_cycle_no_monthly.py
 echo "OK custom migrations"
 
 echo "== [4/5] Restart backend =="

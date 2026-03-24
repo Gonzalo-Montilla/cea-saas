@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     SAAS_LOGIN_MAX_ATTEMPTS: int = 5
     SAAS_LOGIN_LOCK_MINUTES: int = 15
     MFA_TOTP_ISSUER: str = "SIAEC SaaS"
-    DEFAULT_DEMO_DAYS: int = 14
+    DEFAULT_DEMO_DAYS: int = 15
 
     # Email (SMTP)
     SMTP_HOST: str = "smtp.gmail.com"

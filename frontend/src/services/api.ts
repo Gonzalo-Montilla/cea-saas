@@ -728,6 +728,7 @@ export interface SaasTenantItem {
   logo_url?: string | null;
   contacto_nombre?: string | null;
   plan: string;
+  plan_label?: string | null;
   is_active: boolean;
   is_demo: boolean;
   demo_ends_at?: string | null;
@@ -737,8 +738,20 @@ export interface SaasTenantItem {
   admin_email_contacto?: string | null;
   admin_telefono_contacto?: string | null;
   subscription_status?: 'TRIAL' | 'ACTIVE' | 'PAST_DUE' | 'CANCELED';
-  billing_cycle?: 'MONTHLY' | 'QUARTERLY' | 'YEARLY';
+  billing_cycle?: 'MONTHLY' | 'QUARTERLY' | 'SEMIANNUAL' | 'YEARLY';
   monthly_fee?: number;
+  base_fee_effective?: number;
+  period_duration_days?: number;
+  period_total?: number;
+  period_subtotal?: number;
+  iva_rate?: number;
+  iva_amount?: number;
+  active_branches_total?: number;
+  active_additional_branches?: number;
+  included_free_branches_used?: number;
+  billable_branches?: number;
+  extra_branch_fee?: number;
+  branch_amount?: number;
   next_billing_at?: string | null;
   last_payment_at?: string | null;
   created_at: string;
@@ -899,7 +912,7 @@ export const saasAdminAPI = {
     nombre_escuela: string;
     slug?: string | null;
     display_name?: string | null;
-    plan?: 'FREE' | 'BASIC' | 'PRO' | 'ENTERPRISE';
+    plan?: 'FREE' | 'BASIC' | 'PRO' | 'ENTERPRISE' | 'DEMO' | 'BASICO' | 'EMPRENDEDOR' | 'EMPRESA';
     contacto_nombre?: string | null;
     contacto_email: string;
     contacto_telefono?: string | null;
