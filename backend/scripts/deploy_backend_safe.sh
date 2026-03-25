@@ -12,6 +12,14 @@ fi
 cd "${APP_DIR}"
 export PYTHONPATH="${APP_DIR}:${PYTHONPATH:-}"
 
+# Cargar variables desde .env para migraciones y comandos fuera de systemd
+if [[ -f "${APP_DIR}/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "${APP_DIR}/.env"
+  set +a
+fi
+
 echo "== [1/5] Backend deps =="
 "${VENV_BIN}/pip" install -r requirements.txt
 
