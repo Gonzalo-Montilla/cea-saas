@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Response, Request
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
@@ -44,6 +45,7 @@ from app.schemas.estudiante import (
     EstudianteOtpVerifyRequest,
     EstudianteOtpStartResponse,
     EstudianteOtpVerifyResponse,
+    EstudianteCertificadoRuntRequest,
 )
 from app.api.deps import get_current_active_user, get_admin_or_coordinador_or_cajero, get_required_tenant, require_role
 
@@ -1071,6 +1073,105 @@ def contrato_estudiante_pdf(
     return _build_contrato_pdf(estudiante, current_tenant)
 
 
+@router.get("/{estudiante_id}/certificado-pdf")
+def certificado_estudiante_pdf(
+    estudiante_id: int,
+    db: Session = Depends(get_db),
+    _current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
+):
+    estudiante = db.query(Estudiante).filter(
+        Estudiante.id == estudiante_id,
+        Estudiante.tenant_id == current_tenant.id,
+    ).first()
+    if not estudiante:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Estudiante no encontrado")
+
+    habilitado, motivos = _certificado_habilitacion(estudiante)
+    if not habilitado:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se puede generar el certificado: " + "; ".join(motivos),
+        )
+    return _build_certificado_pdf(estudiante, current_tenant)
+
+
+@router.post("/{estudiante_id}/certificado-runt", response_model=EstudianteResponse)
+def registrar_certificado_runt(
+    estudiante_id: int,
+    payload: EstudianteCertificadoRuntRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
+):
+    estudiante = db.query(Estudiante).filter(
+        Estudiante.id == estudiante_id,
+        Estudiante.tenant_id == current_tenant.id,
+    ).first()
+    if not estudiante:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Estudiante no encontrado")
+
+    runt_in = (payload.runt_numero or "").strip().upper()
+    datos = dict(estudiante.datos_adicionales or {})
+    certificado_data = dict(datos.get("certificado_data", {}))
+    current_runt = str(certificado_data.get("runt_numero") or "").strip().upper()
+
+    if current_runt and current_runt != runt_in:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El numero RUNT del certificado ya fue registrado y no puede modificarse.",
+        )
+
+    if not current_runt:
+        certificado_data["runt_numero"] = runt_in
+        certificado_data["runt_registrado_en"] = datetime.utcnow().isoformat()
+        certificado_data["runt_registrado_por_user_id"] = current_user.id
+        datos["certificado_data"] = certificado_data
+        estudiante.datos_adicionales = datos
+        db.commit()
+        db.refresh(estudiante)
+
+    return _build_estudiante_response(estudiante, db)
+
+
+@router.get("/{estudiante_id}/habeas-firmado-pdf")
+def habeas_firmado_pdf(
+    estudiante_id: int,
+    db: Session = Depends(get_db),
+    _current_user: Usuario = Depends(get_current_active_user),
+    current_tenant: Tenant = Depends(get_required_tenant),
+):
+    estudiante = db.query(Estudiante).filter(
+        Estudiante.id == estudiante_id,
+        Estudiante.tenant_id == current_tenant.id,
+    ).first()
+    if not estudiante:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Estudiante no encontrado")
+
+    datos = dict(estudiante.datos_adicionales or {})
+    habeas = dict(datos.get("habeas_data", {}))
+    file_path_raw = str(habeas.get("documento_firmado_pdf_path") or "").strip()
+    if not file_path_raw:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Este estudiante aún no tiene documento Habeas firmado disponible.",
+        )
+
+    file_path = Path(file_path_raw)
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No se encontró el archivo del Habeas firmado.",
+        )
+
+    safe_name = f"habeas_firmado_{estudiante.matricula_numero or estudiante.id}.pdf"
+    return FileResponse(
+        path=str(file_path),
+        filename=safe_name,
+        media_type="application/pdf",
+    )
+
+
 @router.post("/{estudiante_id}/acreditar-horas", response_model=EstudianteResponse)
 def acreditar_horas(
     estudiante_id: int,
@@ -1594,6 +1695,172 @@ def _build_contrato_pdf_bytes(estudiante: Estudiante, tenant: Optional[Tenant] =
     c.showPage()
     c.save()
     return buffer.getvalue()
+
+
+def _certificado_habilitacion(estudiante: Estudiante) -> tuple[bool, list[str]]:
+    motivos = []
+    teoricas_req = int(estudiante.horas_teoricas_requeridas or 0)
+    teoricas_ok = int(estudiante.horas_teoricas_completadas or 0) >= teoricas_req
+    practicas_req = int(estudiante.horas_practicas_requeridas or 0)
+    practicas_ok = int(estudiante.horas_practicas_completadas or 0) >= practicas_req
+    saldo = Decimal(estudiante.saldo_pendiente or 0)
+    saldo_ok = saldo <= Decimal("0")
+    estado_ok = estudiante.estado in {EstadoEstudiante.LISTO_EXAMEN, EstadoEstudiante.GRADUADO}
+
+    if not teoricas_ok:
+        motivos.append("horas teoricas incompletas")
+    if not practicas_ok:
+        motivos.append("horas practicas incompletas")
+    if not saldo_ok:
+        motivos.append("saldo pendiente de pago")
+    if not estado_ok:
+        motivos.append("estado academico no habilitado")
+    if not estudiante.usuario:
+        motivos.append("estudiante sin usuario asociado")
+    if not estudiante.tipo_servicio and not estudiante.categoria:
+        motivos.append("servicio/categoria no definidos")
+    if not _get_certificado_runt_numero(estudiante):
+        motivos.append("numero RUNT del certificado no registrado")
+    return len(motivos) == 0, motivos
+
+
+def _build_certificado_pdf(estudiante: Estudiante, tenant: Optional[Tenant] = None) -> Response:
+    pdf_bytes = _build_certificado_pdf_bytes(estudiante, tenant)
+    return _pdf_response(BytesIO(pdf_bytes), f"certificado_{estudiante.matricula_numero or estudiante.id}.pdf")
+
+
+def _build_certificado_pdf_bytes(estudiante: Estudiante, tenant: Optional[Tenant] = None) -> bytes:
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+
+    c.setFillColor(colors.white)
+    c.rect(0, 0, width, height, fill=1, stroke=0)
+
+    # Marco estilo diploma.
+    c.setStrokeColor(colors.Color(0.78, 0.63, 0.20))
+    c.setLineWidth(2)
+    c.rect(30, 30, width - 60, height - 60, stroke=1, fill=0)
+    c.setLineWidth(1)
+    c.rect(38, 38, width - 76, height - 76, stroke=1, fill=0)
+
+    logo_src = _resolve_logo_image(tenant)
+    if logo_src:
+        try:
+            c.drawImage(ImageReader(logo_src), 52, height - 110, width=88, height=55, preserveAspectRatio=True, mask="auto")
+        except Exception:
+            pass
+
+    school_name = (tenant.display_name or tenant.nombre) if tenant else settings.BRAND_SHORT_NAME
+    school_nit = tenant.nit if tenant and tenant.nit else settings.HABEAS_NIT
+    c.setFont("Helvetica-Bold", 12)
+    c.setFillColor(colors.Color(0.07, 0.14, 0.27))
+    c.drawCentredString(width / 2, height - 75, str(school_name or "SIAEC")[:78])
+    c.setFont("Helvetica", 9)
+    c.drawCentredString(width / 2, height - 90, f"NIT {school_nit or 'N/A'}")
+
+    c.setFont("Helvetica-Bold", 32)
+    c.drawCentredString(width / 2, height - 155, "CERTIFICADO DE")
+    c.drawCentredString(width / 2, height - 191, "APROBACION")
+    c.setLineWidth(1)
+    c.line(205, height - 204, width - 205, height - 204)
+
+    usuario = estudiante.usuario
+    nombre = usuario.nombre_completo if usuario else "ESTUDIANTE"
+    tipo_doc = _tipo_documento_label(usuario.tipo_documento if usuario else None)
+    documento = usuario.cedula if usuario else "N/A"
+    categoria = " / ".join(_categorias_contrato(estudiante)) or (estudiante.categoria.value if estudiante.categoria else "N/A")
+    teoricas = f"{int(estudiante.horas_teoricas_completadas or 0)}/{int(estudiante.horas_teoricas_requeridas or 0)}"
+    practicas = f"{int(estudiante.horas_practicas_completadas or 0)}/{int(estudiante.horas_practicas_requeridas or 0)}"
+    saldo = Decimal(estudiante.saldo_pendiente or 0)
+    saldo_label = "SIN SALDO PENDIENTE" if saldo <= Decimal("0") else f"CON SALDO {saldo}"
+    runt_ref = _get_certificado_runt_numero(estudiante) or estudiante.sicov_expediente_id or estudiante.no_certificado or "PENDIENTE / NO REGISTRADO"
+    fecha_emision = datetime.utcnow().strftime("%Y-%m-%d")
+
+    cuerpo = (
+        f"El Centro de Ensenanza Automovilistica {school_name}, certifica que"
+    )
+    c.setFont("Helvetica", 11)
+    y = height - 238
+    for line in _wrap_text(c, cuerpo, 470, "Helvetica", 11):
+        c.drawCentredString(width / 2, y, line)
+        y -= 15
+
+    # Nombre del estudiante protagonista (estilo firma).
+    c.setFont("Times-Italic", 30)
+    c.drawCentredString(width / 2, y - 14, nombre[:52])
+    c.setLineWidth(0.7)
+    c.line(145, y - 22, width - 145, y - 22)
+
+    c.setFont("Helvetica", 10.5)
+    y -= 41
+    detalle = (
+        f"identificado(a) con {tipo_doc} {documento}, aprobo satisfactoriamente el proceso de "
+        f"formacion para la categoria {categoria}, cumpliendo con la intensidad horaria teorica y "
+        "practica exigida por la normatividad aplicable."
+    )
+    for line in _wrap_text(c, detalle, 472, "Helvetica", 10.5):
+        c.drawCentredString(width / 2, y, line)
+        y -= 14
+
+    y -= 12
+    c.setLineWidth(0.8)
+    c.rect(62, y - 128, width - 124, 128, stroke=1, fill=0)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(76, y - 20, "MATRICULA:")
+    c.setFont("Helvetica", 10)
+    c.drawString(158, y - 20, estudiante.matricula_numero or "N/A")
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(308, y - 20, "CATEGORIA:")
+    c.setFont("Helvetica", 10)
+    c.drawString(391, y - 20, categoria)
+
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(76, y - 47, "HORAS TEORICAS:")
+    c.setFont("Helvetica", 10)
+    c.drawString(182, y - 47, teoricas)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(308, y - 47, "HORAS PRACTICAS:")
+    c.setFont("Helvetica", 10)
+    c.drawString(433, y - 47, practicas)
+
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(76, y - 74, "RUNT / REFERENCIA:")
+    c.setFont("Helvetica", 10)
+    c.drawString(196, y - 74, str(runt_ref)[:52])
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(76, y - 101, "ESTADO FINANCIERO:")
+    c.setFont("Helvetica", 10)
+    c.drawString(196, y - 101, saldo_label)
+
+    cert_code = f"CEA-{datetime.utcnow().year}-{estudiante.id:06d}"
+    fingerprint = hashlib.sha256(
+        f"{estudiante.id}|{estudiante.matricula_numero}|{documento}|{categoria}|{teoricas}|{practicas}|{saldo}".encode("utf-8")
+    ).hexdigest().upper()[:24]
+    c.setFont("Helvetica", 9)
+    c.drawString(70, 138, f"Codigo certificado: {cert_code}")
+    c.drawString(70, 124, f"Hash de validacion: {fingerprint}")
+    c.drawString(70, 110, f"Fecha de emision: {fecha_emision}")
+
+    # Firmas con placeholders en cursiva (mientras no existan firmas digitalizadas).
+    left_x = 180
+    right_x = width - 180
+    sign_y = 86
+    c.setLineWidth(0.8)
+    c.line(left_x - 95, sign_y, left_x + 95, sign_y)
+    c.line(right_x - 95, sign_y, right_x + 95, sign_y)
+    c.setFont("Times-Italic", 14)
+    c.drawCentredString(left_x, sign_y + 9, "Nombre Director(a)")
+    c.drawCentredString(right_x, sign_y + 9, "Nombre Coordinador(a)")
+    c.setFont("Helvetica", 9)
+    c.drawCentredString(left_x, sign_y - 13, "Director(a) CEA")
+    c.drawCentredString(right_x, sign_y - 13, "Coordinacion Academica")
+
+    c.setFont("Helvetica", 8)
+    c.drawCentredString(width / 2, 58, "Documento generado digitalmente por SIAEC")
+    c.save()
+    buffer.seek(0)
+    return buffer.read()
 
 
 def _tenant_mail_context(tenant: Optional[Tenant]) -> tuple[str, str, str, str, str]:
@@ -2219,6 +2486,12 @@ def _extra(estudiante: Estudiante, key: str) -> str:
     return datos.get(key, "")
 
 
+def _get_certificado_runt_numero(estudiante: Estudiante) -> str:
+    datos = dict(estudiante.datos_adicionales or {})
+    certificado_data = dict(datos.get("certificado_data", {}))
+    return str(certificado_data.get("runt_numero") or "").strip().upper()
+
+
 def _pdf_response(buffer: BytesIO, filename: str) -> Response:
     pdf_bytes = buffer.getvalue()
     return Response(
@@ -2328,5 +2601,6 @@ def _build_estudiante_response(estudiante: Estudiante, db: Session = None) -> Es
         historial_pagos=historial_pagos,
         clases_historial=clases_historial,
         servicios=servicios,
-        servicio_activo_id=servicio_activo_id
+        servicio_activo_id=servicio_activo_id,
+        certificado_runt_numero=_get_certificado_runt_numero(estudiante) or None,
     )

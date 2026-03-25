@@ -405,37 +405,65 @@ def get_kpis_clases(
         .all()
     )
 
+    manual_historial = _obtener_historial_clases_manual(db, fecha_inicio_date, fecha_fin_date, current_tenant.id)
+
     total_programadas = len([c for c in clases if c.estado == EstadoClase.PROGRAMADA])
     total_completadas = len([c for c in clases if c.estado == EstadoClase.COMPLETADA])
     total_canceladas = len([c for c in clases if c.estado == EstadoClase.CANCELADA])
+
+    # Fallback operativo: si no hay agenda de clases en tabla Clase,
+    # usar historial manual de acreditaciones (hoja de vida).
+    usar_historial_manual = len(clases) == 0 and len(manual_historial) > 0
+    if usar_historial_manual:
+        total_completadas = len(manual_historial)
+        total_programadas = total_completadas
+        total_canceladas = 0
 
     base_cumplimiento = total_completadas + total_canceladas
     tasa_cumplimiento = (total_completadas / base_cumplimiento * 100) if base_cumplimiento > 0 else 0.0
 
     productividad: dict[int, dict] = {}
-    for clase in clases:
-        if not clase.instructor_id:
-            continue
-        if clase.instructor_id not in productividad:
-            nombre = (
-                clase.instructor.usuario.nombre_completo
-                if clase.instructor and clase.instructor.usuario
-                else f"Instructor {clase.instructor_id}"
-            )
-            productividad[clase.instructor_id] = {
-                "instructor_id": clase.instructor_id,
-                "nombre_completo": nombre,
-                "clases_programadas": 0,
-                "clases_completadas": 0,
-                "clases_canceladas": 0,
-                "porcentaje_cumplimiento": 0.0,
-            }
-        ref = productividad[clase.instructor_id]
-        ref["clases_programadas"] += 1
-        if clase.estado == EstadoClase.COMPLETADA:
+    if usar_historial_manual:
+        for item in manual_historial:
+            instructor_id = item.get("instructor_id")
+            if not instructor_id:
+                continue
+            if instructor_id not in productividad:
+                productividad[instructor_id] = {
+                    "instructor_id": instructor_id,
+                    "nombre_completo": item.get("instructor_nombre") or f"Instructor {instructor_id}",
+                    "clases_programadas": 0,
+                    "clases_completadas": 0,
+                    "clases_canceladas": 0,
+                    "porcentaje_cumplimiento": 0.0,
+                }
+            ref = productividad[instructor_id]
+            ref["clases_programadas"] += 1
             ref["clases_completadas"] += 1
-        elif clase.estado == EstadoClase.CANCELADA:
-            ref["clases_canceladas"] += 1
+    else:
+        for clase in clases:
+            if not clase.instructor_id:
+                continue
+            if clase.instructor_id not in productividad:
+                nombre = (
+                    clase.instructor.usuario.nombre_completo
+                    if clase.instructor and clase.instructor.usuario
+                    else f"Instructor {clase.instructor_id}"
+                )
+                productividad[clase.instructor_id] = {
+                    "instructor_id": clase.instructor_id,
+                    "nombre_completo": nombre,
+                    "clases_programadas": 0,
+                    "clases_completadas": 0,
+                    "clases_canceladas": 0,
+                    "porcentaje_cumplimiento": 0.0,
+                }
+            ref = productividad[clase.instructor_id]
+            ref["clases_programadas"] += 1
+            if clase.estado == EstadoClase.COMPLETADA:
+                ref["clases_completadas"] += 1
+            elif clase.estado == EstadoClase.CANCELADA:
+                ref["clases_canceladas"] += 1
 
     for _, row in productividad.items():
         base = row["clases_completadas"] + row["clases_canceladas"]
@@ -494,14 +522,38 @@ def get_asistencia_clases_diaria(
     )
 
     datos = []
-    for r in rows:
-        datos.append({
-            "fecha": r.fecha.isoformat() if hasattr(r.fecha, "isoformat") else str(r.fecha),
-            "total": int(r.total or 0),
-            "programadas": int(r.programadas or 0),
-            "completadas": int(r.completadas or 0),
-            "canceladas": int(r.canceladas or 0),
-        })
+    if rows:
+        for r in rows:
+            datos.append({
+                "fecha": r.fecha.isoformat() if hasattr(r.fecha, "isoformat") else str(r.fecha),
+                "total": int(r.total or 0),
+                "programadas": int(r.programadas or 0),
+                "completadas": int(r.completadas or 0),
+                "canceladas": int(r.canceladas or 0),
+            })
+    else:
+        # Fallback operativo cuando se acredita desde hoja de vida
+        # sin crear agenda en tabla Clase.
+        manual_historial = _obtener_historial_clases_manual(db, fecha_inicio_date, fecha_fin_date, current_tenant.id)
+        diarios: dict[str, dict] = {}
+        for item in manual_historial:
+            fecha = item.get("fecha_date")
+            if not fecha:
+                continue
+            key = fecha.isoformat()
+            if key not in diarios:
+                diarios[key] = {"total": 0, "programadas": 0, "completadas": 0, "canceladas": 0}
+            diarios[key]["total"] += 1
+            diarios[key]["programadas"] += 1
+            diarios[key]["completadas"] += 1
+        for key in sorted(diarios.keys()):
+            datos.append({
+                "fecha": key,
+                "total": diarios[key]["total"],
+                "programadas": diarios[key]["programadas"],
+                "completadas": diarios[key]["completadas"],
+                "canceladas": diarios[key]["canceladas"],
+            })
 
     return {
         "periodo_inicio": fecha_inicio,
@@ -845,6 +897,35 @@ def _parse_pin_vencimiento(estudiante: Estudiante) -> Optional[datetime]:
     if estudiante.fecha_inscripcion:
         return estudiante.fecha_inscripcion + timedelta(days=90)
     return None
+
+
+def _obtener_historial_clases_manual(
+    db: Session,
+    fecha_inicio: date,
+    fecha_fin: date,
+    tenant_id: int,
+) -> list[dict]:
+    estudiantes = db.query(Estudiante).filter(Estudiante.tenant_id == tenant_id).all()
+    out: list[dict] = []
+    for est in estudiantes:
+        datos = dict(est.datos_adicionales or {})
+        historial = list(datos.get("clases_historial", []))
+        for item in historial:
+            fecha_raw = item.get("fecha")
+            fecha_dt = _parse_fecha(fecha_raw)
+            if not fecha_dt:
+                continue
+            fecha_d = fecha_dt.date()
+            if fecha_d < fecha_inicio or fecha_d > fecha_fin:
+                continue
+            out.append(
+                {
+                    "fecha_date": fecha_d,
+                    "instructor_id": item.get("instructor_id"),
+                    "instructor_nombre": item.get("instructor_nombre"),
+                }
+            )
+    return out
 
 
 def _parse_fecha(value) -> Optional[datetime]:

@@ -56,6 +56,24 @@
   transform: translateY(-1px);
 }
 
+.btn-action.btn-action-success {
+  background: #059669;
+}
+
+.btn-action.btn-action-success:hover {
+  background: #047857;
+}
+
+.btn-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-action:disabled:hover {
+  transform: none;
+}
+
 /* Información Principal */
 .info-principal {
   display: flex;

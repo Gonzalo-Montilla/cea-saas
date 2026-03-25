@@ -425,6 +425,18 @@ export const estudiantesAPI = {
     const response = await api.get(`/estudiantes/${id}/contrato-pdf`, { responseType: 'blob' });
     return response.data;
   },
+  getCertificadoPdf: async (id: number): Promise<Blob> => {
+    const response = await api.get(`/estudiantes/${id}/certificado-pdf`, { responseType: 'blob' });
+    return response.data;
+  },
+  setCertificadoRunt: async (id: number, runtNumero: string): Promise<any> => {
+    const response = await api.post(`/estudiantes/${id}/certificado-runt`, { runt_numero: runtNumero });
+    return response.data;
+  },
+  getHabeasFirmadoPdf: async (id: number): Promise<Blob> => {
+    const response = await api.get(`/estudiantes/${id}/habeas-firmado-pdf`, { responseType: 'blob' });
+    return response.data;
+  },
 };
 
 export interface ClaseItem {

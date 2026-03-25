@@ -15,7 +15,8 @@ import {
   BookOpen,
   PlusCircle,
   Car as CarIcon,
-  AlertCircle
+  AlertCircle,
+  Award
 } from 'lucide-react';
 import '../styles/EstudianteDetalle.css';
 import '../styles/DefinirServicioModal.css';
@@ -95,6 +96,7 @@ interface Estudiante {
   historial_pagos?: PagoHistorial[];
   servicios?: ServicioHistorialItem[];
   servicio_activo_id?: number | null;
+  certificado_runt_numero?: string | null;
 }
 
 export const EstudianteDetalle = () => {
@@ -104,7 +106,11 @@ export const EstudianteDetalle = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [showEditModal, setShowEditModal] = useState(false);
-  const [contratoPreviewUrl, setContratoPreviewUrl] = useState<string | null>(null);
+  const [pdfPreview, setPdfPreview] = useState<null | {
+    url: string;
+    title: string;
+    filename: string;
+  }>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [editError, setEditError] = useState('');
   const [editFotoBase64, setEditFotoBase64] = useState<string | null>(null);
@@ -124,6 +130,10 @@ export const EstudianteDetalle = () => {
   const [corregirPassword, setCorregirPassword] = useState('');
   const [corregirError, setCorregirError] = useState('');
   const [corregirLoading, setCorregirLoading] = useState(false);
+  const [showRuntModal, setShowRuntModal] = useState(false);
+  const [runtNumero, setRuntNumero] = useState('');
+  const [runtError, setRuntError] = useState('');
+  const [runtSaving, setRuntSaving] = useState(false);
   const [editForm, setEditForm] = useState({
     primer_nombre: '',
     segundo_nombre: '',
@@ -187,28 +197,104 @@ export const EstudianteDetalle = () => {
     try {
       const pdfBlob = await estudiantesAPI.getContratoPdf(Number(id));
       const fileUrl = URL.createObjectURL(pdfBlob);
-      setContratoPreviewUrl(fileUrl);
+      const filename = estudiante?.matricula_numero
+        ? `contrato_${estudiante.matricula_numero}.pdf`
+        : `contrato_${id}.pdf`;
+      setPdfPreview({
+        url: fileUrl,
+        title: 'Contrato del Estudiante',
+        filename,
+      });
     } catch (err) {
       console.error('Error al descargar contrato:', err);
       alert('No se pudo cargar el contrato');
     }
   };
 
-  const cerrarContratoPreview = () => {
-    if (contratoPreviewUrl) {
-      URL.revokeObjectURL(contratoPreviewUrl);
+  const handleVerHabeasFirmado = async () => {
+    if (!id) return;
+    try {
+      const pdfBlob = await estudiantesAPI.getHabeasFirmadoPdf(Number(id));
+      const fileUrl = URL.createObjectURL(pdfBlob);
+      const filename = estudiante?.matricula_numero
+        ? `habeas_firmado_${estudiante.matricula_numero}.pdf`
+        : `habeas_firmado_${id}.pdf`;
+      setPdfPreview({
+        url: fileUrl,
+        title: 'Habeas Data firmado',
+        filename,
+      });
+    } catch (err: any) {
+      console.error('Error al descargar Habeas firmado:', err);
+      alert(err?.response?.data?.detail || 'No se pudo cargar el Habeas firmado');
     }
-    setContratoPreviewUrl(null);
   };
 
-  const descargarContrato = () => {
-    if (!contratoPreviewUrl) return;
-    const link = document.createElement('a');
-    link.href = contratoPreviewUrl;
+  const abrirCertificadoPreview = async () => {
+    if (!id) return;
+    const pdfBlob = await estudiantesAPI.getCertificadoPdf(Number(id));
+    const fileUrl = URL.createObjectURL(pdfBlob);
     const filename = estudiante?.matricula_numero
-      ? `contrato_${estudiante.matricula_numero}.pdf`
-      : `contrato_${id}.pdf`;
-    link.download = filename;
+      ? `certificado_${estudiante.matricula_numero}.pdf`
+      : `certificado_${id}.pdf`;
+    setPdfPreview({
+      url: fileUrl,
+      title: 'Certificado de aprobacion',
+      filename,
+    });
+  };
+
+  const handleVerCertificado = async () => {
+    if (!id) return;
+    const runtRegistrado = String(estudiante?.certificado_runt_numero || '').trim();
+    if (!runtRegistrado) {
+      setRuntNumero('');
+      setRuntError('');
+      setShowRuntModal(true);
+      return;
+    }
+    try {
+      await abrirCertificadoPreview();
+    } catch (err: any) {
+      console.error('Error al generar certificado:', err);
+      alert(err?.response?.data?.detail || 'No se pudo generar el certificado.');
+    }
+  };
+
+  const guardarRuntYGenerar = async () => {
+    if (!id) return;
+    const runtNormalizado = runtNumero.trim().toUpperCase();
+    if (!/^[A-Z0-9/-]{4,40}$/.test(runtNormalizado)) {
+      setRuntError("Numero RUNT invalido. Usa 4-40 caracteres alfanumericos, '-' o '/'.");
+      return;
+    }
+    setRuntSaving(true);
+    setRuntError('');
+    try {
+      const actualizado = await estudiantesAPI.setCertificadoRunt(Number(id), runtNormalizado);
+      setEstudiante(actualizado);
+      setShowRuntModal(false);
+      await abrirCertificadoPreview();
+    } catch (err: any) {
+      console.error('Error al guardar numero RUNT:', err);
+      setRuntError(err?.response?.data?.detail || 'No se pudo guardar el numero RUNT.');
+    } finally {
+      setRuntSaving(false);
+    }
+  };
+
+  const cerrarPdfPreview = () => {
+    if (pdfPreview?.url) {
+      URL.revokeObjectURL(pdfPreview.url);
+    }
+    setPdfPreview(null);
+  };
+
+  const descargarPdfPreview = () => {
+    if (!pdfPreview?.url) return;
+    const link = document.createElement('a');
+    link.href = pdfPreview.url;
+    link.download = pdfPreview.filename;
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -600,6 +686,18 @@ export const EstudianteDetalle = () => {
         return 'CC';
     }
   };
+
+  const teoricasCompletas = (estudiante?.horas_teoricas_completadas ?? 0) >= (estudiante?.horas_teoricas_requeridas ?? 0);
+  const practicasCompletas = (estudiante?.horas_practicas_completadas ?? 0) >= (estudiante?.horas_practicas_requeridas ?? 0);
+  const saldoAlDia = Number(estudiante?.saldo_pendiente ?? 0) <= 0;
+  const estadoCertificable = ['LISTO_EXAMEN', 'GRADUADO'].includes(estudiante?.estado || '');
+  const certificadoBloqueos = [
+    !teoricasCompletas ? 'Horas teoricas incompletas' : '',
+    !practicasCompletas ? 'Horas practicas incompletas' : '',
+    !saldoAlDia ? 'Saldo pendiente' : '',
+    !estadoCertificable ? 'Estado academico no habilitado' : '',
+  ].filter(Boolean);
+  const puedeGenerarCertificado = certificadoBloqueos.length === 0;
 
   if (isLoading) {
     return (
@@ -1017,22 +1115,59 @@ export const EstudianteDetalle = () => {
           </div>
         </div>
       )}
-      {contratoPreviewUrl && (
+      {showRuntModal && (
+        <div className="modal-overlay">
+          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Registrar numero RUNT</h2>
+              <button className="btn-close" onClick={() => setShowRuntModal(false)}>
+                ✕
+              </button>
+            </div>
+            <form className="modal-form" onSubmit={(e) => e.preventDefault()}>
+              {runtError && <div className="error-message">{runtError}</div>}
+              <div className="form-group">
+                <label>Numero RUNT del certificado *</label>
+                <input
+                  className="form-input"
+                  value={runtNumero}
+                  onChange={(e) => setRuntNumero(e.target.value.toUpperCase())}
+                  placeholder="Ej: RUNT-2026-00125"
+                  maxLength={40}
+                  autoFocus
+                />
+                <small className="help-text">
+                  Este dato se solicita una sola vez y quedara bloqueado para el certificado.
+                </small>
+              </div>
+              <div className="modal-footer" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                <button type="button" className="btn-outline" onClick={() => setShowRuntModal(false)}>
+                  Cancelar
+                </button>
+                <button type="button" className="btn" onClick={guardarRuntYGenerar} disabled={runtSaving}>
+                  {runtSaving ? 'Guardando...' : 'Guardar y generar'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {pdfPreview && (
         <div className="pdf-preview-modal">
           <div className="pdf-preview-content" onClick={(e) => e.stopPropagation()}>
             <div className="pdf-preview-header">
-              <h3>Contrato del Estudiante</h3>
+              <h3>{pdfPreview.title}</h3>
               <div className="pdf-preview-actions">
-                <button className="btn-descargar" onClick={descargarContrato}>
+                <button className="btn-descargar" onClick={descargarPdfPreview}>
                   <Download size={18} /> Descargar
                 </button>
-                <button className="btn-cerrar" onClick={cerrarContratoPreview}>
+                <button className="btn-cerrar" onClick={cerrarPdfPreview}>
                   ✕
                 </button>
               </div>
             </div>
             <div className="pdf-preview-body">
-              <iframe src={contratoPreviewUrl} title="Contrato" />
+              <iframe src={pdfPreview.url} title={pdfPreview.title} />
             </div>
           </div>
         </div>
@@ -1048,6 +1183,21 @@ export const EstudianteDetalle = () => {
           </button>
           <button className="btn-action" onClick={handleVerContrato}>
             <FileText size={18} /> Ver Contrato
+          </button>
+          <button className="btn-action" onClick={handleVerHabeasFirmado}>
+            <FileText size={18} /> Ver Habeas firmado
+          </button>
+          <button
+            className="btn-action btn-action-success"
+            onClick={handleVerCertificado}
+            disabled={!puedeGenerarCertificado}
+            title={
+              puedeGenerarCertificado
+                ? 'Generar certificado'
+                : `No disponible: ${certificadoBloqueos.join(' | ')}`
+            }
+          >
+            <Award size={18} /> Ver Certificado
           </button>
         </div>
       </div>
@@ -1071,6 +1221,9 @@ export const EstudianteDetalle = () => {
           </p>
           {estudiante.matricula_numero && (
             <p className="matricula">Matrícula: {estudiante.matricula_numero}</p>
+          )}
+          {estudiante.certificado_runt_numero && (
+            <p className="matricula">RUNT certificado: {estudiante.certificado_runt_numero}</p>
           )}
           
           {/* Badge de origen del cliente */}

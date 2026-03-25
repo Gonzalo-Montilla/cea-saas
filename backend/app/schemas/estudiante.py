@@ -247,6 +247,7 @@ class EstudianteResponse(BaseModel):
     clases_historial: List = []
     servicios: List = []
     servicio_activo_id: Optional[int] = None
+    certificado_runt_numero: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -329,6 +330,18 @@ class EstudianteOtpStartResponse(BaseModel):
 class EstudianteOtpVerifyResponse(BaseModel):
     estudiante: EstudianteResponse
     habeas_email_sent: bool
+
+
+class EstudianteCertificadoRuntRequest(BaseModel):
+    runt_numero: str
+
+    @field_validator("runt_numero")
+    @classmethod
+    def validate_runt_numero(cls, v: str) -> str:
+        value = (v or "").strip().upper()
+        if not re.fullmatch(r"[A-Z0-9\-\/]{4,40}", value):
+            raise ValueError("Numero RUNT invalido. Usa 4-40 caracteres alfanumericos, '-' o '/'.")
+        return value
 
 
 class DefinirServicioRequest(BaseModel):
