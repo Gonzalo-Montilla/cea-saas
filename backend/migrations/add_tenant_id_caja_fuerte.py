@@ -14,16 +14,44 @@ def _ensure_default_tenant(conn) -> int:
         return int(existing[0])
 
     tenant_name = "SIAEC Demo"
-    inserted = conn.execute(
-        text(
-            """
-            INSERT INTO tenants (slug, nombre, display_name, plan, is_active, created_at)
-            VALUES (:slug, :nombre, :display_name, 'FREE', TRUE, NOW())
-            RETURNING id
-            """
-        ),
-        {"slug": tenant_slug, "nombre": tenant_name, "display_name": tenant_name},
-    ).fetchone()
+    existing_cols = {
+        row[0]
+        for row in conn.execute(
+            text(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'tenants'
+                """
+            )
+        ).fetchall()
+    }
+
+    cols = ["slug", "nombre", "display_name", "plan", "is_active", "created_at"]
+    values_sql = [":slug", ":nombre", ":display_name", "'FREE'", "TRUE", "NOW()"]
+    params = {"slug": tenant_slug, "nombre": tenant_name, "display_name": tenant_name}
+
+    # Compatibilidad con esquemas nuevos que marcaron columnas NOT NULL.
+    if "is_demo" in existing_cols:
+        cols.append("is_demo")
+        values_sql.append("FALSE")
+    if "subscription_status" in existing_cols:
+        cols.append("subscription_status")
+        values_sql.append("'TRIAL'")
+    if "billing_cycle" in existing_cols:
+        cols.append("billing_cycle")
+        values_sql.append("'QUARTERLY'")
+    if "monthly_fee" in existing_cols:
+        cols.append("monthly_fee")
+        values_sql.append("0")
+
+    insert_sql = f"""
+        INSERT INTO tenants ({", ".join(cols)})
+        VALUES ({", ".join(values_sql)})
+        RETURNING id
+    """
+    inserted = conn.execute(text(insert_sql), params).fetchone()
     return int(inserted[0])
 
 
