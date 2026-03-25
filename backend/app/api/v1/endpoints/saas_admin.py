@@ -2,15 +2,24 @@ import re
 import secrets
 import csv
 import io
+import os
+import base64
+import urllib.request
+from io import BytesIO
+from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel, EmailStr, field_validator
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.utils import ImageReader
+from reportlab.pdfgen import canvas
 
 from app.api.deps import get_saas_admin_user
 from app.core.config import settings
@@ -19,6 +28,7 @@ from app.core.email import send_email
 from app.core.security import get_password_hash
 from app.models.saas_audit_log import SaasAuditLog
 from app.models.saas_billing_event import SaasBillingEvent
+from app.models.saas_payment_receipt import SaasPaymentReceipt
 from app.models.saas_lead import SaasLead
 from app.models.saas_support_ticket import SaasSupportTicket
 from app.models.tenant_branch import TenantBranch, TenantUserBranch
@@ -97,6 +107,12 @@ MODULE_SUPPORT = "saas_support_manage"
 MODULE_BRANCHES = "saas_branches_manage"
 SUPPORT_STATUSES = {"OPEN", "IN_PROGRESS", "WAITING_CUSTOMER", "RESOLVED", "CLOSED"}
 SUPPORT_PRIORITIES = {"LOW", "MEDIUM", "HIGH", "CRITICAL"}
+SAAS_RECEIPTS_DIR = Path("uploads") / "saas_receipts"
+SAAS_RECEIPTS_DIR.mkdir(parents=True, exist_ok=True)
+SAAS_COMPANY_NAME = "Prometheus Tech"
+SAAS_COMPANY_NIT = "123.123.123-1"
+SAAS_COMPANY_EMAIL = "softwaresiaec@gmail.com"
+SAAS_COMPANY_PHONES = "(+57) 323 5492939 - (+57)316 5393281"
 
 
 class TenantAdminUpdate(BaseModel):
@@ -243,6 +259,10 @@ class BillingPaymentCreate(BaseModel):
     notes: Optional[str] = None
     next_billing_at: Optional[datetime] = None
     set_status_active: bool = True
+
+
+class BillingReceiptResendRequest(BaseModel):
+    to_email: Optional[EmailStr] = None
 
 
 class SaasSupportTicketCreate(BaseModel):
@@ -424,8 +444,8 @@ def _tenant_period_amounts(db: Session, tenant: Tenant) -> dict:
     base_fee = float(tenant.monthly_fee or policy.get("base_fee", 0.0) or 0.0)
     active_branches_total = _get_active_branches_count(db, int(tenant.id))
     active_additional_branches = max(0, active_branches_total - 1)
-    billable_branches = max(0, active_branches_total - FREE_BRANCHES_PER_TENANT)
-    included_free_branches_used = min(active_branches_total, FREE_BRANCHES_PER_TENANT)
+    included_free_branches_used = min(active_additional_branches, FREE_BRANCHES_PER_TENANT)
+    billable_branches = max(0, active_additional_branches - included_free_branches_used)
     extra_branch_fee = float(policy.get("extra_branch_fee", 0.0) or 0.0)
     branch_amount = float(billable_branches) * extra_branch_fee
     subtotal = max(0.0, base_fee + branch_amount)
@@ -570,7 +590,13 @@ def _serialize_lead(lead: SaasLead) -> dict:
     }
 
 
-def _serialize_billing_event(event: SaasBillingEvent) -> dict:
+def _serialize_billing_event(event: SaasBillingEvent, include_receipt: bool = True) -> dict:
+    receipt = None
+    if include_receipt:
+        try:
+            receipt = event.receipt if hasattr(event, "receipt") else None
+        except Exception:
+            receipt = None
     return {
         "id": event.id,
         "tenant_id": event.tenant_id,
@@ -584,6 +610,8 @@ def _serialize_billing_event(event: SaasBillingEvent) -> dict:
         "due_at": event.due_at,
         "reference": event.reference,
         "notes": event.notes,
+        "receipt": _serialize_payment_receipt(receipt),
+        "receipt_available": bool(receipt and receipt.file_path),
         "created_at": event.created_at,
     }
 
@@ -643,6 +671,238 @@ def _cycle_days(cycle: Optional[str]) -> int:
 
 def _billing_currency(amount: float) -> str:
     return f"${amount:,.0f} COP".replace(",", ".")
+
+
+def _split_total_with_vat(total_amount: float, iva_rate: float = VAT_RATE) -> tuple[float, float]:
+    if total_amount <= 0:
+        return 0.0, 0.0
+    divisor = 1.0 + max(0.0, float(iva_rate or 0.0))
+    subtotal = round(float(total_amount) / divisor, 2)
+    iva_amount = round(float(total_amount) - subtotal, 2)
+    return subtotal, iva_amount
+
+
+def _next_receipt_number(db: Session) -> str:
+    current_year = datetime.utcnow().year
+    prefix = f"REC-SAA-{current_year}-"
+    latest = db.query(SaasPaymentReceipt).filter(
+        SaasPaymentReceipt.receipt_number.like(f"{prefix}%")
+    ).order_by(SaasPaymentReceipt.id.desc()).first()
+    if latest and latest.receipt_number:
+        try:
+            seq = int(str(latest.receipt_number).split("-")[-1]) + 1
+        except Exception:
+            seq = 1
+    else:
+        seq = 1
+    return f"{prefix}{seq:06d}"
+
+
+def _render_payment_receipt_pdf(
+    receipt_number: str,
+    tenant: Tenant,
+    event: SaasBillingEvent,
+    pricing: dict,
+    recorded_amount: float,
+) -> bytes:
+    def _resolve_logo_for_pdf_saas() -> Optional[object]:
+        # SaaS receipt must always use SIAEC brand logo (never tenant logo).
+        raw = settings.BRAND_LOGO_PATH or os.getenv("BRAND_LOGO_PATH") or ""
+        repo_root = Path(__file__).resolve().parents[5]
+        if not raw:
+            fallback_candidates = [
+                repo_root / "frontend" / "public" / "logo-siaec-sin-fondo.png",
+                repo_root / "frontend" / "public" / "logo-siaec.png",
+                repo_root / "frontend" / "assets" / "logo-siaec-sin-fondo.png",
+                repo_root / "frontend" / "assets" / "logo-siaec.png",
+            ]
+            for default_logo in fallback_candidates:
+                if default_logo.exists():
+                    return str(default_logo)
+            return None
+        if raw.startswith("data:image"):
+            try:
+                _header, encoded = raw.split(",", 1)
+                return BytesIO(base64.b64decode(encoded))
+            except Exception:
+                return None
+        if raw.startswith("http://") or raw.startswith("https://"):
+            try:
+                req = urllib.request.Request(raw, headers={"User-Agent": "SIAEC-SaaS-PDF/1.0"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return BytesIO(resp.read())
+            except Exception:
+                return None
+        if raw.startswith("/"):
+            rel = raw.lstrip("/")
+            candidates = [
+                repo_root / "frontend" / "public" / rel,
+                repo_root / "frontend" / "assets" / rel,
+            ]
+            for path in candidates:
+                if path.exists():
+                    return str(path)
+        if os.path.exists(raw):
+            return raw
+        return None
+
+    def _pdf_kv(c: canvas.Canvas, label: str, value: str, y: int) -> int:
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(120, y, f"{label}:")
+        c.setFont("Helvetica", 10)
+        c.drawString(300, y, value)
+        return y - 18
+
+    def _pdf_section(c: canvas.Canvas, title: str, y: int) -> int:
+        title = title.upper()
+        x = 80
+        section_width = 452
+        section_height = 18
+        rect_y = y - 12
+        c.setFillColor(colors.Color(0.95, 0.96, 0.98))
+        c.setStrokeColor(colors.Color(0.88, 0.90, 0.94))
+        c.rect(x, rect_y, section_width, section_height, fill=1, stroke=1)
+        c.setFillColor(colors.black)
+        c.setFont("Helvetica-Bold", 11)
+        text_width = c.stringWidth(title, "Helvetica-Bold", 11)
+        c.drawString(x + (section_width - text_width) / 2, y - 8, title)
+        return y - 24
+
+    subtotal_amount = float(pricing.get("subtotal", 0.0) or 0.0)
+    iva_rate = float(pricing.get("iva_rate", VAT_RATE) or VAT_RATE)
+    iva_amount = float(pricing.get("iva_amount", 0.0) or 0.0)
+    total_amount = float(pricing.get("total", 0.0) or 0.0)
+    plan_label = str(pricing.get("plan_label") or _plan_public_label(tenant.plan))
+    duration_days = int(pricing.get("duration_days", 30) or 30)
+    base_fee = float(pricing.get("base_fee", 0.0) or 0.0)
+    active_additional = int(pricing.get("active_additional_branches", 0) or 0)
+    free_included = int(pricing.get("included_free_branches_used", 0) or 0)
+    billable_branches = int(pricing.get("billable_branches", 0) or 0)
+    extra_branch_fee = float(pricing.get("extra_branch_fee", 0.0) or 0.0)
+    branch_amount = float(pricing.get("branch_amount", 0.0) or 0.0)
+    paid_at_text = event.paid_at.strftime("%Y-%m-%d %H:%M:%S") if event.paid_at else "-"
+    due_at_text = event.due_at.strftime("%Y-%m-%d") if event.due_at else "-"
+
+    buffer = BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=letter)
+
+    logo_src = _resolve_logo_for_pdf_saas()
+    if logo_src:
+        try:
+            logo = ImageReader(logo_src)
+            pdf.drawImage(logo, 186, 675, width=240, height=120, preserveAspectRatio=True, mask='auto')
+        except Exception:
+            pass
+
+    pdf.setFont("Helvetica", 11)
+    pdf.drawCentredString(306, 664, f"{SAAS_COMPANY_NAME} | NIT {SAAS_COMPANY_NIT}")
+    pdf.setFont("Helvetica-Bold", 14)
+    pdf.drawCentredString(306, 648, "Recibo de pago")
+
+    y = 618
+    pdf.setLineWidth(0.5)
+    pdf.line(80, y, 532, y)
+    y -= 20
+
+    y = _pdf_section(pdf, "Datos del recibo", y)
+    y = _pdf_kv(pdf, "Número", receipt_number, y)
+    y = _pdf_kv(pdf, "Fecha emisión", f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC", y)
+    y = _pdf_kv(pdf, "Moneda", event.currency or "COP", y)
+
+    y -= 6
+    y = _pdf_section(pdf, "Datos de la escuela", y)
+    y = _pdf_kv(pdf, "Escuela", str(tenant.display_name or tenant.nombre or tenant.slug), y)
+    y = _pdf_kv(pdf, "Código", str(tenant.slug), y)
+    y = _pdf_kv(pdf, "NIT", str(tenant.nit or "-"), y)
+    y = _pdf_kv(pdf, "Email contacto", str(tenant.contacto_email or "-"), y)
+    y = _pdf_kv(pdf, "Plan comercial", f"{plan_label} ({duration_days} días)", y)
+
+    y -= 6
+    y = _pdf_section(pdf, "Detalle de cobro del período", y)
+    y = _pdf_kv(pdf, "Fecha pago registrado", paid_at_text, y)
+    y = _pdf_kv(pdf, "Referencia", str(event.reference or "-"), y)
+    y = _pdf_kv(pdf, "Corte/período", f"vence {due_at_text}", y)
+    y = _pdf_kv(pdf, "Tarifa base plan (sin IVA)", _billing_currency(base_fee), y)
+    y = _pdf_kv(pdf, "Sucursales adicionales activas", str(active_additional), y)
+    y = _pdf_kv(pdf, "Sucursales incluidas sin costo", str(free_included), y)
+    y = _pdf_kv(
+        pdf,
+        "Sucursales cobradas",
+        f"{billable_branches} x {_billing_currency(extra_branch_fee)} ({_billing_currency(branch_amount)})",
+        y,
+    )
+
+    y -= 6
+    y = _pdf_section(pdf, "Resumen de cobro", y)
+    y = _pdf_kv(pdf, "Subtotal (sin IVA)", _billing_currency(subtotal_amount), y)
+    y = _pdf_kv(pdf, f"IVA ({int(round(iva_rate * 100))}%)", _billing_currency(iva_amount), y)
+    y = _pdf_kv(pdf, "Total período (con IVA)", _billing_currency(total_amount), y)
+    y = _pdf_kv(pdf, "Monto registrado en esta transacción", _billing_currency(recorded_amount), y)
+
+    y -= 6
+    y = _pdf_section(pdf, "Observaciones", y)
+    y = _pdf_kv(pdf, "Notas", str(event.notes or "-"), y)
+    y -= 4
+    pdf.setFont("Helvetica", 9)
+    pdf.drawCentredString(306, y, f"Generado por {SAAS_COMPANY_NAME} | Plataforma SIAEC")
+
+    pdf.showPage()
+    pdf.save()
+    buffer.seek(0)
+    return buffer.read()
+
+
+def _save_receipt_pdf(receipt_number: str, pdf_bytes: bytes) -> str:
+    safe_name = re.sub(r"[^A-Za-z0-9_-]+", "-", receipt_number).strip("-") or "recibo-saas"
+    file_path = SAAS_RECEIPTS_DIR / f"{safe_name}.pdf"
+    file_path.write_bytes(pdf_bytes)
+    return str(file_path.resolve())
+
+
+def _build_payment_receipt_email_body(
+    tenant: Tenant,
+    receipt_number: str,
+    event: SaasBillingEvent,
+    total_amount: float,
+) -> str:
+    school_name = tenant.display_name or tenant.nombre or tenant.slug
+    paid_at_text = event.paid_at.strftime("%Y-%m-%d %H:%M") if event.paid_at else datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+    return (
+        f"Hola equipo de {school_name},\n\n"
+        "Adjuntamos el comprobante de pago SaaS.\n\n"
+        f"- Recibo: {receipt_number}\n"
+        f"- Fecha de pago: {paid_at_text}\n"
+        f"- Total pagado: {_billing_currency(total_amount)}\n"
+        f"- Referencia: {event.reference or '-'}\n\n"
+        "Gracias por su pago.\n\n"
+        f"{settings.SMTP_FROM_NAME} - Backoffice SaaS"
+    )
+
+
+def _serialize_payment_receipt(receipt: SaasPaymentReceipt | None) -> Optional[dict]:
+    if not receipt:
+        return None
+    return {
+        "id": receipt.id,
+        "receipt_number": receipt.receipt_number,
+        "subtotal_amount": float(receipt.subtotal_amount or 0),
+        "iva_rate": float(receipt.iva_rate or 0),
+        "iva_amount": float(receipt.iva_amount or 0),
+        "total_amount": float(receipt.total_amount or 0),
+        "sent_to_email": receipt.sent_to_email,
+        "sent_at": receipt.sent_at,
+        "created_at": receipt.created_at,
+    }
+
+
+def _saas_receipts_table_exists(db: Session) -> bool:
+    try:
+        exists = db.execute(
+            text("SELECT to_regclass('public.saas_payment_receipts')")
+        ).scalar()
+        return bool(exists)
+    except Exception:
+        return False
 
 
 def _build_overdue_email_body(tenant: Tenant, days_overdue: int, pending_amount: Optional[float] = None) -> str:
@@ -1554,10 +1814,11 @@ def list_billing_events(
                 func.lower(func.coalesce(SaasBillingEvent.notes, "")).like(term),
             )
         )
+    receipts_enabled = _saas_receipts_table_exists(db)
     total = query.count()
     items = query.order_by(SaasBillingEvent.created_at.desc()).offset(skip).limit(limit).all()
     return {
-        "items": [_serialize_billing_event(row) for row in items],
+        "items": [_serialize_billing_event(row, include_receipt=receipts_enabled) for row in items],
         "total": int(total),
         "skip": skip,
         "limit": limit,
@@ -1593,6 +1854,47 @@ def record_tenant_payment(
         notes=_normalize_text(payload.notes),
     )
     db.add(event)
+    db.flush()
+
+    receipt = None
+    receipt_number = None
+    sent_email = False
+    recipient_email = (tenant.contacto_email or "").strip().lower()
+    receipts_enabled = _saas_receipts_table_exists(db)
+    if receipts_enabled:
+        subtotal_amount = float(pricing.get("subtotal", 0.0) or 0.0)
+        iva_amount = float(pricing.get("iva_amount", 0.0) or 0.0)
+        receipt_number = _next_receipt_number(db)
+        receipt_pdf_bytes = _render_payment_receipt_pdf(
+            receipt_number=receipt_number,
+            tenant=tenant,
+            event=event,
+            pricing=pricing,
+            recorded_amount=amount,
+        )
+        receipt_file_path = _save_receipt_pdf(receipt_number, receipt_pdf_bytes)
+        receipt = SaasPaymentReceipt(
+            billing_event_id=event.id,
+            tenant_id=tenant.id,
+            receipt_number=receipt_number,
+            subtotal_amount=subtotal_amount,
+            iva_rate=VAT_RATE,
+            iva_amount=iva_amount,
+            total_amount=amount,
+            file_path=receipt_file_path,
+        )
+        db.add(receipt)
+
+        if recipient_email:
+            sent_email = send_email(
+                to_email=recipient_email,
+                subject=f"[{settings.SMTP_FROM_NAME}] Recibo de pago {receipt_number}",
+                body=_build_payment_receipt_email_body(tenant, receipt_number, event, amount),
+                attachment=(f"{receipt_number}.pdf", receipt_pdf_bytes, "application/pdf"),
+            )
+            if sent_email:
+                receipt.sent_to_email = recipient_email
+                receipt.sent_at = datetime.utcnow()
 
     tenant.last_payment_at = paid_at
     if payload.next_billing_at:
@@ -1616,11 +1918,17 @@ def record_tenant_payment(
             "paid_at": paid_at,
             "next_billing_at": tenant.next_billing_at,
             "reference": event.reference,
+            "receipt_number": receipt_number,
+            "receipt_sent": bool(sent_email),
+            "receipt_email": recipient_email or None,
+            "receipts_enabled": bool(receipts_enabled),
         },
     )
     db.commit()
     db.refresh(tenant)
     db.refresh(event)
+    if receipt:
+        db.refresh(receipt)
     return {
         "tenant": {
             "id": tenant.id,
@@ -1629,8 +1937,99 @@ def record_tenant_payment(
             "next_billing_at": tenant.next_billing_at,
             "last_payment_at": tenant.last_payment_at,
         },
-        "event": _serialize_billing_event(event),
+        "event": _serialize_billing_event(event, include_receipt=receipts_enabled),
+        "receipt": _serialize_payment_receipt(receipt),
+        "receipt_sent": bool(sent_email),
+        "receipts_enabled": bool(receipts_enabled),
     }
+
+
+@router.get("/billing/events/{event_id}/receipt/download")
+def download_billing_receipt(
+    event_id: int,
+    db: Session = Depends(get_db),
+    _admin: Usuario = Depends(get_saas_admin_user),
+):
+    _require_saas_module(_admin, MODULE_BILLING, "descargar recibo de pago")
+    if not _saas_receipts_table_exists(db):
+        raise HTTPException(
+            status_code=503,
+            detail="Recibos SaaS no habilitados aún. Ejecuta la migración create_saas_payment_receipts.",
+        )
+    event = db.query(SaasBillingEvent).filter(SaasBillingEvent.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Evento de facturación no encontrado")
+    receipt = db.query(SaasPaymentReceipt).filter(
+        SaasPaymentReceipt.billing_event_id == event.id
+    ).first()
+    if not receipt or not receipt.file_path:
+        raise HTTPException(status_code=404, detail="Recibo no disponible para este evento")
+    file_path = Path(receipt.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Archivo de recibo no encontrado")
+    return FileResponse(
+        path=str(file_path),
+        filename=f"{receipt.receipt_number}.pdf",
+        media_type="application/pdf",
+    )
+
+
+@router.post("/billing/events/{event_id}/receipt/resend")
+def resend_billing_receipt(
+    event_id: int,
+    payload: BillingReceiptResendRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_saas_admin_user),
+):
+    _require_saas_module(admin, MODULE_BILLING, "reenviar recibo de pago")
+    if not _saas_receipts_table_exists(db):
+        raise HTTPException(
+            status_code=503,
+            detail="Recibos SaaS no habilitados aún. Ejecuta la migración create_saas_payment_receipts.",
+        )
+    event = db.query(SaasBillingEvent).filter(SaasBillingEvent.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Evento de facturación no encontrado")
+    receipt = db.query(SaasPaymentReceipt).filter(
+        SaasPaymentReceipt.billing_event_id == event.id
+    ).first()
+    if not receipt or not receipt.file_path:
+        raise HTTPException(status_code=404, detail="Recibo no disponible para este evento")
+    tenant = db.query(Tenant).filter(Tenant.id == event.tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant no encontrado")
+
+    file_path = Path(receipt.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Archivo de recibo no encontrado")
+    target_email = str(payload.to_email or tenant.contacto_email or "").strip().lower()
+    if not target_email:
+        raise HTTPException(status_code=400, detail="No hay correo destino para enviar el recibo")
+    pdf_bytes = file_path.read_bytes()
+    sent = send_email(
+        to_email=target_email,
+        subject=f"[{settings.SMTP_FROM_NAME}] Recibo de pago {receipt.receipt_number}",
+        body=_build_payment_receipt_email_body(tenant, receipt.receipt_number, event, float(receipt.total_amount or 0)),
+        attachment=(f"{receipt.receipt_number}.pdf", pdf_bytes, "application/pdf"),
+    )
+    if sent:
+        receipt.sent_to_email = target_email
+        receipt.sent_at = datetime.utcnow()
+
+    _write_audit_log(
+        db=db,
+        actor=admin,
+        request=request,
+        action="billing.receipt_resent",
+        entity_type="billing_event",
+        entity_id=str(event.id),
+        summary=f"Reenvió recibo {receipt.receipt_number} del tenant {tenant.slug}",
+        payload={"event_id": event.id, "receipt_number": receipt.receipt_number, "to_email": target_email, "sent": bool(sent)},
+    )
+    db.commit()
+    db.refresh(receipt)
+    return {"sent": bool(sent), "to_email": target_email, "receipt": _serialize_payment_receipt(receipt)}
 
 
 @router.post("/billing/run-overdue-check")

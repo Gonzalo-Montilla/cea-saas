@@ -870,6 +870,18 @@ export interface SaasBillingEventItem {
   due_at?: string | null;
   reference?: string | null;
   notes?: string | null;
+  receipt_available?: boolean;
+  receipt?: {
+    id: number;
+    receipt_number: string;
+    subtotal_amount: number;
+    iva_rate: number;
+    iva_amount: number;
+    total_amount: number;
+    sent_to_email?: string | null;
+    sent_at?: string | null;
+    created_at: string;
+  } | null;
   created_at: string;
 }
 
@@ -1058,8 +1070,21 @@ export const saasAdminAPI = {
       next_billing_at?: string | null;
       set_status_active?: boolean;
     }
-  ): Promise<{ tenant: Partial<SaasTenantItem>; event: SaasBillingEventItem }> => {
+  ): Promise<{ tenant: Partial<SaasTenantItem>; event: SaasBillingEventItem; receipt?: any; receipt_sent?: boolean }> => {
     const response = await api.post(`/saas-admin/billing/tenants/${tenantId}/record-payment`, data);
+    return response.data;
+  },
+  downloadBillingReceipt: async (eventId: number): Promise<Blob> => {
+    const response = await api.get(`/saas-admin/billing/events/${eventId}/receipt/download`, {
+      responseType: 'blob',
+    });
+    return response.data;
+  },
+  resendBillingReceipt: async (
+    eventId: number,
+    data?: { to_email?: string | null }
+  ): Promise<{ sent: boolean; to_email: string; receipt?: any }> => {
+    const response = await api.post(`/saas-admin/billing/events/${eventId}/receipt/resend`, data || {});
     return response.data;
   },
   runBillingOverdueCheck: async (): Promise<{ updated_tenants: number }> => {

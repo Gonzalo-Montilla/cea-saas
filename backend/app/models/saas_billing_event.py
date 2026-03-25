@@ -22,3 +22,4 @@ class SaasBillingEvent(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False, index=True)
 
     tenant = relationship("Tenant")
+    receipt = relationship("SaasPaymentReceipt", back_populates="billing_event", uselist=False)

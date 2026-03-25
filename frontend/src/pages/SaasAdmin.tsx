@@ -81,6 +81,7 @@ const AUDIT_ACTIONS = [
   'mfa.backup_codes_regenerated',
   'mfa.backup_code_used',
   'billing.payment_recorded',
+  'billing.receipt_resent',
   'billing.overdue_check_run',
   'billing.cycle_charges_run',
   'billing.overdue_reminders_sent',
@@ -110,6 +111,11 @@ const money = (value: number) =>
 const planLabel = (plan?: string | null) => PLAN_LABELS[String(plan || '').toUpperCase()] || String(plan || '-');
 const normalizeBillingCycle = (value?: string | null) =>
   String(value || '').toUpperCase() === 'MONTHLY' ? 'QUARTERLY' : (value || 'QUARTERLY');
+const normalizeComparableDate = (value?: string | null) => {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  return raw.slice(0, 10);
+};
 const toPlanCode = (value?: string | null) => String(value || '').trim().toUpperCase() || 'FREE';
 const FREE_INCLUDED_ADDITIONAL_BRANCHES = 1;
 const computeTenantPricingPreview = (tenant: SaasTenantItem) => {
@@ -254,6 +260,13 @@ export const SaasAdmin = () => {
   const [processingCycleCharges, setProcessingCycleCharges] = useState(false);
   const [sendingOverdueReminders, setSendingOverdueReminders] = useState(false);
   const [savingLeadId, setSavingLeadId] = useState<number | null>(null);
+  const [receiptActionEventId, setReceiptActionEventId] = useState<number | null>(null);
+  const [receiptPreview, setReceiptPreview] = useState<null | {
+    eventId: number;
+    receiptNumber: string;
+    objectUrl: string;
+  }>(null);
+  const [receiptPreviewZoom, setReceiptPreviewZoom] = useState(100);
   const [savingSupportTicketId, setSavingSupportTicketId] = useState<number | null>(null);
   const [processingSupportAlerts, setProcessingSupportAlerts] = useState(false);
   const [submittingConversion, setSubmittingConversion] = useState(false);
@@ -745,25 +758,25 @@ export const SaasAdmin = () => {
       plan: tenantProfile.plan || 'FREE',
       is_active: Boolean(tenantProfile.is_active),
       is_demo: Boolean(tenantProfile.is_demo),
-      demo_ends_at: tenantProfile.demo_ends_at || null,
+      demo_ends_at: normalizeComparableDate(tenantProfile.demo_ends_at),
       contacto_nombre: tenantProfile.contacto_nombre || null,
       contacto_email: tenantProfile.contacto_email || null,
       contacto_telefono: tenantProfile.contacto_telefono || null,
       subscription_status: tenantProfile.subscription_status || 'TRIAL',
       billing_cycle: normalizeBillingCycle(tenantProfile.billing_cycle),
-      next_billing_at: tenantProfile.next_billing_at || null,
+      next_billing_at: normalizeComparableDate(tenantProfile.next_billing_at),
     };
     const baselineComparable = {
       plan: tenantProfileBaseline.plan || 'FREE',
       is_active: Boolean(tenantProfileBaseline.is_active),
       is_demo: Boolean(tenantProfileBaseline.is_demo),
-      demo_ends_at: tenantProfileBaseline.demo_ends_at || null,
+      demo_ends_at: normalizeComparableDate(tenantProfileBaseline.demo_ends_at),
       contacto_nombre: tenantProfileBaseline.contacto_nombre || null,
       contacto_email: tenantProfileBaseline.contacto_email || null,
       contacto_telefono: tenantProfileBaseline.contacto_telefono || null,
       subscription_status: tenantProfileBaseline.subscription_status || 'TRIAL',
       billing_cycle: normalizeBillingCycle(tenantProfileBaseline.billing_cycle),
-      next_billing_at: tenantProfileBaseline.next_billing_at || null,
+      next_billing_at: normalizeComparableDate(tenantProfileBaseline.next_billing_at),
     };
     return JSON.stringify(currentComparable) !== JSON.stringify(baselineComparable);
   }, [tenantProfile, tenantProfileBaseline]);
@@ -807,7 +820,7 @@ export const SaasAdmin = () => {
   const onSaveTenant = async (tenant: SaasTenantItem) => {
     try {
       setSavingTenantId(tenant.id);
-      await saasAdminAPI.updateTenant(tenant.id, {
+      const updatedTenant = await saasAdminAPI.updateTenant(tenant.id, {
         plan: tenant.plan,
         is_active: tenant.is_active,
         is_demo: tenant.is_demo,
@@ -819,16 +832,28 @@ export const SaasAdmin = () => {
         billing_cycle: normalizeBillingCycle(tenant.billing_cycle),
         next_billing_at: tenant.next_billing_at || null,
       });
+      updateTenantDraft(tenant.id, (current) => ({
+        ...current,
+        ...updatedTenant,
+        billing_cycle: normalizeBillingCycle(updatedTenant.billing_cycle),
+      }));
       setTenantProfileBaseline((prev) => {
         if (!prev || prev.id !== tenant.id) return prev;
         return {
-          ...tenant,
+          ...prev,
+          ...updatedTenant,
+          billing_cycle: normalizeBillingCycle(updatedTenant.billing_cycle),
         };
       });
       if (canTenants || canBilling) await loadData();
       if (canAudit) await loadAuditLogs();
+      setInfoMessage('Cambios guardados correctamente.');
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo actualizar el tenant');
+      if (err?.response?.status === 401) {
+        setError('Tu sesión expiró. Inicia sesión nuevamente para guardar cambios.');
+      } else {
+        setError(err?.response?.data?.detail || 'No se pudo actualizar el tenant');
+      }
     } finally {
       setSavingTenantId(null);
     }
@@ -1073,6 +1098,14 @@ export const SaasAdmin = () => {
     setPaymentModalTenant(null);
   };
 
+  const closeReceiptPreviewModal = () => {
+    if (receiptPreview?.objectUrl) {
+      URL.revokeObjectURL(receiptPreview.objectUrl);
+    }
+    setReceiptPreview(null);
+    setReceiptPreviewZoom(100);
+  };
+
   const submitTenantPayment = async () => {
     if (!paymentModalTenant) return;
     const amountValue = Number(paymentForm.amount || 0);
@@ -1084,7 +1117,7 @@ export const SaasAdmin = () => {
       setRecordingPayment(true);
       setError('');
       setInfoMessage('');
-      await saasAdminAPI.recordTenantPayment(paymentModalTenant.id, {
+      const result = await saasAdminAPI.recordTenantPayment(paymentModalTenant.id, {
         amount: amountValue,
         paid_at: paymentForm.paid_at ? `${paymentForm.paid_at}:00` : null,
         reference: paymentForm.reference.trim() || null,
@@ -1095,11 +1128,85 @@ export const SaasAdmin = () => {
       if (canTenants || canBilling) await loadData();
       if (canBilling) await loadBillingEvents();
       if (canAudit) await loadAuditLogs();
-      setInfoMessage('Pago registrado correctamente.');
+      if (result?.receipts_enabled === false) {
+        setInfoMessage('Pago registrado correctamente. Recibos SaaS no habilitados aún (falta migración de base de datos).');
+      } else if (result?.receipt_sent) {
+        setInfoMessage('Pago registrado correctamente. Recibo PDF generado y enviado por correo.');
+      } else {
+        setInfoMessage('Pago registrado correctamente. Recibo PDF generado (envío de correo pendiente).');
+      }
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'No se pudo registrar el pago');
     } finally {
       setRecordingPayment(false);
+    }
+  };
+
+  const downloadReceipt = async (row: SaasBillingEventItem) => {
+    if (!row?.id) return;
+    try {
+      setReceiptActionEventId(row.id);
+      setError('');
+      const blob = await saasAdminAPI.downloadBillingReceipt(row.id);
+      const receiptNumber = row.receipt?.receipt_number || `recibo-evento-${row.id}`;
+      const objectUrl = URL.createObjectURL(blob);
+      if (receiptPreview?.objectUrl) {
+        URL.revokeObjectURL(receiptPreview.objectUrl);
+      }
+      setReceiptPreview({
+        eventId: row.id,
+        receiptNumber,
+        objectUrl,
+      });
+      setReceiptPreviewZoom(100);
+      setInfoMessage(`Vista previa lista: ${receiptNumber}.pdf`);
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'No se pudo abrir el recibo');
+    } finally {
+      setReceiptActionEventId(null);
+    }
+  };
+
+  const downloadReceiptFromPreview = () => {
+    if (!receiptPreview?.objectUrl) return;
+    const link = document.createElement('a');
+    link.href = receiptPreview.objectUrl;
+    link.download = `${receiptPreview.receiptNumber}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setInfoMessage(`Recibo descargado: ${receiptPreview.receiptNumber}.pdf`);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (receiptPreview?.objectUrl) {
+        URL.revokeObjectURL(receiptPreview.objectUrl);
+      }
+    };
+  }, [receiptPreview]);
+
+  const resendReceipt = async (row: SaasBillingEventItem) => {
+    if (!row?.id) return;
+    try {
+      setReceiptActionEventId(row.id);
+      setError('');
+      const suggested = row.receipt?.sent_to_email || '';
+      const input = window.prompt('Correo destino para reenviar recibo (deja vacío para usar el contacto del tenant):', suggested);
+      if (input === null) return;
+      const toEmail = input.trim() || null;
+      const result = await saasAdminAPI.resendBillingReceipt(row.id, { to_email: toEmail });
+      if (canBilling) await loadBillingEvents(billingSkip, billingLimit);
+      if (canAudit) await loadAuditLogs();
+      setInfoMessage(
+        result.sent
+          ? `Recibo reenviado a ${result.to_email}.`
+          : `No se pudo enviar el recibo a ${result.to_email}.`
+      );
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'No se pudo reenviar el recibo');
+    } finally {
+      setReceiptActionEventId(null);
     }
   };
 
@@ -2459,8 +2566,10 @@ export const SaasAdmin = () => {
                 <th>Evento</th>
                 <th>Estado</th>
                 <th>Monto</th>
+                <th>Recibo</th>
                 <th>Referencia</th>
                 <th>Pago/Vence</th>
+                <th>Acción</th>
               </tr>
             </thead>
             <tbody>
@@ -2471,16 +2580,41 @@ export const SaasAdmin = () => {
                   <td><span className={statusClass(row.event_type)}>{row.event_type}</span></td>
                   <td><span className={statusClass(row.status)}>{row.status}</span></td>
                   <td>{money(Number(row.amount || 0))}</td>
+                  <td>{row.receipt?.receipt_number || '-'}</td>
                   <td>{row.reference || '-'}</td>
                   <td>
                     {row.paid_at ? `Pagado: ${new Date(row.paid_at).toLocaleDateString('es-CO')}` : '-'}
                     {row.due_at ? ` | Vence: ${new Date(row.due_at).toLocaleDateString('es-CO')}` : ''}
                   </td>
+                  <td>
+                    {row.event_type === 'PAYMENT_RECORDED' && row.receipt_available ? (
+                      <div className="saas-user-actions">
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          onClick={() => void downloadReceipt(row)}
+                          disabled={receiptActionEventId === row.id}
+                        >
+                          Ver PDF
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          onClick={() => void resendReceipt(row)}
+                          disabled={receiptActionEventId === row.id}
+                        >
+                          Reenviar
+                        </button>
+                      </div>
+                    ) : (
+                      '-'
+                    )}
+                  </td>
                 </tr>
               ))}
               {billingEvents.length === 0 && (
                 <tr>
-                  <td colSpan={7}>{billingLoading ? 'Cargando...' : 'No hay eventos de facturación registrados'}</td>
+                  <td colSpan={9}>{billingLoading ? 'Cargando...' : 'No hay eventos de facturación registrados'}</td>
                 </tr>
               )}
             </tbody>
@@ -3535,6 +3669,65 @@ export const SaasAdmin = () => {
                 </>
               );
             })()}
+          </div>
+        </div>
+      )}
+
+      {receiptPreview && (
+        <div className="saas-modal-backdrop" onClick={closeReceiptPreviewModal}>
+          <div className="saas-modal saas-modal-receipt-preview" onClick={(e) => e.stopPropagation()}>
+            <div className="saas-card-header bo-card-header">
+              <h3>Vista previa del recibo</h3>
+              <span>{receiptPreview.receiptNumber}.pdf</span>
+            </div>
+            <div className="saas-receipt-preview-toolbar">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setReceiptPreviewZoom((prev) => Math.max(50, prev - 10))}
+              >
+                Zoom -
+              </button>
+              <span>{receiptPreviewZoom}%</span>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setReceiptPreviewZoom((prev) => Math.min(200, prev + 10))}
+              >
+                Zoom +
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setReceiptPreviewZoom(100)}
+              >
+                100%
+              </button>
+            </div>
+            <div className="saas-receipt-preview-frame-wrap">
+              <div
+                className="saas-receipt-preview-zoom-surface"
+                style={{
+                  transform: `scale(${receiptPreviewZoom / 100})`,
+                  width: `${100 / (receiptPreviewZoom / 100)}%`,
+                  height: `${72 / (receiptPreviewZoom / 100)}vh`,
+                }}
+              >
+                <iframe
+                  title={`Recibo ${receiptPreview.receiptNumber}`}
+                  src={receiptPreview.objectUrl}
+                  className="saas-receipt-preview-frame"
+                />
+              </div>
+            </div>
+            <div className="saas-user-actions">
+              <button type="button" className="btn-secondary" onClick={closeReceiptPreviewModal}>
+                Cerrar
+              </button>
+              <button type="button" className="btn-primary" onClick={downloadReceiptFromPreview}>
+                Descargar PDF
+              </button>
+            </div>
           </div>
         </div>
       )}
