@@ -322,6 +322,40 @@ export const estudiantesAPI = {
     const response = await api.post('/estudiantes/', data);
     return response.data;
   },
+  startOtp: async (data: any): Promise<{
+    session_token: string;
+    expires_at: string;
+    cooldown_seconds: number;
+    email: string;
+    otp_sent: boolean;
+    debug_otp_code?: string | null;
+    warning_message?: string | null;
+  }> => {
+    const response = await api.post('/estudiantes/otp/start', data);
+    return response.data;
+  },
+  resendOtp: async (sessionToken: string): Promise<{
+    session_token: string;
+    expires_at: string;
+    cooldown_seconds: number;
+    email: string;
+    otp_sent: boolean;
+    debug_otp_code?: string | null;
+    warning_message?: string | null;
+  }> => {
+    const response = await api.post('/estudiantes/otp/resend', { session_token: sessionToken });
+    return response.data;
+  },
+  verifyOtpAndCreate: async (sessionToken: string, otpCode: string): Promise<{
+    estudiante: any;
+    habeas_email_sent: boolean;
+  }> => {
+    const response = await api.post('/estudiantes/otp/verify', {
+      session_token: sessionToken,
+      otp_code: otpCode,
+    });
+    return response.data;
+  },
 
   getAll: async (params?: { skip?: number; limit?: number; search?: string }): Promise<any> => {
     const queryParams = new URLSearchParams();

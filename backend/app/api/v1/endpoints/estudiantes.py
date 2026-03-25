@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Response, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
@@ -6,10 +6,13 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
+import secrets
 import os
 import base64
+import hashlib
 import logging
 import urllib.request
+from pathlib import Path
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib.utils import ImageReader
@@ -22,6 +25,7 @@ from app.core.config import settings
 from app.core.email import send_email
 from app.models.usuario import Usuario, RolUsuario
 from app.models.estudiante import Estudiante, EstadoEstudiante, CategoriaLicencia, OrigenCliente, TipoServicio
+from app.models.estudiante_otp_session import EstudianteOtpSession
 from app.models.pago import Pago, MetodoPago, EstadoPago
 from app.models.clase import Instructor, Vehiculo, EstadoInstructor
 from app.models.compromiso_pago import CompromisoPago, CuotaPago, FrecuenciaPago, EstadoCuota
@@ -35,12 +39,23 @@ from app.schemas.estudiante import (
     DefinirServicioRequest,
     AmpliarServicioRequest,
     AcreditarHorasRequest,
-    CorregirServicioRequest
+    CorregirServicioRequest,
+    EstudianteOtpResendRequest,
+    EstudianteOtpVerifyRequest,
+    EstudianteOtpStartResponse,
+    EstudianteOtpVerifyResponse,
 )
 from app.api.deps import get_current_active_user, get_admin_or_coordinador_or_cajero, get_required_tenant, require_role
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+OTP_EXPIRES_MINUTES = 10
+OTP_MAX_ATTEMPTS = 5
+OTP_RESEND_COOLDOWN_SECONDS = 60
+OTP_MAX_RESENDS = 5
+LOCAL_ENV_NAMES = {"local", "dev", "development"}
+HABEAS_SIGNED_DOCS_DIR = Path("uploads") / "habeas_signed"
+HABEAS_SIGNED_DOCS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _generate_matricula_numero(db: Session, current_tenant: Tenant) -> str:
@@ -57,6 +72,162 @@ def _generate_matricula_numero(db: Session, current_tenant: Tenant) -> str:
         sequence += 1
 
 
+def _mask_email(email: str) -> str:
+    clean = (email or "").strip().lower()
+    if "@" not in clean:
+        return clean
+    local, domain = clean.split("@", 1)
+    if len(local) <= 2:
+        hidden = local[0] + "*" if local else "*"
+    else:
+        hidden = local[0] + ("*" * max(1, len(local) - 2)) + local[-1]
+    return f"{hidden}@{domain}"
+
+
+def _generate_otp_code() -> str:
+    return f"{secrets.randbelow(1_000_000):06d}"
+
+
+def _assert_usuario_unique_constraints(db: Session, cedula: str, email: str) -> None:
+    normalized_email = (email or "").strip().lower()
+    existing_user = db.query(Usuario).filter(
+        or_(Usuario.cedula == cedula, Usuario.email == normalized_email),
+    ).first()
+    if not existing_user:
+        return
+    if existing_user.email == normalized_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ya existe un usuario con ese correo en la plataforma.",
+        )
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Ya existe un usuario con ese documento en la plataforma.",
+    )
+
+
+def _send_estudiante_otp_email(email: str, otp_code: str, tenant: Optional[Tenant] = None) -> bool:
+    brand_name, _contact_phone, _contact_email, _, _ = _tenant_mail_context(tenant)
+    subject = f"Codigo OTP de verificacion - {brand_name}"
+    body = (
+        "Hola,\n\n"
+        "Estamos validando el registro de nuevo estudiante, este es tu codigo para la firma digital del Habeas Data.\n"
+        f"Tu codigo OTP es: {otp_code}\n\n"
+        f"Este codigo vence en {OTP_EXPIRES_MINUTES} minutos y solo se puede usar una vez.\n"
+        "Si no solicitaste este codigo, ignora este correo.\n\n"
+        f"{brand_name}\n"
+    )
+    sent = send_email(email, subject, body)
+    if not sent:
+        logger.warning("No se pudo enviar OTP de estudiante a %s", email)
+    return sent
+
+
+def _is_local_env() -> bool:
+    return str(settings.APP_ENV or "").strip().lower() in LOCAL_ENV_NAMES
+
+
+def _create_estudiante_with_habeas(
+    db: Session,
+    payload: dict,
+    current_tenant: Tenant,
+    signature_payload: Optional[dict] = None,
+) -> tuple[Estudiante, bool]:
+    estudiante_data = EstudianteCreate(**payload)
+    _assert_usuario_unique_constraints(db, estudiante_data.cedula, estudiante_data.email)
+
+    nombre_completo = estudiante_data.nombre_completo
+    if not nombre_completo:
+        partes = [
+            estudiante_data.primer_nombre,
+            estudiante_data.segundo_nombre,
+            estudiante_data.primer_apellido,
+            estudiante_data.segundo_apellido,
+        ]
+        nombre_completo = " ".join([p for p in partes if p and p.strip()])
+
+    nuevo_usuario = Usuario(
+        email=estudiante_data.email,
+        password_hash=get_password_hash(estudiante_data.password),
+        nombre_completo=nombre_completo,
+        cedula=estudiante_data.cedula,
+        tipo_documento=estudiante_data.tipo_documento,
+        telefono=estudiante_data.telefono,
+        rol=RolUsuario.ESTUDIANTE,
+        tenant_id=current_tenant.id,
+        is_active=True,
+        is_verified=False,
+    )
+    try:
+        db.add(nuevo_usuario)
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        _assert_usuario_unique_constraints(db, estudiante_data.cedula, estudiante_data.email)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se pudo crear el usuario por conflicto de datos únicos.",
+        )
+    db.add(
+        TenantUser(
+            tenant_id=current_tenant.id,
+            user_id=nuevo_usuario.id,
+            rol=RolUsuario.ESTUDIANTE.value,
+            is_active=True,
+        )
+    )
+
+    matricula_numero = _generate_matricula_numero(db, current_tenant)
+    nuevo_estudiante = Estudiante(
+        usuario_id=nuevo_usuario.id,
+        tenant_id=current_tenant.id,
+        matricula_numero=matricula_numero,
+        fecha_nacimiento=estudiante_data.fecha_nacimiento,
+        direccion=estudiante_data.direccion,
+        ciudad=estudiante_data.ciudad,
+        barrio=estudiante_data.barrio,
+        tipo_sangre=estudiante_data.tipo_sangre,
+        eps=estudiante_data.eps,
+        ocupacion=estudiante_data.ocupacion,
+        estado_civil=estudiante_data.estado_civil,
+        nivel_educativo=estudiante_data.nivel_educativo,
+        estrato=estudiante_data.estrato,
+        nivel_sisben=estudiante_data.nivel_sisben,
+        necesidades_especiales=estudiante_data.necesidades_especiales,
+        contacto_emergencia_nombre=estudiante_data.contacto_emergencia_nombre,
+        contacto_emergencia_telefono=estudiante_data.contacto_emergencia_telefono,
+        foto_url=estudiante_data.foto_base64,
+        estado=EstadoEstudiante.PROSPECTO,
+    )
+    nuevo_estudiante.datos_adicionales = {
+        "habeas_data": {
+            "aceptado": True,
+            "aceptado_en": datetime.utcnow().isoformat(),
+            "correo_enviado": False,
+        },
+        "nombres": {
+            "primer_nombre": estudiante_data.primer_nombre,
+            "segundo_nombre": estudiante_data.segundo_nombre,
+            "primer_apellido": estudiante_data.primer_apellido,
+            "segundo_apellido": estudiante_data.segundo_apellido,
+        },
+    }
+    db.add(nuevo_estudiante)
+    db.flush()
+    db.commit()
+    db.refresh(nuevo_estudiante)
+
+    enviado = _enviar_habeas_data(
+        nuevo_estudiante,
+        current_tenant,
+        signature_payload=signature_payload,
+    )
+    if enviado:
+        db.commit()
+        db.refresh(nuevo_estudiante)
+    return nuevo_estudiante, enviado
+
+
 @router.post("", response_model=EstudianteResponse, status_code=status.HTTP_201_CREATED)
 def create_estudiante(
     estudiante_data: EstudianteCreate,
@@ -71,114 +242,221 @@ def create_estudiante(
     - Guarda foto en base64
     - NO asigna servicio (se hace después en "Definir Servicio")
     """
-    # Verificar si ya existe un usuario con esa cédula o email
-    existing_user = db.query(Usuario).filter(
-        or_(Usuario.cedula == estudiante_data.cedula, Usuario.email == estudiante_data.email),
-        Usuario.tenant_id == current_tenant.id,
-    ).first()
-    
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Ya existe un usuario con esa cédula o email"
-        )
-    
     try:
-        # 1. Crear Usuario
-        nombre_completo = estudiante_data.nombre_completo
-        if not nombre_completo:
-            partes = [
-                estudiante_data.primer_nombre,
-                estudiante_data.segundo_nombre,
-                estudiante_data.primer_apellido,
-                estudiante_data.segundo_apellido
-            ]
-            nombre_completo = " ".join([p for p in partes if p and p.strip()])
-
-        nuevo_usuario = Usuario(
-            email=estudiante_data.email,
-            password_hash=get_password_hash(estudiante_data.password),
-            nombre_completo=nombre_completo,
-            cedula=estudiante_data.cedula,
-            tipo_documento=estudiante_data.tipo_documento,
-            telefono=estudiante_data.telefono,
-            rol=RolUsuario.ESTUDIANTE,
-            tenant_id=current_tenant.id,
-            is_active=True,
-            is_verified=False
+        nuevo_estudiante, _ = _create_estudiante_with_habeas(
+            db=db,
+            payload=estudiante_data.model_dump(mode="json"),
+            current_tenant=current_tenant,
         )
-        db.add(nuevo_usuario)
-        db.flush()
-        db.add(
-            TenantUser(
-                tenant_id=current_tenant.id,
-                user_id=nuevo_usuario.id,
-                rol=RolUsuario.ESTUDIANTE.value,
-                is_active=True,
-            )
-        )
-        
-        # 2. Generar número de matrícula aislado por tenant y globalmente único
-        matricula_numero = _generate_matricula_numero(db, current_tenant)
-        
-        # 3. Crear Estudiante (solo datos personales)
-        nuevo_estudiante = Estudiante(
-            usuario_id=nuevo_usuario.id,
-            tenant_id=current_tenant.id,
-            matricula_numero=matricula_numero,
-            fecha_nacimiento=estudiante_data.fecha_nacimiento,
-            direccion=estudiante_data.direccion,
-            ciudad=estudiante_data.ciudad,
-            barrio=estudiante_data.barrio,
-            tipo_sangre=estudiante_data.tipo_sangre,
-            eps=estudiante_data.eps,
-            ocupacion=estudiante_data.ocupacion,
-            estado_civil=estudiante_data.estado_civil,
-            nivel_educativo=estudiante_data.nivel_educativo,
-            estrato=estudiante_data.estrato,
-            nivel_sisben=estudiante_data.nivel_sisben,
-            necesidades_especiales=estudiante_data.necesidades_especiales,
-            contacto_emergencia_nombre=estudiante_data.contacto_emergencia_nombre,
-            contacto_emergencia_telefono=estudiante_data.contacto_emergencia_telefono,
-            foto_url=estudiante_data.foto_base64,  # Guardar base64 temporalmente
-            estado=EstadoEstudiante.PROSPECTO  # Prospecto hasta que se defina servicio
-        )
-        nuevo_estudiante.datos_adicionales = {
-            "habeas_data": {
-                "aceptado": True,
-                "aceptado_en": datetime.utcnow().isoformat(),
-                "correo_enviado": False
-            },
-            "nombres": {
-                "primer_nombre": estudiante_data.primer_nombre,
-                "segundo_nombre": estudiante_data.segundo_nombre,
-                "primer_apellido": estudiante_data.primer_apellido,
-                "segundo_apellido": estudiante_data.segundo_apellido
-            }
-        }
-        db.add(nuevo_estudiante)
-        db.flush()
-        
-        db.commit()
-        db.refresh(nuevo_estudiante)
-
-        enviado = _enviar_habeas_data(nuevo_estudiante, current_tenant)
-        if enviado:
-            datos = dict(nuevo_estudiante.datos_adicionales or {})
-            habeas = dict(datos.get("habeas_data", {}))
-            if habeas:
-                habeas["correo_enviado"] = True
-                datos["habeas_data"] = habeas
-                nuevo_estudiante.datos_adicionales = datos
-                db.commit()
-        
         return _build_estudiante_response(nuevo_estudiante, db)
-        
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al crear estudiante: {str(e)}"
+        )
+
+
+@router.post("/otp/start", response_model=EstudianteOtpStartResponse)
+def start_estudiante_otp(
+    estudiante_data: EstudianteCreate,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero),
+    current_tenant: Tenant = Depends(get_required_tenant),
+):
+    _assert_usuario_unique_constraints(db, estudiante_data.cedula, estudiante_data.email)
+
+    now = datetime.utcnow()
+    otp_code = _generate_otp_code()
+    session_token = secrets.token_urlsafe(32)
+    expires_at = now + timedelta(minutes=OTP_EXPIRES_MINUTES)
+
+    sent = _send_estudiante_otp_email(estudiante_data.email, otp_code, current_tenant)
+    warning_message = None
+    debug_otp_code = None
+    if not sent:
+        if _is_local_env():
+            debug_otp_code = otp_code
+            warning_message = "No se pudo enviar correo OTP. Se habilitó código de prueba en modo local."
+            logger.warning(
+                "[OTP-LOCAL-FALLBACK] SMTP falló. Usa este OTP para %s: %s",
+                estudiante_data.email,
+                otp_code,
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="No se pudo enviar el OTP al correo del estudiante. Verifica la configuración SMTP.",
+            )
+
+    session = EstudianteOtpSession(
+        tenant_id=current_tenant.id,
+        created_by_user_id=current_user.id,
+        session_token=session_token,
+        estudiante_email=estudiante_data.email.strip().lower(),
+        otp_hash=get_password_hash(otp_code),
+        payload=estudiante_data.model_dump(mode="json"),
+        attempts=0,
+        max_attempts=OTP_MAX_ATTEMPTS,
+        resend_count=0,
+        last_sent_at=now,
+        expires_at=expires_at,
+    )
+    db.add(session)
+    db.commit()
+
+    return EstudianteOtpStartResponse(
+        session_token=session_token,
+        expires_at=expires_at,
+        cooldown_seconds=OTP_RESEND_COOLDOWN_SECONDS,
+        email=_mask_email(estudiante_data.email),
+        otp_sent=bool(sent),
+        debug_otp_code=debug_otp_code,
+        warning_message=warning_message,
+    )
+
+
+@router.post("/otp/resend", response_model=EstudianteOtpStartResponse)
+def resend_estudiante_otp(
+    payload: EstudianteOtpResendRequest,
+    db: Session = Depends(get_db),
+    _current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero),
+    current_tenant: Tenant = Depends(get_required_tenant),
+):
+    session = db.query(EstudianteOtpSession).filter(
+        EstudianteOtpSession.session_token == payload.session_token,
+        EstudianteOtpSession.tenant_id == current_tenant.id,
+    ).first()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesión OTP no encontrada")
+    if session.consumed_at:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Este OTP ya fue usado")
+    if session.resend_count >= OTP_MAX_RESENDS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Se alcanzó el máximo de reenvíos. Inicia el registro nuevamente.",
+        )
+
+    now = datetime.utcnow()
+    if session.last_sent_at:
+        elapsed = int((now - session.last_sent_at).total_seconds())
+        wait_seconds = OTP_RESEND_COOLDOWN_SECONDS - elapsed
+        if wait_seconds > 0:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Espera {wait_seconds}s para reenviar el OTP.",
+            )
+
+    otp_code = _generate_otp_code()
+    sent = _send_estudiante_otp_email(session.estudiante_email, otp_code, current_tenant)
+    warning_message = None
+    debug_otp_code = None
+    if not sent:
+        if _is_local_env():
+            debug_otp_code = otp_code
+            warning_message = "No se pudo reenviar por correo. Se habilitó código de prueba en modo local."
+            logger.warning(
+                "[OTP-LOCAL-FALLBACK] SMTP falló en reenvío. Usa este OTP para %s: %s",
+                session.estudiante_email,
+                otp_code,
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="No se pudo reenviar el OTP. Verifica la configuración SMTP.",
+            )
+
+    session.otp_hash = get_password_hash(otp_code)
+    session.attempts = 0
+    session.resend_count = int(session.resend_count or 0) + 1
+    session.last_sent_at = now
+    session.expires_at = now + timedelta(minutes=OTP_EXPIRES_MINUTES)
+    db.commit()
+
+    return EstudianteOtpStartResponse(
+        session_token=session.session_token,
+        expires_at=session.expires_at,
+        cooldown_seconds=OTP_RESEND_COOLDOWN_SECONDS,
+        email=_mask_email(session.estudiante_email),
+        otp_sent=bool(sent),
+        debug_otp_code=debug_otp_code,
+        warning_message=warning_message,
+    )
+
+
+@router.post("/otp/verify", response_model=EstudianteOtpVerifyResponse, status_code=status.HTTP_201_CREATED)
+def verify_estudiante_otp_and_create(
+    payload: EstudianteOtpVerifyRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    _current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero),
+    current_tenant: Tenant = Depends(get_required_tenant),
+):
+    session = db.query(EstudianteOtpSession).filter(
+        EstudianteOtpSession.session_token == payload.session_token,
+        EstudianteOtpSession.tenant_id == current_tenant.id,
+    ).first()
+    if not session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesión OTP no encontrada")
+    if session.consumed_at:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Este OTP ya fue usado")
+
+    now = datetime.utcnow()
+    if not session.expires_at or now > session.expires_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El OTP expiró. Solicita uno nuevo.",
+        )
+    if int(session.attempts or 0) >= int(session.max_attempts or OTP_MAX_ATTEMPTS):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Superaste el máximo de intentos OTP. Solicita un nuevo código.",
+        )
+
+    if not verify_password(payload.otp_code, session.otp_hash):
+        session.attempts = int(session.attempts or 0) + 1
+        db.commit()
+        remaining = max(0, int(session.max_attempts or OTP_MAX_ATTEMPTS) - int(session.attempts or 0))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"OTP inválido. Intentos restantes: {remaining}.",
+        )
+
+    try:
+        token_fragment = str(session.session_token or "")
+        token_fragment = token_fragment[-8:] if token_fragment else "N/A"
+        signature_payload = _build_habeas_signature_payload(
+            {
+                "metodo_firma": "OTP_DIGITAL",
+                "firmado_en": now.isoformat(),
+                "evidencia": f"OTP_SESSION_*{token_fragment}",
+            },
+            request=request,
+        )
+        estudiante, habeas_sent = _create_estudiante_with_habeas(
+            db=db,
+            payload=dict(session.payload or {}),
+            current_tenant=current_tenant,
+            signature_payload=signature_payload,
+        )
+        session.verified_at = now
+        session.consumed_at = now
+        db.commit()
+        return EstudianteOtpVerifyResponse(
+            estudiante=_build_estudiante_response(estudiante, db),
+            habeas_email_sent=bool(habeas_sent),
+        )
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"No se pudo validar OTP y crear estudiante: {str(e)}",
         )
 
 
@@ -1327,7 +1605,148 @@ def _tenant_mail_context(tenant: Optional[Tenant]) -> tuple[str, str, str, str, 
     return brand_name, contact_phone, contact_email, razon_social, nit
 
 
-def _enviar_habeas_data(estudiante: Estudiante, tenant: Optional[Tenant] = None) -> bool:
+def _build_habeas_signature_payload(
+    otp_meta: Optional[dict],
+    request: Optional[Request] = None,
+) -> dict:
+    now_iso = datetime.utcnow().isoformat()
+    payload = {
+        "metodo_firma": "OTP_DIGITAL",
+        "firmado_en": now_iso,
+    }
+    if otp_meta:
+        payload.update({k: v for k, v in dict(otp_meta).items() if v is not None})
+    if request:
+        payload["ip_address"] = request.client.host if request.client else None
+        payload["user_agent"] = request.headers.get("user-agent")
+    return payload
+
+
+def _build_habeas_signed_pdf_bytes(
+    estudiante: Estudiante,
+    tenant: Optional[Tenant],
+    signature_payload: dict,
+) -> bytes:
+    brand_name, contact_phone, contact_email, razon_social, nit = _tenant_mail_context(tenant)
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
+
+    def _draw_header() -> int:
+        logo_src = _resolve_logo_image(tenant)
+        if logo_src:
+            try:
+                c.drawImage(ImageReader(logo_src), 50, 700, width=180, height=70, preserveAspectRatio=True, mask='auto')
+            except Exception:
+                pass
+        c.setFont("Helvetica-Bold", 15)
+        c.drawCentredString(310, 686, "AUTORIZACION PARA EL TRATAMIENTO DE DATOS PERSONALES")
+        c.setFont("Helvetica", 9)
+        c.drawCentredString(310, 672, f"{brand_name} | NIT {nit} | Contacto: {contact_phone} | {contact_email}")
+        c.setLineWidth(0.6)
+        c.line(50, 662, 570, 662)
+        return 652
+
+    def _ensure_space(y: int, min_y: int) -> int:
+        if y < min_y:
+            c.showPage()
+            return _draw_header()
+        return y
+
+    def _draw_body_paragraph(y: int, title: str, text: str) -> int:
+        y = _ensure_space(y, 120)
+        y = _draw_section_bar(c, title, y)
+        c.setFont("Helvetica", 9)
+        for paragraph in text.split("\n"):
+            lines = _wrap_text(c, paragraph, 508, "Helvetica", 9)
+            for line in lines:
+                y = _ensure_space(y, 80)
+                c.drawString(56, y, line)
+                y -= 12
+            y -= 4
+        return y - 2
+
+    nombre = estudiante.usuario.nombre_completo if estudiante and estudiante.usuario else "N/A"
+    tipo_doc = _tipo_documento_label(estudiante.usuario.tipo_documento if estudiante and estudiante.usuario else None)
+    doc = estudiante.usuario.cedula if estudiante and estudiante.usuario else "N/A"
+    email_inst = contact_email or "No registrado"
+    direccion_inst = "Direccion institucional no registrada"
+    matricula = estudiante.matricula_numero or "N/A"
+
+    y = _draw_header()
+    y = _draw_section_bar(c, "Datos del titular", y)
+    y = _draw_box_row(c, y, [("Nombre completo", nombre), ("Documento", f"{tipo_doc} {doc}")], [330, 190])
+    y = _draw_box_row(c, y, [("Matricula", matricula), ("Correo", estudiante.usuario.email if estudiante and estudiante.usuario else "N/A")], [220, 300])
+    y = _draw_box_row(c, y, [("Institucion", razon_social), ("NIT", nit)], [390, 130])
+
+    y -= 4
+    y = _draw_body_paragraph(
+        y,
+        "Autorizacion del titular",
+        f"Yo, {nombre}, identificado con {tipo_doc} {doc}, actuando en nombre propio "
+        "(y en caso de ser menor de edad, con la autorizacion de mi padre/madre/tutor), "
+        f"otorgo mi consentimiento libre, previo, expreso e informado a {brand_name}, para que recolecte, almacene, use, "
+        "actualice, transmita y en general realice el tratamiento de mis datos personales, de acuerdo con las siguientes finalidades:",
+    )
+    y = _draw_body_paragraph(
+        y,
+        "Finalidades",
+        "- Gestion academica y administrativa como estudiante.\n"
+        "- Envio de informacion institucional, comunicados y notificaciones relacionadas con el proceso formativo.\n"
+        "- Uso de herramientas tecnologicas para el desarrollo de actividades academicas.\n"
+        "- Registro en sistemas de biblioteca, plataformas virtuales y servicios estudiantiles.",
+    )
+    y = _draw_body_paragraph(
+        y,
+        "Derechos del titular",
+        "Declaro que se me ha informado sobre mis derechos como titular de datos personales, entre ellos: conocer, actualizar, "
+        "rectificar, solicitar prueba de la autorizacion, revocarla en cualquier momento, y presentar quejas ante la autoridad competente. "
+        f"Entiendo que puedo ejercer estos derechos mediante comunicacion escrita al correo {email_inst} o en la oficina de {direccion_inst}.",
+    )
+    y = _draw_body_paragraph(
+        y,
+        "Vigencia y aceptacion",
+        "La presente autorizacion tendra vigencia durante la relacion academica y despues de ella, mientras no sea revocada. "
+        "Acepto los terminos y autorizo el tratamiento de mis datos personales.",
+    )
+
+    firmado_en = signature_payload.get("firmado_en") or datetime.utcnow().isoformat()
+    metodo = signature_payload.get("metodo_firma") or "OTP_DIGITAL"
+    evidencia = signature_payload.get("evidencia") or "-"
+    ip = signature_payload.get("ip_address") or "N/A"
+    ua = signature_payload.get("user_agent") or "N/A"
+    y = _ensure_space(y, 160)
+    y = _draw_section_bar(c, "Firma digital de autorizacion", y)
+    y = _draw_box_row(c, y, [("Metodo", metodo), ("Fecha", firmado_en)], [180, 340])
+    y = _draw_box_row(c, y, [("Evidencia OTP", evidencia), ("IP", ip)], [370, 150])
+    y -= 2
+    c.setLineWidth(0.6)
+    c.rect(50, y - 28, 520, 28)
+    c.setFont("Helvetica-Bold", 8)
+    c.drawString(56, y - 10, "User-Agent:")
+    c.setFont("Helvetica", 8)
+    ua_lines = _wrap_text(c, ua, 445, "Helvetica", 8)
+    ua_text = ua_lines[0] if ua_lines else ua
+    c.drawString(120, y - 10, ua_text)
+    y -= 34
+
+    c.save()
+    buffer.seek(0)
+    return buffer.read()
+
+
+def _save_habeas_signed_pdf(estudiante: Estudiante, pdf_bytes: bytes) -> str:
+    safe_base = str(estudiante.matricula_numero or estudiante.id or "estudiante").replace("/", "-").replace(" ", "_")
+    file_path = HABEAS_SIGNED_DOCS_DIR / f"habeas_firmado_{safe_base}.pdf"
+    file_path.write_bytes(pdf_bytes)
+    return str(file_path.resolve())
+
+
+def _enviar_habeas_data(
+    estudiante: Estudiante,
+    tenant: Optional[Tenant] = None,
+    signature_payload: Optional[dict] = None,
+) -> bool:
     if not estudiante or not estudiante.usuario:
         return False
     nombre = estudiante.usuario.nombre_completo
@@ -1338,7 +1757,8 @@ def _enviar_habeas_data(estudiante: Estudiante, tenant: Optional[Tenant] = None)
     body = (
         f"Hola {nombre},\n\n"
         f"Gracias por confiar en {brand_name}. Confirmamos la autorizacion previa, expresa e informada "
-        "para el tratamiento de tus datos personales conforme a la Ley 1581 de 2012.\n\n"
+        "para el tratamiento de tus datos personales conforme a la Ley 1581 de 2012.\n"
+        "Adjuntamos el documento de autorizacion firmado digitalmente.\n\n"
         f"Matricula: {estudiante.matricula_numero or 'N/A'}\n"
         f"Cedula: {estudiante.usuario.cedula}\n\n"
         "Responsable: {razon}\n"
@@ -1362,9 +1782,35 @@ def _enviar_habeas_data(estudiante: Estudiante, tenant: Optional[Tenant] = None)
         politica=politica
     )
 
-    enviado = send_email(email, subject, body)
+    signed_payload = signature_payload or {
+        "metodo_firma": "CHECKBOX_PORTAL",
+        "firmado_en": datetime.utcnow().isoformat(),
+        "evidencia": "FLUJO_LEGADO_SIN_OTP",
+    }
+    pdf_bytes = _build_habeas_signed_pdf_bytes(estudiante, tenant, signed_payload)
+    filename = f"habeas_firmado_{estudiante.matricula_numero or estudiante.id}.pdf"
+    enviado = send_email(
+        email,
+        subject,
+        body,
+        attachment=(filename, pdf_bytes, "application/pdf"),
+    )
     if not enviado:
         logger.warning("No se pudo enviar correo de habeas data a %s", email)
+        return False
+    try:
+        pdf_path = _save_habeas_signed_pdf(estudiante, pdf_bytes)
+        datos = dict(estudiante.datos_adicionales or {})
+        habeas = dict(datos.get("habeas_data", {}))
+        content_hash = hashlib.sha256(pdf_bytes).hexdigest()
+        habeas["correo_enviado"] = True
+        habeas["documento_firmado_pdf_path"] = pdf_path
+        habeas["documento_firmado_hash_sha256"] = content_hash
+        habeas["firma_digital"] = signed_payload
+        datos["habeas_data"] = habeas
+        estudiante.datos_adicionales = datos
+    except Exception:
+        logger.warning("No se pudo persistir metadata de Habeas firmado para estudiante %s", estudiante.id)
     return enviado
 
 

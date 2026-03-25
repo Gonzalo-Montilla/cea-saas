@@ -412,6 +412,93 @@
   cursor: not-allowed;
 }
 
+.otp-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.otp-modal {
+  width: min(560px, 96vw);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-md);
+  padding: 20px;
+  display: grid;
+  gap: 12px;
+}
+
+.otp-modal.result-modal {
+  width: min(520px, 94vw);
+}
+
+.otp-modal h3 {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.otp-modal p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.otp-meta {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.otp-warning-box {
+  padding: 10px 12px;
+  border: 1px solid #facc15;
+  background: #fef9c3;
+  color: #854d0e;
+  border-radius: 8px;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+.otp-copy-btn {
+  margin-left: 8px;
+  border: 1px solid rgba(133, 77, 14, 0.35);
+  background: rgba(255, 255, 255, 0.6);
+  color: #854d0e;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.otp-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.otp-success-box {
+  padding: 10px 12px;
+  border: 1px solid #86efac;
+  background: #dcfce7;
+  color: #166534;
+  border-radius: 8px;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+
+.otp-modal-actions {
+  margin-top: 8px;
+  padding-top: 12px;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .nuevo-estudiante-container {
@@ -433,5 +520,9 @@
   .btn-primary,
   .btn-secondary {
     width: 100%;
+  }
+
+  .otp-modal-actions {
+    flex-direction: column-reverse;
   }
 }

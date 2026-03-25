@@ -283,6 +283,54 @@ class EstudiantesListResponse(BaseModel):
     limit: int
 
 
+class EstudianteOtpResendRequest(BaseModel):
+    session_token: str
+
+    @field_validator("session_token")
+    @classmethod
+    def validate_session_token(cls, v: str) -> str:
+        value = v.strip()
+        if len(value) < 24:
+            raise ValueError("Token OTP inválido")
+        return value
+
+
+class EstudianteOtpVerifyRequest(BaseModel):
+    session_token: str
+    otp_code: str
+
+    @field_validator("session_token")
+    @classmethod
+    def validate_session_token(cls, v: str) -> str:
+        value = v.strip()
+        if len(value) < 24:
+            raise ValueError("Token OTP inválido")
+        return value
+
+    @field_validator("otp_code")
+    @classmethod
+    def validate_otp_code(cls, v: str) -> str:
+        value = v.strip()
+        if not re.fullmatch(r"\d{6}", value):
+            raise ValueError("El OTP debe tener 6 dígitos")
+        return value
+
+
+class EstudianteOtpStartResponse(BaseModel):
+    session_token: str
+    expires_at: datetime
+    cooldown_seconds: int = 60
+    email: str
+    otp_sent: bool = True
+    debug_otp_code: Optional[str] = None
+    warning_message: Optional[str] = None
+
+
+class EstudianteOtpVerifyResponse(BaseModel):
+    estudiante: EstudianteResponse
+    habeas_email_sent: bool
+
+
 class DefinirServicioRequest(BaseModel):
     """Schema para definir el servicio de un estudiante"""
     tipo_servicio: TipoServicio

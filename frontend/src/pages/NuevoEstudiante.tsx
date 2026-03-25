@@ -1,16 +1,32 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
 import { estudiantesAPI } from '../services/api';
 import { Camera, RotateCcw, Check, UserPlus } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import '../styles/NuevoEstudiante.css';
 
 export const NuevoEstudiante = () => {
-  const { user } = useAuth();
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [otpSessionToken, setOtpSessionToken] = useState('');
+  const [otpMaskedEmail, setOtpMaskedEmail] = useState('');
+  const [otpExpiresAt, setOtpExpiresAt] = useState<string | null>(null);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpError, setOtpError] = useState('');
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [otpTimeLeft, setOtpTimeLeft] = useState(0);
+  const [otpResendCooldown, setOtpResendCooldown] = useState(0);
+  const [otpWarning, setOtpWarning] = useState('');
+  const [otpDebugCode, setOtpDebugCode] = useState('');
+  const [otpDeliveryStatus, setOtpDeliveryStatus] = useState<'sent' | 'fallback' | ''>('');
+  const [otpCodeCopied, setOtpCodeCopied] = useState(false);
+  const [otpCancelConfirmOpen, setOtpCancelConfirmOpen] = useState(false);
+  const [resultModal, setResultModal] = useState<null | {
+    kind: 'success' | 'warning';
+    title: string;
+    message: string;
+  }>(null);
   const [aceptaHabeas, setAceptaHabeas] = useState(false);
   const MAX_IMAGE_SIZE_MB = 2;
   const MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024;
@@ -157,6 +173,17 @@ export const NuevoEstudiante = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (!otpSessionToken || !otpExpiresAt) return;
+    const interval = window.setInterval(() => {
+      const expiresAtMs = new Date(otpExpiresAt).getTime();
+      const diffSeconds = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000));
+      setOtpTimeLeft(diffSeconds);
+      setOtpResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [otpSessionToken, otpExpiresAt]);
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
@@ -242,21 +269,26 @@ export const NuevoEstudiante = () => {
         foto_base64: fotoCapturada,
         autorizacion_tratamiento: aceptaHabeas
       };
-      
-      // Llamar a la API
-      const resultado = await estudiantesAPI.create(estudianteData);
-      
-      console.log('Estudiante creado:', resultado);
-      
-      // Navegar al dashboard o mostrar mensaje de éxito
-      alert('Estudiante registrado exitosamente. Matrícula: ' + resultado.matricula_numero);
-      navigate('/dashboard');
-      
+
+      const otpInit = await estudiantesAPI.startOtp(estudianteData);
+      setOtpSessionToken(otpInit.session_token);
+      setOtpMaskedEmail(otpInit.email || email.trim());
+      setOtpExpiresAt(otpInit.expires_at);
+      setOtpCode('');
+      setOtpError('');
+      setOtpWarning(otpInit.warning_message || '');
+      setOtpDebugCode(otpInit.debug_otp_code || '');
+      setOtpDeliveryStatus(otpInit.otp_sent ? 'sent' : 'fallback');
+      setOtpTimeLeft(Math.max(0, Math.floor((new Date(otpInit.expires_at).getTime() - Date.now()) / 1000)));
+      setOtpResendCooldown(Number(otpInit.cooldown_seconds || 60));
     } catch (err: any) {
       console.error('Error al registrar estudiante:', err);
-      
-      // Manejar errores de validación (422)
-      if (err.response?.status === 422 && Array.isArray(err.response?.data?.detail)) {
+      const statusCode = Number(err?.response?.status || 0);
+      if (statusCode === 401) {
+        setError('Tu sesión expiró. Inicia sesión nuevamente para continuar.');
+      } else if (statusCode === 503) {
+        setError('No se pudo enviar OTP por correo en este momento. Intenta de nuevo en unos segundos.');
+      } else if (statusCode === 422 && Array.isArray(err.response?.data?.detail)) {
         const errores = err.response.data.detail;
         const mensajesError = errores.map((e: any) => {
           const campo = e.loc ? e.loc.join('.') : 'desconocido';
@@ -264,10 +296,97 @@ export const NuevoEstudiante = () => {
         }).join(', ');
         setError(`Errores de validación: ${mensajesError}`);
       } else {
-        setError(err.response?.data?.detail || 'Error al registrar estudiante');
+        setError(err.response?.data?.detail || 'No se pudo iniciar la validación OTP');
       }
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const closeOtpModal = () => {
+    if (otpBusy) return;
+    if (otpSessionToken) {
+      setOtpCancelConfirmOpen(true);
+      return;
+    }
+    closeOtpModalConfirmed();
+  };
+
+  const closeOtpModalConfirmed = () => {
+    setOtpSessionToken('');
+    setOtpMaskedEmail('');
+    setOtpExpiresAt(null);
+    setOtpCode('');
+    setOtpError('');
+    setOtpWarning('');
+    setOtpDebugCode('');
+    setOtpDeliveryStatus('');
+    setOtpCodeCopied(false);
+    setOtpTimeLeft(0);
+    setOtpResendCooldown(0);
+    setOtpCancelConfirmOpen(false);
+  };
+
+  const copyLocalOtpCode = async () => {
+    if (!otpDebugCode) return;
+    try {
+      await navigator.clipboard.writeText(otpDebugCode);
+      setOtpCodeCopied(true);
+      setTimeout(() => setOtpCodeCopied(false), 2000);
+    } catch {
+      // No-op: código visible para copia manual.
+    }
+  };
+
+  const closeResultModal = () => setResultModal(null);
+
+  const handleVerifyOtp = async () => {
+    const otp = otpCode.trim();
+    if (!/^\d{6}$/.test(otp)) {
+      setOtpError('Ingresa un código OTP válido de 6 dígitos.');
+      return;
+    }
+    if (!otpSessionToken) return;
+    try {
+      setOtpBusy(true);
+      setOtpError('');
+      const result = await estudiantesAPI.verifyOtpAndCreate(otpSessionToken, otp);
+      const estudiante = result?.estudiante;
+      const matricula = estudiante?.matricula_numero || 'N/A';
+      const correoMsg = result?.habeas_email_sent
+        ? 'Se envió la confirmación de Habeas Data con el PDF firmado adjunto.'
+        : 'Estudiante creado, pero no se pudo enviar el correo de Habeas Data con PDF adjunto.';
+      closeOtpModalConfirmed();
+      setResultModal({
+        kind: result?.habeas_email_sent ? 'success' : 'warning',
+        title: result?.habeas_email_sent ? 'Registro completado' : 'Registro completado con advertencia',
+        message: `Matrícula: ${matricula}.\n${correoMsg}`,
+      });
+    } catch (err: any) {
+      setOtpError(err?.response?.data?.detail || 'No se pudo validar el OTP');
+    } finally {
+      setOtpBusy(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    if (!otpSessionToken || otpResendCooldown > 0) return;
+    try {
+      setOtpBusy(true);
+      setOtpError('');
+      const result = await estudiantesAPI.resendOtp(otpSessionToken);
+      setOtpExpiresAt(result.expires_at);
+      setOtpMaskedEmail(result.email || otpMaskedEmail);
+      setOtpResendCooldown(Number(result.cooldown_seconds || 60));
+      setOtpTimeLeft(Math.max(0, Math.floor((new Date(result.expires_at).getTime() - Date.now()) / 1000)));
+      setOtpWarning(result.warning_message || '');
+      setOtpDebugCode(result.debug_otp_code || '');
+      setOtpDeliveryStatus(result.otp_sent ? 'sent' : 'fallback');
+      setOtpCodeCopied(false);
+    } catch (err: any) {
+      setOtpError(err?.response?.data?.detail || 'No se pudo reenviar el OTP');
+    } finally {
+      setOtpBusy(false);
     }
   };
 
@@ -706,10 +825,113 @@ export const NuevoEstudiante = () => {
             className="btn-primary"
             disabled={isLoading}
           >
-            {isLoading ? 'Guardando...' : 'Guardar Estudiante'}
+            {isLoading ? 'Enviando OTP...' : 'Guardar y validar OTP'}
           </button>
         </div>
       </form>
+
+      {otpSessionToken && (
+        <div className="otp-modal-backdrop" onClick={closeOtpModal}>
+          <div className="otp-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Validación OTP del estudiante</h3>
+            <p>
+              Se envió un código al correo <strong>{otpMaskedEmail}</strong>. Solicita el código y escríbelo aquí para completar el registro.
+            </p>
+            <div className="otp-meta">
+              <span>Vence en: <strong>{Math.floor(otpTimeLeft / 60)}:{String(otpTimeLeft % 60).padStart(2, '0')}</strong></span>
+              <span>Reenvío: <strong>{otpResendCooldown > 0 ? `${otpResendCooldown}s` : 'Disponible'}</strong></span>
+            </div>
+            {otpDeliveryStatus === 'sent' && (
+              <div className="otp-success-box">
+                Código OTP enviado correctamente al correo del estudiante.
+              </div>
+            )}
+            {otpWarning && (
+              <div className="otp-warning-box">
+                {otpWarning}
+                {otpDebugCode ? (
+                  <>
+                    {' '}Código local: <strong>{otpDebugCode}</strong>
+                    {' '}
+                    <button type="button" className="otp-copy-btn" onClick={() => void copyLocalOtpCode()}>
+                      {otpCodeCopied ? 'Copiado' : 'Copiar código'}
+                    </button>
+                  </>
+                ) : null}
+              </div>
+            )}
+            <div className="form-group">
+              <label htmlFor="otpCode">Código OTP (6 dígitos)</label>
+              <input
+                id="otpCode"
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                value={otpCode}
+                onChange={(e) => setOtpCode(soloDigitos(e.target.value).slice(0, 6))}
+                placeholder="Ej: 123456"
+                disabled={otpBusy}
+              />
+            </div>
+            {otpError && <div className="error-message">{otpError}</div>}
+            <div className="form-actions otp-modal-actions">
+              <button type="button" className="btn-secondary" onClick={closeOtpModal} disabled={otpBusy}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={handleResendOtp}
+                disabled={otpBusy || otpResendCooldown > 0}
+              >
+                {otpBusy ? 'Procesando...' : 'Reenviar OTP'}
+              </button>
+              <button type="button" className="btn-primary" onClick={handleVerifyOtp} disabled={otpBusy}>
+                {otpBusy ? 'Validando...' : 'Validar y guardar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {otpCancelConfirmOpen && (
+        <div className="otp-modal-backdrop" onClick={() => setOtpCancelConfirmOpen(false)}>
+          <div className="otp-modal result-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Cancelar validación OTP</h3>
+            <div className="otp-warning-box">
+              Tienes una validación OTP en curso.
+              {'\n'}Si cancelas ahora, deberás solicitar un nuevo código para continuar.
+            </div>
+            <div className="form-actions otp-modal-actions">
+              <button type="button" className="btn-secondary" onClick={() => setOtpCancelConfirmOpen(false)}>
+                Continuar con la validación
+              </button>
+              <button type="button" className="btn-primary" onClick={closeOtpModalConfirmed}>
+                Sí, cancelar validación OTP
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {resultModal && (
+        <div className="otp-modal-backdrop" onClick={closeResultModal}>
+          <div className="otp-modal result-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>{resultModal.title}</h3>
+            <div className={resultModal.kind === 'success' ? 'otp-success-box' : 'otp-warning-box'}>
+              {resultModal.message}
+            </div>
+            <div className="form-actions otp-modal-actions">
+              <button type="button" className="btn-secondary" onClick={closeResultModal}>
+                Cerrar
+              </button>
+              <button type="button" className="btn-primary" onClick={() => navigate('/dashboard')}>
+                Ir al dashboard
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
