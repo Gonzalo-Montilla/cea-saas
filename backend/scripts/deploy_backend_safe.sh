@@ -10,6 +10,7 @@ if [[ ! -x "${VENV_BIN}/python" ]]; then
 fi
 
 cd "${APP_DIR}"
+export PYTHONPATH="${APP_DIR}:${PYTHONPATH:-}"
 
 echo "== [1/5] Backend deps =="
 "${VENV_BIN}/pip" install -r requirements.txt
