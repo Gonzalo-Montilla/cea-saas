@@ -55,3 +55,36 @@ Confirmar:
 schtasks /Delete /TN "SIAEC_Class_Reminders_10m" /F
 schtasks /Delete /TN "SIAEC_SaaS_Automation_Daily" /F
 ```
+
+## 7) Produccion Linux (cron) - cobranza inteligente diaria
+
+En servidor Linux (root o usuario con permisos):
+
+```bash
+chmod +x /opt/siaec/SAAS-CEA/backend/scripts/run_saas_automation.sh
+```
+
+Probar manual:
+
+```bash
+bash /opt/siaec/SAAS-CEA/backend/scripts/run_saas_automation.sh
+```
+
+Programar cron diario (08:00):
+
+```bash
+crontab -e
+```
+
+Agregar:
+
+```bash
+0 8 * * * /bin/bash /opt/siaec/SAAS-CEA/backend/scripts/run_saas_automation.sh >> /var/log/siaec_saas_automation.log 2>&1
+```
+
+Verificar:
+
+```bash
+crontab -l
+tail -n 100 /var/log/siaec_saas_automation.log
+```

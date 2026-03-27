@@ -932,19 +932,91 @@ export interface SaasBillingEventItem {
 }
 
 export const saasAdminAPI = {
-  getSummary: async (): Promise<{
+  getSummary: async (params?: { month_ref?: string }): Promise<{
     total_tenants: number;
     active_tenants: number;
     inactive_tenants: number;
     demo_tenants: number;
     demos_por_vencer: number;
     plan_counts: Record<string, number>;
+    active_billable_tenants: number;
     mrr_estimado: number;
     mrr_real: number;
+    ingresos_30d: number;
+    pagos_30d: number;
+    ingresos_mes_actual: number;
+    ticket_promedio_30d: number;
+    arpu_estimado: number;
     overdue_tenants: number;
     overdue_amount: number;
+    revenue_analytics?: {
+      period_current_start: string;
+      period_current_end: string;
+      period_previous_start: string;
+      period_previous_end: string;
+      starting_mrr: number;
+      ending_mrr: number;
+      new_mrr: number;
+      expansion_mrr: number;
+      contraction_mrr: number;
+      churn_mrr: number;
+      net_new_mrr: number;
+      logo_churn: number;
+      nrr_pct: number;
+    };
   }> => {
-    const response = await api.get('/saas-admin/summary');
+    const queryParams = new URLSearchParams();
+    if (params?.month_ref) queryParams.append('month_ref', params.month_ref);
+    const query = queryParams.toString();
+    const response = await api.get(`/saas-admin/summary${query ? `?${query}` : ''}`);
+    return response.data;
+  },
+  getSummaryIncomeBreakdown: async (params?: {
+    fecha_inicio?: string;
+    fecha_fin?: string;
+    limit?: number;
+  }): Promise<{
+    fecha_inicio?: string | null;
+    fecha_fin?: string | null;
+    total_amount: number;
+    total_payments: number;
+    by_tenant: Array<{
+      tenant_id: number;
+      tenant_slug?: string | null;
+      tenant_nombre?: string | null;
+      total_amount: number;
+      payments_count: number;
+      last_payment_at?: string | null;
+    }>;
+    payments: SaasBillingEventItem[];
+  }> => {
+    const queryParams = new URLSearchParams();
+    if (params?.fecha_inicio) queryParams.append('fecha_inicio', params.fecha_inicio);
+    if (params?.fecha_fin) queryParams.append('fecha_fin', params.fecha_fin);
+    if (params?.limit !== undefined) queryParams.append('limit', params.limit.toString());
+    const query = queryParams.toString();
+    const response = await api.get(`/saas-admin/summary/income-breakdown${query ? `?${query}` : ''}`);
+    return response.data;
+  },
+  getSummaryDataQuality: async (): Promise<{
+    generated_at: string;
+    healthy: boolean;
+    total_issues: number;
+    checks: Array<{
+      key: string;
+      label: string;
+      count: number;
+      severity: 'warning' | 'critical';
+    }>;
+  }> => {
+    const response = await api.get('/saas-admin/summary/data-quality');
+    return response.data;
+  },
+  runSummaryDataQualityFix: async (
+    checkKey: string
+  ): Promise<{ ok: boolean; check_key: string; fixed_count: number; summary?: string }> => {
+    const query = new URLSearchParams({ check_key: checkKey }).toString();
+    const response = await api.post(`/saas-admin/summary/data-quality/fix?${query}`);
     return response.data;
   },
   getTenants: async (params?: {
@@ -1141,8 +1213,22 @@ export const saasAdminAPI = {
     const response = await api.post('/saas-admin/billing/run-cycle-charges');
     return response.data;
   },
-  sendBillingOverdueReminders: async (): Promise<{ evaluated: number; sent: number }> => {
+  sendBillingOverdueReminders: async (): Promise<{ evaluated: number; sent: number; stage_counts?: Record<string, number> }> => {
     const response = await api.post('/saas-admin/billing/send-overdue-reminders');
+    return response.data;
+  },
+  getBillingDunningSummary: async (): Promise<{
+    generated_at: string;
+    window_days: number;
+    due_soon_3d: number;
+    past_due_total: number;
+    in_sequence: number;
+    reminders_sent_30d: number;
+    stage_counts: Record<string, number>;
+    payments_after_reminder_30d: number;
+    recovered_after_reminder_30d: number;
+  }> => {
+    const response = await api.get('/saas-admin/billing/dunning-summary');
     return response.data;
   },
   getBillingAgingSummary: async (): Promise<{

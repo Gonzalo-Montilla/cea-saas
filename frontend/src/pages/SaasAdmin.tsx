@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Building2, DollarSign, Eye, EyeOff, Rocket } from 'lucide-react';
+import { Building2, DollarSign, Eye, EyeOff, Rocket, ShieldAlert } from 'lucide-react';
 import {
   ResponsiveContainer,
   PieChart,
@@ -150,6 +150,20 @@ const computeTenantPricingPreview = (tenant: SaasTenantItem) => {
 };
 
 const dateCell = (value?: string | null) => (value ? new Date(value).toLocaleDateString('es-CO') : '-');
+const toDateInputValue = (value: Date) => {
+  const y = value.getFullYear();
+  const m = String(value.getMonth() + 1).padStart(2, '0');
+  const d = String(value.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+const toMonthInputValue = (value: Date) => {
+  const y = value.getFullYear();
+  const m = String(value.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+};
+const toRangeStartIso = (value?: string) => (value ? `${value}T00:00:00` : undefined);
+const toRangeEndIso = (value?: string) => (value ? `${value}T23:59:59` : undefined);
+const csvSafe = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
 const statusClass = (value?: string | null) => `bo-status bo-status-${String(value || 'info').toLowerCase()}`;
 
 const normalizeScopes = (scopes?: string[]) =>
@@ -213,6 +227,7 @@ export const SaasAdmin = () => {
   const [summary, setSummary] = useState<any>(null);
   const [pipelineSummary, setPipelineSummary] = useState<any>(null);
   const [agingSummary, setAgingSummary] = useState<any>(null);
+  const [dunningSummary, setDunningSummary] = useState<any>(null);
   const [tenants, setTenants] = useState<SaasTenantItem[]>([]);
   const [users, setUsers] = useState<SaasUserItem[]>([]);
   const [leads, setLeads] = useState<SaasLeadItem[]>([]);
@@ -231,6 +246,47 @@ export const SaasAdmin = () => {
   const [leadStage, setLeadStage] = useState('');
   const [supportSearch, setSupportSearch] = useState('');
   const [resumenPeriod, setResumenPeriod] = useState<(typeof RESUMEN_PERIODS)[number]['value']>('30d');
+  const [resumenMonthRef, setResumenMonthRef] = useState(() => toMonthInputValue(new Date()));
+  const [resumenIncomeFrom, setResumenIncomeFrom] = useState(() => {
+    const start = new Date();
+    start.setDate(start.getDate() - 29);
+    return toDateInputValue(start);
+  });
+  const [resumenIncomeTo, setResumenIncomeTo] = useState(() => toDateInputValue(new Date()));
+  const [resumenIncomeLoading, setResumenIncomeLoading] = useState(false);
+  const [resumenIncomeExporting, setResumenIncomeExporting] = useState(false);
+  const [resumenDataQuality, setResumenDataQuality] = useState<{
+    generated_at?: string;
+    healthy: boolean;
+    total_issues: number;
+    checks: Array<{
+      key: string;
+      label: string;
+      count: number;
+      severity: 'warning' | 'critical';
+    }>;
+  } | null>(null);
+  const [resumenDataQualityFixingKey, setResumenDataQualityFixingKey] = useState<string | null>(null);
+  const [resumenIncomeData, setResumenIncomeData] = useState<{
+    fecha_inicio?: string | null;
+    fecha_fin?: string | null;
+    total_amount: number;
+    total_payments: number;
+    by_tenant: Array<{
+      tenant_id: number;
+      tenant_slug?: string | null;
+      tenant_nombre?: string | null;
+      total_amount: number;
+      payments_count: number;
+      last_payment_at?: string | null;
+    }>;
+    payments: SaasBillingEventItem[];
+  }>({
+    total_amount: 0,
+    total_payments: 0,
+    by_tenant: [],
+    payments: [],
+  });
   const [tenantMonthlyFeeDrafts, setTenantMonthlyFeeDrafts] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(false);
   const [resumenLoading, setResumenLoading] = useState(false);
@@ -429,7 +485,7 @@ export const SaasAdmin = () => {
       setLoading(true);
       setError('');
       const [summaryData, tenantsData] = await Promise.all([
-        saasAdminAPI.getSummary(),
+        saasAdminAPI.getSummary({ month_ref: resumenMonthRef || undefined }),
         saasAdminAPI.getTenants({ limit: 200, search: search.trim() || undefined }),
       ]);
       setSummary(summaryData);
@@ -551,15 +607,25 @@ export const SaasAdmin = () => {
     try {
       setResumenLoading(true);
       const tasks: Promise<void>[] = [];
+      if (canTenants || canBilling) {
+        tasks.push(
+          (async () => {
+            const dataQuality = await saasAdminAPI.getSummaryDataQuality();
+            setResumenDataQuality(dataQuality);
+          })()
+        );
+      }
       if (canBilling) {
         tasks.push(
           (async () => {
-            const [aging, events] = await Promise.all([
+            const [aging, events, dunning] = await Promise.all([
               saasAdminAPI.getBillingAgingSummary(),
               saasAdminAPI.getBillingEvents({ limit: 200 }),
+              saasAdminAPI.getBillingDunningSummary(),
             ]);
             setAgingSummary(aging);
             setBillingEvents(events.items || []);
+            setDunningSummary(dunning);
           })()
         );
       }
@@ -595,15 +661,119 @@ export const SaasAdmin = () => {
     }
   };
 
+  const loadResumenIncomeBreakdown = async (
+    fromDate = resumenIncomeFrom,
+    toDate = resumenIncomeTo
+  ) => {
+    try {
+      if (!canBilling) return;
+      if (fromDate && toDate && fromDate > toDate) {
+        setError('El rango de fechas es inválido en Resumen');
+        return;
+      }
+      setResumenIncomeLoading(true);
+      const payload = await saasAdminAPI.getSummaryIncomeBreakdown({
+        fecha_inicio: toRangeStartIso(fromDate),
+        fecha_fin: toRangeEndIso(toDate),
+        limit: 400,
+      });
+      setResumenIncomeData({
+        fecha_inicio: payload?.fecha_inicio ?? null,
+        fecha_fin: payload?.fecha_fin ?? null,
+        total_amount: Number(payload?.total_amount || 0),
+        total_payments: Number(payload?.total_payments || 0),
+        by_tenant: payload?.by_tenant || [],
+        payments: payload?.payments || [],
+      });
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'No se pudo cargar ingresos del resumen');
+    } finally {
+      setResumenIncomeLoading(false);
+    }
+  };
+
+  const runResumenDataQualityFix = async (checkKey: string) => {
+    try {
+      const confirmFix = window.confirm('Se ejecutará una autocorrección de datos. ¿Deseas continuar?');
+      if (!confirmFix) return;
+      setResumenDataQualityFixingKey(checkKey);
+      const result = await saasAdminAPI.runSummaryDataQualityFix(checkKey);
+      setInfoMessage(result?.summary || `Autocorrección ejecutada: ${checkKey}`);
+      await Promise.all([
+        loadResumenInsights(),
+        loadData(),
+      ]);
+      if (canBilling) {
+        await loadResumenIncomeBreakdown();
+      }
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'No se pudo ejecutar la autocorrección');
+    } finally {
+      setResumenDataQualityFixingKey(null);
+    }
+  };
+
+  const exportResumenIncomeCsv = () => {
+    try {
+      setResumenIncomeExporting(true);
+      const rows = resumenIncomeData?.payments || [];
+      const header = [
+        'fecha_pago',
+        'escuela',
+        'tenant_slug',
+        'monto_cop',
+        'referencia',
+        'estado',
+        'evento',
+        'id_evento',
+      ];
+      const lines = [header.join(',')];
+      rows.forEach((event) => {
+        const line = [
+          event.paid_at || event.created_at || '',
+          event.tenant_nombre || '',
+          event.tenant_slug || '',
+          Number(event.amount || 0).toFixed(2),
+          event.reference || '',
+          event.status || '',
+          event.event_type || '',
+          String(event.id || ''),
+        ];
+        lines.push(line.map(csvSafe).join(','));
+      });
+      const csvContent = `\uFEFF${lines.join('\n')}`;
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `resumen_ingresos_${resumenIncomeFrom || 'sin-inicio'}_a_${resumenIncomeTo || 'sin-fin'}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setResumenIncomeExporting(false);
+    }
+  };
+
   useEffect(() => {
     if ((saasView === 'resumen' || saasView === 'tenants') && (canTenants || canBilling)) void loadData();
-    if (saasView === 'resumen') void loadResumenInsights();
+    if (saasView === 'resumen') {
+      void loadResumenInsights();
+      if (canBilling) void loadResumenIncomeBreakdown();
+    }
     if (saasView === 'billing' && canBilling) void loadBillingEvents(billingSkip, billingLimit);
     if (saasView === 'users' && canUsers) void loadUsers();
     if (saasView === 'pipeline' && canPipeline) void loadPipeline();
     if (saasView === 'support' && canSupport) void loadSupportTickets(supportSkip, supportLimit);
     if ((saasView === 'audit' || saasView === 'security') && canAudit) void loadAuditLogs(auditSkip, auditLimit);
   }, [canTenants, canBilling, canUsers, canPipeline, canSupport, canAudit, saasView]);
+
+  useEffect(() => {
+    if (saasView === 'resumen' && (canTenants || canBilling)) {
+      void loadData();
+    }
+  }, [resumenMonthRef]);
 
   const auditPage = Math.floor(auditSkip / Math.max(auditLimit, 1)) + 1;
   const auditTotalPages = Math.max(1, Math.ceil(auditTotal / Math.max(auditLimit, 1)));
@@ -731,13 +901,36 @@ export const SaasAdmin = () => {
       .sort((a, b) => a.month.localeCompare(b.month))
       .slice(-8);
   }, [filteredBillingEvents]);
+  const revenueMovementRows = useMemo(
+    () => [
+      { name: 'Nuevo', amount: Number(summary?.revenue_analytics?.new_mrr || 0) },
+      { name: 'Expansión', amount: Number(summary?.revenue_analytics?.expansion_mrr || 0) },
+      { name: 'Contracción', amount: Number(summary?.revenue_analytics?.contraction_mrr || 0) },
+      { name: 'Churn', amount: Number(summary?.revenue_analytics?.churn_mrr || 0) },
+    ],
+    [summary]
+  );
+
+  const resumenIncomeTopTenants = useMemo(
+    () => (resumenIncomeData.by_tenant || []).slice(0, 8),
+    [resumenIncomeData.by_tenant]
+  );
 
   const collectionRiskPct = useMemo(() => {
     const overdue = Number(summary?.overdue_amount || 0);
-    const mrrReal = Number(summary?.mrr_real || 0);
-    if (mrrReal <= 0) return 0;
-    return Math.min(999, (overdue / mrrReal) * 100);
+    const ingresos30d = Number(summary?.ingresos_30d || summary?.mrr_real || 0);
+    if (ingresos30d <= 0) return 0;
+    return Math.min(999, (overdue / ingresos30d) * 100);
   }, [summary]);
+  const topDataQualityIssue = useMemo(() => {
+    const checks = resumenDataQuality?.checks || [];
+    const sorted = [...checks].sort((a, b) => Number(b.count || 0) - Number(a.count || 0));
+    return sorted[0] || null;
+  }, [resumenDataQuality]);
+  const autoFixableChecks = useMemo(
+    () => new Set(['tenant_trial_without_demo', 'tenant_demo_without_trial', 'missing_next_billing', 'payment_paid_without_date']),
+    []
+  );
 
   const mfaRecentEvents = useMemo(
     () => auditLogs.filter((row) => row.action.startsWith('mfa.')).slice(0, 5),
@@ -1251,9 +1444,15 @@ export const SaasAdmin = () => {
       setInfoMessage('');
       const result = await saasAdminAPI.sendBillingOverdueReminders();
       if (canBilling) await loadBillingEvents();
+      if (saasView === 'resumen') await loadResumenInsights();
       if (canAudit) await loadAuditLogs();
+      const stageCounts = result?.stage_counts || {};
+      const stageSummary = Object.entries(stageCounts)
+        .filter(([, v]) => Number(v || 0) > 0)
+        .map(([k, v]) => `${k}: ${Number(v || 0)}`)
+        .join(' | ');
       setInfoMessage(
-        `Recordatorios ejecutados. Evaluados: ${Number(result.evaluated || 0)} | Enviados: ${Number(result.sent || 0)}.`
+        `Recordatorios ejecutados. Evaluados: ${Number(result.evaluated || 0)} | Enviados: ${Number(result.sent || 0)}${stageSummary ? ` | Etapas: ${stageSummary}` : ''}.`
       );
     } catch (err: any) {
       setError(err?.response?.data?.detail || 'No se pudieron enviar recordatorios de cartera');
@@ -1898,9 +2097,23 @@ export const SaasAdmin = () => {
         </div>
         <div className="saas-kpi-card">
           <DollarSign size={18} />
-          <h4>MRR estimado / real</h4>
+          <h4>MRR proyectado</h4>
           <strong>{money(Number(summary?.mrr_estimado || 0))}</strong>
-          <span>Real: {money(Number(summary?.mrr_real || 0))}</span>
+          <span>
+            Tenants facturables: {Number(summary?.active_billable_tenants || 0)} | ARPU: {money(Number(summary?.arpu_estimado || 0))}
+          </span>
+        </div>
+        <div className="saas-kpi-card">
+          <DollarSign size={18} />
+          <h4>Ingresos cobrados (30 días)</h4>
+          <strong>{money(Number(summary?.ingresos_30d || 0))}</strong>
+          <span>Pagos registrados: {Number(summary?.pagos_30d || 0)} | Ticket prom.: {money(Number(summary?.ticket_promedio_30d || 0))}</span>
+        </div>
+        <div className="saas-kpi-card">
+          <DollarSign size={18} />
+          <h4>Ingresos mes analizado</h4>
+          <strong>{money(Number(summary?.ingresos_mes_actual || 0))}</strong>
+          <span>Mes seleccionado: {resumenMonthRef || '-'}</span>
         </div>
         <div className="saas-kpi-card">
           <DollarSign size={18} />
@@ -1912,7 +2125,29 @@ export const SaasAdmin = () => {
           <DollarSign size={18} />
           <h4>Riesgo cartera / MRR real</h4>
           <strong>{collectionRiskPct.toFixed(1)}%</strong>
-          <span>{resumenLoading ? 'Actualizando KPIs...' : 'Monitorea morosidad en relación al ingreso recurrente real'}</span>
+          <span>{resumenLoading ? 'Actualizando KPIs...' : 'Relación entre cartera vencida y cobro real de los últimos 30 días.'}</span>
+        </div>
+        <div className="saas-kpi-card">
+          <DollarSign size={18} />
+          <h4>NRR (mes actual)</h4>
+          <strong>{Number(summary?.revenue_analytics?.nrr_pct || 0).toFixed(1)}%</strong>
+          <span>Churn logos: {Number(summary?.revenue_analytics?.logo_churn || 0)} | Base previa: {money(Number(summary?.revenue_analytics?.starting_mrr || 0))}</span>
+        </div>
+        <div className="saas-kpi-card">
+          <DollarSign size={18} />
+          <h4>Net New MRR</h4>
+          <strong>{money(Number(summary?.revenue_analytics?.net_new_mrr || 0))}</strong>
+          <span>Ending MRR: {money(Number(summary?.revenue_analytics?.ending_mrr || 0))}</span>
+        </div>
+        <div className="saas-kpi-card">
+          <ShieldAlert size={18} />
+          <h4>Calidad de datos</h4>
+          <strong>{Number(resumenDataQuality?.total_issues || 0)}</strong>
+          <span>
+            {resumenDataQuality?.healthy
+              ? 'Sin inconsistencias críticas detectadas.'
+              : `Principal hallazgo: ${topDataQualityIssue?.label || 'Revisar detalle'} (${Number(topDataQualityIssue?.count || 0)})`}
+          </span>
         </div>
       </div>
       )}
@@ -2130,6 +2365,11 @@ export const SaasAdmin = () => {
         <div className="saas-card-header bo-card-header">
           <h3>Resumen analítico SaaS</h3>
           <div className="saas-search">
+            <input
+              type="month"
+              value={resumenMonthRef}
+              onChange={(e) => setResumenMonthRef(e.target.value)}
+            />
             <select value={resumenPeriod} onChange={(e) => setResumenPeriod(e.target.value as any)}>
               {RESUMEN_PERIODS.map((item) => (
                 <option key={item.value} value={item.value}>
@@ -2144,6 +2384,57 @@ export const SaasAdmin = () => {
           <span>Tickets creados en período: <strong>{filteredResumenSupportTickets.length}</strong></span>
           <span>Eventos de facturación en período: <strong>{filteredBillingEvents.length}</strong></span>
         </div>
+        {canBilling && (
+          <div className="saas-lead-metrics">
+            <span>Dunning en secuencia: <strong>{Number(dunningSummary?.in_sequence || 0)}</strong></span>
+            <span>Por vencer (3 días): <strong>{Number(dunningSummary?.due_soon_3d || 0)}</strong></span>
+            <span>Vencidos: <strong>{Number(dunningSummary?.past_due_total || 0)}</strong></span>
+            <span>Recordatorios 30d: <strong>{Number(dunningSummary?.reminders_sent_30d || 0)}</strong></span>
+            <span>Recuperado post-recordatorio: <strong>{money(Number(dunningSummary?.recovered_after_reminder_30d || 0))}</strong></span>
+          </div>
+        )}
+        {!!resumenDataQuality && (
+          <div className="saas-table-wrap bo-table-wrap">
+            <table className="saas-table bo-table">
+              <thead>
+                <tr>
+                  <th>Chequeo de calidad</th>
+                  <th>Severidad</th>
+                  <th>Conteo</th>
+                  <th>Acción</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(resumenDataQuality.checks || []).map((check) => (
+                  <tr key={`dq-${check.key}`}>
+                    <td>{check.label}</td>
+                    <td>{check.severity === 'critical' ? 'Crítica' : 'Advertencia'}</td>
+                    <td>{Number(check.count || 0)}</td>
+                    <td>
+                      {autoFixableChecks.has(check.key) ? (
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          onClick={() => void runResumenDataQualityFix(check.key)}
+                          disabled={Number(check.count || 0) <= 0 || resumenDataQualityFixingKey === check.key}
+                        >
+                          {resumenDataQualityFixingKey === check.key ? 'Corrigiendo...' : 'Auto-corregir'}
+                        </button>
+                      ) : (
+                        <span style={{ color: 'var(--text-secondary)' }}>Manual</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {(!resumenDataQuality.checks || resumenDataQuality.checks.length === 0) && (
+                  <tr>
+                    <td colSpan={4}>No hay chequeos disponibles</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
         <div className="saas-plan-grid">
           {byPlanRows.map((row) => (
             <div key={row.plan} className="saas-plan-item">
@@ -2246,7 +2537,136 @@ export const SaasAdmin = () => {
               </ResponsiveContainer>
             </div>
           )}
+          {canBilling && (
+            <div className="saas-chart-card">
+              <h4>MRR movement (mes vs mes)</h4>
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={revenueMovementRows}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" />
+                  <YAxis />
+                  <Tooltip formatter={(value: any) => money(Number(value || 0))} />
+                  <Bar dataKey="amount" fill="var(--chart-1)" radius={[6, 6, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
+        {canBilling && (
+          <div className="saas-chart-card saas-chart-card-wide">
+            <div className="saas-card-header bo-card-header">
+              <h4 style={{ margin: 0 }}>Relación de ingresos por escuela (Resumen)</h4>
+              <div className="saas-search">
+                <input
+                  type="date"
+                  value={resumenIncomeFrom}
+                  onChange={(e) => setResumenIncomeFrom(e.target.value)}
+                />
+                <input
+                  type="date"
+                  value={resumenIncomeTo}
+                  onChange={(e) => setResumenIncomeTo(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => void loadResumenIncomeBreakdown()}
+                  disabled={resumenIncomeLoading}
+                >
+                  {resumenIncomeLoading ? 'Consultando...' : 'Aplicar filtro'}
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={exportResumenIncomeCsv}
+                  disabled={resumenIncomeExporting}
+                >
+                  {resumenIncomeExporting ? 'Exportando...' : 'Exportar CSV'}
+                </button>
+              </div>
+            </div>
+            <div className="saas-lead-metrics">
+              <span>Ingresos en rango: <strong>{money(Number(resumenIncomeData.total_amount || 0))}</strong></span>
+              <span>Pagos en rango: <strong>{Number(resumenIncomeData.total_payments || 0)}</strong></span>
+              <span>Escuelas con pagos: <strong>{Number(resumenIncomeData.by_tenant?.length || 0)}</strong></span>
+            </div>
+            <div className="saas-charts-grid">
+              <div className="saas-chart-card">
+                <h4>Top escuelas por ingresos</h4>
+                <ResponsiveContainer width="100%" height={240}>
+                  <BarChart data={resumenIncomeTopTenants}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="tenant_slug" interval={0} angle={-15} height={62} textAnchor="end" />
+                    <YAxis />
+                    <Tooltip formatter={(value: any) => money(Number(value || 0))} />
+                    <Bar dataKey="total_amount" fill="var(--chart-2)" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="saas-chart-card">
+                <h4>Escuelas que pagaron (detalle)</h4>
+                <div className="saas-table-wrap bo-table-wrap">
+                  <table className="saas-table bo-table">
+                    <thead>
+                      <tr>
+                        <th>Escuela</th>
+                        <th>Pagos</th>
+                        <th>Total</th>
+                        <th>Último pago</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(resumenIncomeData.by_tenant || []).map((row) => (
+                        <tr key={`resumen-income-tenant-${row.tenant_id}`}>
+                          <td>
+                            <strong>{row.tenant_nombre || row.tenant_slug || `Tenant #${row.tenant_id}`}</strong>
+                            {row.tenant_slug ? <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{row.tenant_slug}</div> : null}
+                          </td>
+                          <td>{Number(row.payments_count || 0)}</td>
+                          <td>{money(Number(row.total_amount || 0))}</td>
+                          <td>{dateCell(row.last_payment_at)}</td>
+                        </tr>
+                      ))}
+                      {(!resumenIncomeData.by_tenant || resumenIncomeData.by_tenant.length === 0) && (
+                        <tr>
+                          <td colSpan={4}>Sin pagos en el rango seleccionado</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+            <h4 style={{ margin: '8px 0 0' }}>Pagos registrados en el rango</h4>
+            <div className="saas-table-wrap bo-table-wrap">
+              <table className="saas-table bo-table">
+                <thead>
+                  <tr>
+                    <th>Fecha pago</th>
+                    <th>Escuela</th>
+                    <th>Monto</th>
+                    <th>Referencia</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(resumenIncomeData.payments || []).map((event) => (
+                    <tr key={`resumen-income-event-${event.id}`}>
+                      <td>{dateCell(event.paid_at || event.created_at)}</td>
+                      <td>{event.tenant_nombre || event.tenant_slug || `Tenant #${event.tenant_id}`}</td>
+                      <td>{money(Number(event.amount || 0))}</td>
+                      <td>{event.reference || '-'}</td>
+                    </tr>
+                  ))}
+                  {(!resumenIncomeData.payments || resumenIncomeData.payments.length === 0) && (
+                    <tr>
+                      <td colSpan={4}>Sin pagos en el rango seleccionado</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
       )}
 

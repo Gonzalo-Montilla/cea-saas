@@ -13,7 +13,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel, EmailStr, field_validator
-from sqlalchemy import func, or_, text
+from sqlalchemy import func, or_, text, and_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from reportlab.lib import colors
@@ -82,6 +82,13 @@ PLAN_BILLING_POLICY = {
 }
 FREE_BRANCHES_PER_TENANT = 1
 VAT_RATE = 0.19
+DUNNING_STAGE_RULES = [
+    ("OVERDUE_14D", "Atraso 14+ días", 14),
+    ("OVERDUE_7D", "Atraso 7+ días", 7),
+    ("OVERDUE_3D", "Atraso 3+ días", 3),
+    ("OVERDUE_0D", "Vencido hoy", 0),
+    ("PRE_DUE_3D", "Por vencer (3 días)", -3),
+]
 PLAN_MRR_ESTIMATE = {
     code: int((float(meta.get("base_fee", 0.0)) / max(1, float(meta.get("duration_days", 30))) * 30.0))
     for code, meta in PLAN_BILLING_POLICY.items()
@@ -921,6 +928,63 @@ def _build_overdue_email_body(tenant: Tenant, days_overdue: int, pending_amount:
     )
 
 
+def _compute_dunning_stage(tenant: Tenant, now: datetime) -> tuple[Optional[str], Optional[str], int]:
+    if not tenant.next_billing_at:
+        return None, None, 0
+    due_date = tenant.next_billing_at.date()
+    days_delta = (now.date() - due_date).days
+    if tenant.subscription_status == "PAST_DUE":
+        if days_delta >= 14:
+            return "OVERDUE_14D", "Atraso 14+ días", days_delta
+        if days_delta >= 7:
+            return "OVERDUE_7D", "Atraso 7+ días", days_delta
+        if days_delta >= 3:
+            return "OVERDUE_3D", "Atraso 3+ días", days_delta
+        return "OVERDUE_0D", "Vencido hoy", days_delta
+    if tenant.subscription_status == "ACTIVE" and -3 <= days_delta < 0:
+        return "PRE_DUE_3D", "Por vencer (3 días)", days_delta
+    return None, None, days_delta
+
+
+def _build_dunning_email_body(
+    tenant: Tenant,
+    stage_code: str,
+    stage_label: str,
+    days_delta: int,
+    pending_amount: Optional[float] = None,
+) -> str:
+    tenant_name = tenant.display_name or tenant.nombre or tenant.slug
+    due_text = tenant.next_billing_at.strftime("%Y-%m-%d") if tenant.next_billing_at else "N/A"
+    fee = float(pending_amount if pending_amount is not None else (tenant.monthly_fee or 0))
+    if stage_code == "PRE_DUE_3D":
+        status_line = f"Su próximo cobro vence en {abs(int(days_delta))} día(s)."
+        action_line = "Este es un aviso preventivo para programar el pago con anticipación."
+    elif stage_code == "OVERDUE_0D":
+        status_line = "Su cobro está venciendo hoy."
+        action_line = "Agradecemos realizar el pago hoy para evitar entrar en mora."
+    elif stage_code == "OVERDUE_3D":
+        status_line = f"Días de atraso: {max(1, int(days_delta))}."
+        action_line = "Te solicitamos priorizar este pago durante el día."
+    elif stage_code == "OVERDUE_7D":
+        status_line = f"Días de atraso: {max(1, int(days_delta))}."
+        action_line = "Tu cuenta requiere regularización prioritaria para evitar medidas operativas."
+    else:
+        status_line = f"Días de atraso: {max(1, int(days_delta))}."
+        action_line = "Último aviso de cobro antes de escalar a gestión manual."
+    return (
+        f"Hola equipo de {tenant_name},\n\n"
+        f"Recordatorio de facturación ({stage_label}) de {settings.SMTP_FROM_NAME}.\n"
+        f"Valor pendiente estimado: {_billing_currency(fee)} (IVA incluido).\n"
+        f"Fecha de cobro: {due_text}.\n"
+        f"{status_line}\n\n"
+        f"{action_line}\n\n"
+        "Por favor coordinar el pago para mantener continuidad del servicio.\n"
+        "Si ya realizaron el pago, ignoren este mensaje.\n\n"
+        "Gracias,\n"
+        f"{settings.SMTP_FROM_NAME} - Backoffice SaaS"
+    )
+
+
 def _build_school_access_link(tenant_slug: str) -> str:
     base_portal = (settings.PORTAL_URL or "").strip().rstrip("/")
     if base_portal:
@@ -997,10 +1061,30 @@ def _bump_session_version(user: Usuario) -> None:
 
 @router.get("/summary")
 def get_saas_summary(
+    month_ref: Optional[str] = Query(
+        None,
+        description="Mes de análisis en formato YYYY-MM. Si no se envía, usa el mes actual.",
+    ),
     db: Session = Depends(get_db),
     _admin: Usuario = Depends(get_saas_admin_user),
 ):
     _require_any_saas_module(_admin, [MODULE_TENANTS, MODULE_BILLING], "resumen SaaS")
+    now = datetime.utcnow()
+    if month_ref:
+        try:
+            selected_month_start = datetime.strptime(month_ref, "%Y-%m").replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="month_ref inválido. Usa formato YYYY-MM")
+    else:
+        selected_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    next_month_start = (selected_month_start + timedelta(days=32)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    selected_month_end = min(now, next_month_start - timedelta(microseconds=1))
+
+    month_start = selected_month_start
+    prev_month_end = month_start - timedelta(microseconds=1)
+    prev_month_start = prev_month_end.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    rolling_30d_start = now - timedelta(days=30)
+
     total_tenants = db.query(func.count(Tenant.id)).scalar() or 0
     active_tenants = db.query(func.count(Tenant.id)).filter(Tenant.is_active.is_(True)).scalar() or 0
     inactive_tenants = total_tenants - active_tenants
@@ -1013,26 +1097,113 @@ def get_saas_summary(
         .all()
     )
     plan_counts = {row.plan: int(row.total or 0) for row in by_plan}
-    mrr_estimado = 0
-    for plan, count in plan_counts.items():
-        mrr_estimado += int(PLAN_MRR_ESTIMATE.get(plan, 0)) * int(count)
+
+    # MRR estimado: proyección mensual basada en tarifa efectiva por período + sucursales cobrables.
+    mrr_estimado = 0.0
     mrr_real = 0.0
     overdue_amount = 0.0
     active_billable_tenants = db.query(Tenant).filter(
         Tenant.subscription_status.in_(["ACTIVE", "PAST_DUE"]),
         Tenant.is_active.is_(True),
+        Tenant.is_demo.is_(False),
     ).all()
     for tenant in active_billable_tenants:
         pricing = _tenant_period_amounts(db, tenant)
         duration_days = max(1, int(pricing["duration_days"]))
-        mrr_real += (float(pricing["total"]) / duration_days) * 30.0
+        mrr_estimado += (float(pricing["total"]) / duration_days) * 30.0
         if tenant.subscription_status == "PAST_DUE":
             overdue_amount += float(pricing["total"])
+
+    paid_30d_sum, paid_30d_count = db.query(
+        func.coalesce(func.sum(SaasBillingEvent.amount), 0),
+        func.count(SaasBillingEvent.id),
+    ).filter(
+        SaasBillingEvent.event_type == "PAYMENT_RECORDED",
+        SaasBillingEvent.status == "PAID",
+        SaasBillingEvent.paid_at.isnot(None),
+        SaasBillingEvent.paid_at >= rolling_30d_start,
+    ).first()
+    mrr_real = float(paid_30d_sum or 0)
+    pagos_30d = int(paid_30d_count or 0)
+
+    ingresos_mes_actual_raw = db.query(
+        func.coalesce(func.sum(SaasBillingEvent.amount), 0),
+    ).filter(
+        SaasBillingEvent.event_type == "PAYMENT_RECORDED",
+        SaasBillingEvent.status == "PAID",
+        SaasBillingEvent.paid_at.isnot(None),
+        SaasBillingEvent.paid_at >= month_start,
+        SaasBillingEvent.paid_at <= selected_month_end,
+    ).scalar()
+    ingresos_mes_actual = float(ingresos_mes_actual_raw or 0)
+    ticket_promedio_30d = (mrr_real / pagos_30d) if pagos_30d > 0 else 0.0
+    arpu_estimado = (mrr_estimado / len(active_billable_tenants)) if active_billable_tenants else 0.0
+
+    # Revenue analytics (MVP): compara ingresos por tenant entre mes previo y mes actual.
+    paid_date_expr = func.coalesce(SaasBillingEvent.paid_at, SaasBillingEvent.created_at)
+    current_rows = (
+        db.query(
+            SaasBillingEvent.tenant_id.label("tenant_id"),
+            func.coalesce(func.sum(SaasBillingEvent.amount), 0).label("amount"),
+        )
+        .filter(
+            SaasBillingEvent.event_type == "PAYMENT_RECORDED",
+            SaasBillingEvent.status == "PAID",
+            paid_date_expr >= month_start,
+            paid_date_expr <= selected_month_end,
+        )
+        .group_by(SaasBillingEvent.tenant_id)
+        .all()
+    )
+    previous_rows = (
+        db.query(
+            SaasBillingEvent.tenant_id.label("tenant_id"),
+            func.coalesce(func.sum(SaasBillingEvent.amount), 0).label("amount"),
+        )
+        .filter(
+            SaasBillingEvent.event_type == "PAYMENT_RECORDED",
+            SaasBillingEvent.status == "PAID",
+            paid_date_expr >= prev_month_start,
+            paid_date_expr <= prev_month_end,
+        )
+        .group_by(SaasBillingEvent.tenant_id)
+        .all()
+    )
+    current_by_tenant = {int(row.tenant_id): float(row.amount or 0) for row in current_rows}
+    prev_by_tenant = {int(row.tenant_id): float(row.amount or 0) for row in previous_rows}
+    all_tenant_ids = set(current_by_tenant.keys()) | set(prev_by_tenant.keys())
+
+    new_mrr = 0.0
+    expansion_mrr = 0.0
+    contraction_mrr = 0.0
+    churn_mrr = 0.0
+    logo_churn = 0
+
+    for tenant_id in all_tenant_ids:
+        prev_amount = float(prev_by_tenant.get(tenant_id, 0.0))
+        curr_amount = float(current_by_tenant.get(tenant_id, 0.0))
+        if prev_amount <= 0 and curr_amount > 0:
+            new_mrr += curr_amount
+        elif prev_amount > 0 and curr_amount <= 0:
+            churn_mrr += prev_amount
+            logo_churn += 1
+        elif prev_amount > 0 and curr_amount > prev_amount:
+            expansion_mrr += (curr_amount - prev_amount)
+        elif prev_amount > 0 and 0 < curr_amount < prev_amount:
+            contraction_mrr += (prev_amount - curr_amount)
+
+    starting_mrr = float(sum(prev_by_tenant.values()) or 0.0)
+    ending_mrr = float(sum(current_by_tenant.values()) or 0.0)
+    ending_existing_mrr = float(
+        sum(current_by_tenant.get(tid, 0.0) for tid, prev in prev_by_tenant.items() if float(prev or 0) > 0)
+    )
+    nrr_pct = (ending_existing_mrr / starting_mrr * 100.0) if starting_mrr > 0 else 100.0
+    net_new_mrr = (new_mrr + expansion_mrr) - (contraction_mrr + churn_mrr)
 
     demos_por_vencer = db.query(func.count(Tenant.id)).filter(
         Tenant.is_demo.is_(True),
         Tenant.demo_ends_at.isnot(None),
-        Tenant.demo_ends_at <= (datetime.utcnow().replace(hour=23, minute=59, second=59, microsecond=0)),
+        Tenant.demo_ends_at <= now.replace(hour=23, minute=59, second=59, microsecond=0),
     ).scalar() or 0
     overdue_tenants = db.query(func.count(Tenant.id)).filter(
         Tenant.subscription_status == "PAST_DUE",
@@ -1045,10 +1216,297 @@ def get_saas_summary(
         "demo_tenants": int(demo_tenants),
         "demos_por_vencer": int(demos_por_vencer),
         "plan_counts": plan_counts,
-        "mrr_estimado": int(mrr_estimado),
+        "active_billable_tenants": int(len(active_billable_tenants)),
+        "mrr_estimado": float(mrr_estimado or 0),
         "mrr_real": float(mrr_real or 0),
+        "ingresos_30d": float(mrr_real or 0),
+        "pagos_30d": int(pagos_30d),
+        "ingresos_mes_actual": float(ingresos_mes_actual or 0),
+        "ticket_promedio_30d": float(ticket_promedio_30d or 0),
+        "arpu_estimado": float(arpu_estimado or 0),
         "overdue_tenants": int(overdue_tenants),
         "overdue_amount": float(overdue_amount or 0),
+        "revenue_analytics": {
+            "period_current_start": month_start.isoformat(),
+            "period_current_end": selected_month_end.isoformat(),
+            "period_previous_start": prev_month_start.isoformat(),
+            "period_previous_end": prev_month_end.isoformat(),
+            "starting_mrr": float(starting_mrr or 0),
+            "ending_mrr": float(ending_mrr or 0),
+            "new_mrr": float(new_mrr or 0),
+            "expansion_mrr": float(expansion_mrr or 0),
+            "contraction_mrr": float(contraction_mrr or 0),
+            "churn_mrr": float(churn_mrr or 0),
+            "net_new_mrr": float(net_new_mrr or 0),
+            "logo_churn": int(logo_churn),
+            "nrr_pct": float(nrr_pct or 0),
+        },
+    }
+
+
+@router.get("/summary/data-quality")
+def get_saas_summary_data_quality(
+    db: Session = Depends(get_db),
+    _admin: Usuario = Depends(get_saas_admin_user),
+):
+    _require_any_saas_module(_admin, [MODULE_TENANTS, MODULE_BILLING], "resumen de calidad de datos")
+    now = datetime.utcnow()
+    rolling_30d_start = now - timedelta(days=30)
+
+    tenant_trial_without_demo = (
+        db.query(func.count(Tenant.id))
+        .filter(Tenant.subscription_status == "TRIAL", Tenant.is_demo.is_(False))
+        .scalar()
+        or 0
+    )
+    tenant_demo_without_trial = (
+        db.query(func.count(Tenant.id))
+        .filter(Tenant.is_demo.is_(True), Tenant.subscription_status != "TRIAL")
+        .scalar()
+        or 0
+    )
+    inactive_with_paid_status = (
+        db.query(func.count(Tenant.id))
+        .filter(Tenant.is_active.is_(False), Tenant.subscription_status.in_(["ACTIVE", "PAST_DUE"]))
+        .scalar()
+        or 0
+    )
+    missing_next_billing = (
+        db.query(func.count(Tenant.id))
+        .filter(
+            Tenant.is_active.is_(True),
+            Tenant.is_demo.is_(False),
+            Tenant.subscription_status.in_(["ACTIVE", "PAST_DUE"]),
+            Tenant.next_billing_at.is_(None),
+        )
+        .scalar()
+        or 0
+    )
+    payment_without_reference_30d = (
+        db.query(func.count(SaasBillingEvent.id))
+        .filter(
+            SaasBillingEvent.event_type == "PAYMENT_RECORDED",
+            SaasBillingEvent.status == "PAID",
+            func.coalesce(SaasBillingEvent.paid_at, SaasBillingEvent.created_at) >= rolling_30d_start,
+            func.length(func.trim(func.coalesce(SaasBillingEvent.reference, ""))) == 0,
+        )
+        .scalar()
+        or 0
+    )
+    payment_paid_without_date = (
+        db.query(func.count(SaasBillingEvent.id))
+        .filter(
+            SaasBillingEvent.event_type == "PAYMENT_RECORDED",
+            SaasBillingEvent.status == "PAID",
+            SaasBillingEvent.paid_at.is_(None),
+        )
+        .scalar()
+        or 0
+    )
+
+    checks = [
+        {
+            "key": "tenant_trial_without_demo",
+            "label": "Tenants TRIAL sin bandera demo",
+            "count": int(tenant_trial_without_demo),
+            "severity": "warning",
+        },
+        {
+            "key": "tenant_demo_without_trial",
+            "label": "Tenants demo con estado distinto a TRIAL",
+            "count": int(tenant_demo_without_trial),
+            "severity": "warning",
+        },
+        {
+            "key": "inactive_with_paid_status",
+            "label": "Tenants inactivos en estado ACTIVE/PAST_DUE",
+            "count": int(inactive_with_paid_status),
+            "severity": "warning",
+        },
+        {
+            "key": "missing_next_billing",
+            "label": "Tenants facturables sin proxima fecha de cobro",
+            "count": int(missing_next_billing),
+            "severity": "critical",
+        },
+        {
+            "key": "payment_without_reference_30d",
+            "label": "Pagos de 30 dias sin referencia",
+            "count": int(payment_without_reference_30d),
+            "severity": "warning",
+        },
+        {
+            "key": "payment_paid_without_date",
+            "label": "Pagos PAID sin fecha paid_at",
+            "count": int(payment_paid_without_date),
+            "severity": "critical",
+        },
+    ]
+    total_issues = sum(int(item["count"] or 0) for item in checks)
+    return {
+        "generated_at": now.isoformat(),
+        "healthy": total_issues == 0,
+        "total_issues": int(total_issues),
+        "checks": checks,
+    }
+
+
+@router.post("/summary/data-quality/fix")
+def run_saas_summary_data_quality_fix(
+    request: Request,
+    check_key: str = Query(..., min_length=3, max_length=80),
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_saas_admin_user),
+):
+    _require_any_saas_module(admin, [MODULE_TENANTS, MODULE_BILLING], "corregir calidad de datos")
+    key = (check_key or "").strip().lower()
+    now = datetime.utcnow()
+
+    fixed_count = 0
+    summary = ""
+
+    if key == "tenant_trial_without_demo":
+        target_tenants = db.query(Tenant).filter(
+            Tenant.subscription_status == "TRIAL",
+            Tenant.is_demo.is_(False),
+        ).all()
+        for tenant in target_tenants:
+            tenant.is_demo = True
+            if tenant.demo_ends_at is None:
+                tenant.demo_ends_at = now + timedelta(days=max(1, int(settings.DEFAULT_DEMO_DAYS)))
+        fixed_count = len(target_tenants)
+        summary = f"Sincronizó {fixed_count} tenants TRIAL -> demo"
+
+    elif key == "tenant_demo_without_trial":
+        target_tenants = db.query(Tenant).filter(
+            Tenant.is_demo.is_(True),
+            Tenant.subscription_status != "TRIAL",
+        ).all()
+        for tenant in target_tenants:
+            tenant.is_demo = False
+        fixed_count = len(target_tenants)
+        summary = f"Sincronizó {fixed_count} tenants demo fuera de TRIAL"
+
+    elif key == "missing_next_billing":
+        target_tenants = db.query(Tenant).filter(
+            Tenant.is_active.is_(True),
+            Tenant.is_demo.is_(False),
+            Tenant.subscription_status.in_(["ACTIVE", "PAST_DUE"]),
+            Tenant.next_billing_at.is_(None),
+        ).all()
+        for tenant in target_tenants:
+            duration_days = int(_tenant_period_amounts(db, tenant).get("duration_days", 30) or 30)
+            tenant.next_billing_at = now + timedelta(days=max(1, duration_days))
+        fixed_count = len(target_tenants)
+        summary = f"Definió next_billing_at para {fixed_count} tenants"
+
+    elif key == "payment_paid_without_date":
+        rows = db.query(SaasBillingEvent).filter(
+            SaasBillingEvent.event_type == "PAYMENT_RECORDED",
+            SaasBillingEvent.status == "PAID",
+            SaasBillingEvent.paid_at.is_(None),
+        ).all()
+        for event in rows:
+            event.paid_at = event.created_at or now
+        fixed_count = len(rows)
+        summary = f"Normalizó paid_at en {fixed_count} pagos"
+
+    else:
+        raise HTTPException(status_code=400, detail="check_key no soportado para autocorrección")
+
+    _write_audit_log(
+        db=db,
+        actor=admin,
+        request=request,
+        action="summary.data_quality_fix_run",
+        entity_type="summary_data_quality",
+        entity_id=key,
+        summary=summary or f"Ejecutó autocorrección de calidad para {key}",
+        payload={"check_key": key, "fixed_count": int(fixed_count)},
+    )
+    db.commit()
+    return {
+        "ok": True,
+        "check_key": key,
+        "fixed_count": int(fixed_count),
+        "summary": summary,
+    }
+
+
+@router.get("/summary/income-breakdown")
+def get_saas_summary_income_breakdown(
+    fecha_inicio: Optional[datetime] = Query(None),
+    fecha_fin: Optional[datetime] = Query(None),
+    limit: int = Query(250, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    _admin: Usuario = Depends(get_saas_admin_user),
+):
+    _require_saas_module(_admin, MODULE_BILLING, "consultar ingresos en resumen SaaS")
+    if fecha_inicio and fecha_fin and fecha_fin < fecha_inicio:
+        raise HTTPException(status_code=400, detail="El rango de fechas es inválido")
+
+    paid_date_expr = func.coalesce(SaasBillingEvent.paid_at, SaasBillingEvent.created_at)
+    filters = [
+        SaasBillingEvent.event_type == "PAYMENT_RECORDED",
+        SaasBillingEvent.status == "PAID",
+    ]
+    if fecha_inicio:
+        filters.append(paid_date_expr >= fecha_inicio)
+    if fecha_fin:
+        filters.append(paid_date_expr <= fecha_fin)
+
+    total_amount_raw, total_payments_raw = (
+        db.query(
+            func.coalesce(func.sum(SaasBillingEvent.amount), 0),
+            func.count(SaasBillingEvent.id),
+        )
+        .join(Tenant, Tenant.id == SaasBillingEvent.tenant_id)
+        .filter(*filters)
+        .first()
+    )
+
+    by_tenant_rows = (
+        db.query(
+            Tenant.id.label("tenant_id"),
+            Tenant.slug.label("tenant_slug"),
+            Tenant.nombre.label("tenant_nombre"),
+            func.coalesce(func.sum(SaasBillingEvent.amount), 0).label("total_amount"),
+            func.count(SaasBillingEvent.id).label("payments_count"),
+            func.max(paid_date_expr).label("last_payment_at"),
+        )
+        .join(Tenant, Tenant.id == SaasBillingEvent.tenant_id)
+        .filter(*filters)
+        .group_by(Tenant.id, Tenant.slug, Tenant.nombre)
+        .order_by(func.coalesce(func.sum(SaasBillingEvent.amount), 0).desc(), Tenant.nombre.asc())
+        .all()
+    )
+
+    payment_rows = (
+        db.query(SaasBillingEvent)
+        .join(Tenant, Tenant.id == SaasBillingEvent.tenant_id)
+        .filter(*filters)
+        .order_by(paid_date_expr.desc(), SaasBillingEvent.id.desc())
+        .limit(limit)
+        .all()
+    )
+
+    return {
+        "fecha_inicio": fecha_inicio.isoformat() if fecha_inicio else None,
+        "fecha_fin": fecha_fin.isoformat() if fecha_fin else None,
+        "total_amount": float(total_amount_raw or 0),
+        "total_payments": int(total_payments_raw or 0),
+        "by_tenant": [
+            {
+                "tenant_id": int(row.tenant_id),
+                "tenant_slug": row.tenant_slug,
+                "tenant_nombre": row.tenant_nombre,
+                "total_amount": float(row.total_amount or 0),
+                "payments_count": int(row.payments_count or 0),
+                "last_payment_at": row.last_payment_at.isoformat() if row.last_payment_at else None,
+            }
+            for row in by_tenant_rows
+        ],
+        "payments": [_serialize_billing_event(row, include_receipt=False) for row in payment_rows],
     }
 
 
@@ -2140,30 +2598,35 @@ def send_billing_overdue_reminders(
     now = datetime.utcnow()
     candidates = db.query(Tenant).filter(
         Tenant.is_active.is_(True),
-        Tenant.subscription_status == "PAST_DUE",
+        Tenant.subscription_status.in_(["ACTIVE", "PAST_DUE"]),
         Tenant.next_billing_at.isnot(None),
         Tenant.contacto_email.isnot(None),
     ).all()
     sent = 0
     evaluated = 0
+    stage_counts: dict[str, int] = {}
     for tenant in candidates:
         email = (tenant.contacto_email or "").strip().lower()
         if not email:
             continue
+        stage_code, stage_label, days_delta = _compute_dunning_stage(tenant, now)
+        if not stage_code:
+            continue
         evaluated += 1
-        recent = db.query(SaasBillingEvent).filter(
+        stage_marker = f"stage={stage_code}"
+        already_sent_stage = db.query(SaasBillingEvent).filter(
             SaasBillingEvent.tenant_id == tenant.id,
             SaasBillingEvent.event_type == "OVERDUE_REMINDER_SENT",
-            SaasBillingEvent.created_at >= (now - timedelta(hours=24)),
+            SaasBillingEvent.due_at == tenant.next_billing_at,
+            SaasBillingEvent.notes.ilike(f"%{stage_marker}%"),
         ).first()
-        if recent:
+        if already_sent_stage:
             continue
-        days_overdue = (now.date() - tenant.next_billing_at.date()).days if tenant.next_billing_at else 0
         pricing = _tenant_period_amounts(db, tenant)
         ok = send_email(
             to_email=email,
-            subject=f"[{settings.SMTP_FROM_NAME}] Recordatorio de pago pendiente",
-            body=_build_overdue_email_body(tenant, days_overdue, pricing["total"]),
+            subject=f"[{settings.SMTP_FROM_NAME}] Cobranza SaaS - {stage_label}",
+            body=_build_dunning_email_body(tenant, stage_code, stage_label or stage_code, days_delta, pricing["total"]),
         )
         if ok:
             db.add(SaasBillingEvent(
@@ -2173,9 +2636,13 @@ def send_billing_overdue_reminders(
                 amount=float(pricing["total"]),
                 currency="COP",
                 due_at=tenant.next_billing_at,
-                notes=f"Recordatorio enviado a {email}.",
+                notes=(
+                    f"Dunning reminder sent to {email}; stage={stage_code}; "
+                    f"stage_label={stage_label}; days_delta={int(days_delta)}."
+                ),
             ))
             sent += 1
+            stage_counts[stage_code] = int(stage_counts.get(stage_code, 0) + 1)
 
     _write_audit_log(
         db=db,
@@ -2185,10 +2652,83 @@ def send_billing_overdue_reminders(
         entity_type="billing",
         entity_id="overdue-reminders",
         summary=f"Ejecutó recordatorios de cartera (evaluados={evaluated}, enviados={sent})",
-        payload={"evaluated": evaluated, "sent": sent},
+        payload={"evaluated": evaluated, "sent": sent, "stage_counts": stage_counts},
     )
     db.commit()
-    return {"evaluated": evaluated, "sent": sent}
+    return {"evaluated": evaluated, "sent": sent, "stage_counts": stage_counts}
+
+
+@router.get("/billing/dunning-summary")
+def get_billing_dunning_summary(
+    db: Session = Depends(get_db),
+    _admin: Usuario = Depends(get_saas_admin_user),
+):
+    _require_saas_module(_admin, MODULE_BILLING, "consultar resumen de cobranza inteligente")
+    now = datetime.utcnow()
+    rolling_30d_start = now - timedelta(days=30)
+
+    stage_counts: dict[str, int] = {}
+    for code, _label, _threshold in DUNNING_STAGE_RULES:
+        count = db.query(func.count(SaasBillingEvent.id)).filter(
+            SaasBillingEvent.event_type == "OVERDUE_REMINDER_SENT",
+            SaasBillingEvent.created_at >= rolling_30d_start,
+            SaasBillingEvent.notes.ilike(f"%stage={code}%"),
+        ).scalar() or 0
+        stage_counts[code] = int(count)
+
+    reminders_sent_30d = int(sum(stage_counts.values()))
+    due_soon_3d = db.query(func.count(Tenant.id)).filter(
+        Tenant.is_active.is_(True),
+        Tenant.subscription_status == "ACTIVE",
+        Tenant.next_billing_at.isnot(None),
+        Tenant.next_billing_at >= now,
+        Tenant.next_billing_at <= (now + timedelta(days=3)),
+    ).scalar() or 0
+    past_due_total = db.query(func.count(Tenant.id)).filter(
+        Tenant.is_active.is_(True),
+        Tenant.subscription_status == "PAST_DUE",
+        Tenant.next_billing_at.isnot(None),
+    ).scalar() or 0
+    in_sequence = db.query(func.count(Tenant.id)).filter(
+        Tenant.is_active.is_(True),
+        Tenant.next_billing_at.isnot(None),
+        or_(
+            and_(Tenant.subscription_status == "ACTIVE", Tenant.next_billing_at <= (now + timedelta(days=3)), Tenant.next_billing_at >= now),
+            Tenant.subscription_status == "PAST_DUE",
+        ),
+    ).scalar() or 0
+
+    reminded_tenant_ids_rows = db.query(SaasBillingEvent.tenant_id).filter(
+        SaasBillingEvent.event_type == "OVERDUE_REMINDER_SENT",
+        SaasBillingEvent.created_at >= rolling_30d_start,
+    ).distinct().all()
+    reminded_tenant_ids = [int(row[0]) for row in reminded_tenant_ids_rows if row and row[0] is not None]
+    recovered_after_reminder_30d = 0.0
+    payments_after_reminder_30d = 0
+    if reminded_tenant_ids:
+        recovered_after_reminder_30d_raw, payments_after_reminder_30d_raw = db.query(
+            func.coalesce(func.sum(SaasBillingEvent.amount), 0),
+            func.count(SaasBillingEvent.id),
+        ).filter(
+            SaasBillingEvent.event_type == "PAYMENT_RECORDED",
+            SaasBillingEvent.status == "PAID",
+            SaasBillingEvent.tenant_id.in_(reminded_tenant_ids),
+            func.coalesce(SaasBillingEvent.paid_at, SaasBillingEvent.created_at) >= rolling_30d_start,
+        ).first()
+        recovered_after_reminder_30d = float(recovered_after_reminder_30d_raw or 0)
+        payments_after_reminder_30d = int(payments_after_reminder_30d_raw or 0)
+
+    return {
+        "generated_at": now.isoformat(),
+        "window_days": 30,
+        "due_soon_3d": int(due_soon_3d),
+        "past_due_total": int(past_due_total),
+        "in_sequence": int(in_sequence),
+        "reminders_sent_30d": int(reminders_sent_30d),
+        "stage_counts": stage_counts,
+        "payments_after_reminder_30d": int(payments_after_reminder_30d),
+        "recovered_after_reminder_30d": float(recovered_after_reminder_30d),
+    }
 
 
 @router.get("/billing/aging-summary")
