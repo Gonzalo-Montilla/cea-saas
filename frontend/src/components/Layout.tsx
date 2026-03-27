@@ -47,11 +47,24 @@ export const Layout = ({ children }: LayoutProps) => {
     return saved === 'dark' ? 'dark' : 'light';
   });
   const supportPrevUnreadRef = useRef<number | null>(null);
+  const [isMobileNav, setIsMobileNav] = useState<boolean>(() => window.innerWidth <= 1024);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', themeMode);
     localStorage.setItem('theme_mode', themeMode);
   }, [themeMode]);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 1024px)');
+    const apply = () => {
+      const mobile = mq.matches;
+      setIsMobileNav(mobile);
+      setSidebarExpanded(!mobile);
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
 
   useEffect(() => {
     const loadTenantBranding = async () => {
@@ -244,6 +257,7 @@ export const Layout = ({ children }: LayoutProps) => {
                 onClick={(e) => {
                   e.preventDefault();
                   navigate(item.path);
+                  if (isMobileNav) setSidebarExpanded(false);
                 }}
               >
                 <span className="nav-icon"><Icon size={22} /></span>
@@ -258,6 +272,14 @@ export const Layout = ({ children }: LayoutProps) => {
           })}
         </nav>
       </aside>
+      {isMobileNav && sidebarExpanded && (
+        <button
+          type="button"
+          className="sidebar-backdrop"
+          aria-label="Cerrar menú"
+          onClick={() => setSidebarExpanded(false)}
+        />
+      )}
 
       <div className={`main-wrapper ${sidebarExpanded ? 'expanded' : 'collapsed'}`}>
         <header className="dashboard-header">

@@ -206,3 +206,42 @@
 :root[data-theme='dark'] .quick-action:hover {
   background: var(--surface-2);
 }
+
+@media (max-width: 1024px) {
+  .stats-grid {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+  }
+
+  .quick-actions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .stat-card {
+    padding: 14px;
+  }
+
+  .stat-header {
+    margin-bottom: 10px;
+  }
+
+  .stat-icon {
+    width: 42px;
+    height: 42px;
+  }
+
+  .stat-value {
+    font-size: 24px;
+  }
+
+  .panel-header,
+  .panel-body {
+    padding: 12px 14px;
+  }
+
+  .quick-action {
+    min-height: 44px;
+  }
+}

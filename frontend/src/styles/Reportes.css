@@ -451,6 +451,17 @@
     align-items: flex-start;
   }
 
+  .reportes-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .btn-exportar,
+  .btn-exportar.secondary {
+    width: 100%;
+    justify-content: center;
+  }
+
   .header-titulo h1 {
     font-size: 1.5rem;
   }
@@ -472,9 +483,36 @@
     align-items: stretch;
   }
 
+  .filtro-fecha {
+    width: 100%;
+  }
+
+  .filtro-fecha input {
+    width: 100%;
+  }
+
   .btn-aplicar-filtros {
     width: 100%;
     justify-content: center;
+  }
+
+  .kpi-valor {
+    font-size: 1.6rem;
+  }
+
+  .grafico-card {
+    padding: 1rem;
+  }
+
+  .grafico-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .grafico-stats {
+    gap: 10px;
+    flex-wrap: wrap;
   }
 }
 
@@ -1202,6 +1240,10 @@
   .tabla-estudiantes th,
   .tabla-estudiantes td {
     padding: 0.625rem 0.75rem;
+  }
+
+  .td-concepto {
+    max-width: 140px;
   }
 }
 

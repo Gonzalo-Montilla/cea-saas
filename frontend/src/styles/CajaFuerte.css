@@ -214,6 +214,11 @@
 .tabla-movimientos table {
   width: 100%;
   border-collapse: collapse;
+  min-width: 900px;
+}
+
+.tabla-movimientos {
+  overflow-x: auto;
 }
 
 .tabla-movimientos th,
@@ -238,4 +243,33 @@
   text-align: center;
   color: var(--text-secondary);
   padding: 16px;
+}
+
+@media (max-width: 1024px) {
+  .caja-fuerte-container {
+    padding: 16px;
+  }
+
+  .section-actions {
+    flex-wrap: wrap;
+  }
+
+  .section-actions button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .caja-fuerte-section {
+    padding: 14px;
+  }
+
+  .form-grid,
+  .filtros {
+    grid-template-columns: 1fr;
+  }
+
+  .resumen-valor {
+    font-size: 18px;
+  }
 }

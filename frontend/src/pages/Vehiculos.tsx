@@ -273,50 +273,52 @@ export const Vehiculos = () => {
               )}
             </div>
           ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>Placa</th>
-                  <th>Tipo</th>
-                  <th>Marca</th>
-                  <th>Modelo</th>
-                  <th>Año</th>
-                  <th>Responsable</th>
-                  <th>Estado</th>
-                  <th>Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                {vehiculos.map((vehiculo) => (
-                  <tr key={vehiculo.id}>
-                    <td>{vehiculo.placa}</td>
-                    <td>{vehiculo.tipo || '-'}</td>
-                    <td>{vehiculo.marca || '-'}</td>
-                    <td>{vehiculo.modelo || '-'}</td>
-                    <td>{vehiculo.año || '-'}</td>
-                    <td>{vehiculo.responsable_nombre || '-'}</td>
-                    <td>
-                      <span className={`badge ${vehiculo.is_active ? 'badge-activo' : 'badge-inactivo'}`}>
-                        {vehiculo.is_active ? 'Activo' : 'Inactivo'}
-                      </span>
-                    </td>
-                    <td className="acciones">
-                      <button className="btn-icon" onClick={() => navigate(`/vehiculos/${vehiculo.id}`)} title="Hoja de vida">
-                        <Eye size={16} />
-                      </button>
-                      <button className="btn-icon" onClick={() => abrirModalEditar(vehiculo)}>
-                        <Pencil size={16} />
-                      </button>
-                      {vehiculo.is_active && (
-                        <button className="btn-icon danger" onClick={() => eliminarVehiculo(vehiculo)}>
-                          <Trash2 size={16} />
-                        </button>
-                      )}
-                    </td>
+            <div className="vehiculos-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Placa</th>
+                    <th>Tipo</th>
+                    <th>Marca</th>
+                    <th>Modelo</th>
+                    <th>Año</th>
+                    <th>Responsable</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {vehiculos.map((vehiculo) => (
+                    <tr key={vehiculo.id}>
+                      <td>{vehiculo.placa}</td>
+                      <td>{vehiculo.tipo || '-'}</td>
+                      <td>{vehiculo.marca || '-'}</td>
+                      <td>{vehiculo.modelo || '-'}</td>
+                      <td>{vehiculo.año || '-'}</td>
+                      <td>{vehiculo.responsable_nombre || '-'}</td>
+                      <td>
+                        <span className={`badge ${vehiculo.is_active ? 'badge-activo' : 'badge-inactivo'}`}>
+                          {vehiculo.is_active ? 'Activo' : 'Inactivo'}
+                        </span>
+                      </td>
+                      <td className="acciones">
+                        <button className="btn-icon" onClick={() => navigate(`/vehiculos/${vehiculo.id}`)} title="Hoja de vida">
+                          <Eye size={16} />
+                        </button>
+                        <button className="btn-icon" onClick={() => abrirModalEditar(vehiculo)}>
+                          <Pencil size={16} />
+                        </button>
+                        {vehiculo.is_active && (
+                          <button className="btn-icon danger" onClick={() => eliminarVehiculo(vehiculo)}>
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}

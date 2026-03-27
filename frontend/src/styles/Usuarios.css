@@ -83,6 +83,11 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   overflow: hidden;
+  min-width: 860px;
+}
+
+.usuarios-table {
+  overflow-x: auto;
 }
 
 .usuarios-table th,
@@ -186,4 +191,39 @@
   background: var(--primary);
   color: #fff;
   border: 1px solid var(--primary);
+}
+
+@media (max-width: 1024px) {
+  .usuarios-container {
+    padding: 16px;
+  }
+
+  .search-section {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .search-box {
+    max-width: none;
+  }
+
+  .btn-search {
+    width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .modal-box {
+    width: calc(100vw - 16px);
+    max-height: 88vh;
+  }
+
+  .modal-footer {
+    flex-wrap: wrap;
+  }
+
+  .modal-footer .btn-secondary,
+  .modal-footer .btn-primary {
+    width: 100%;
+  }
 }

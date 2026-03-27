@@ -216,7 +216,7 @@ export const Tarifas = () => {
       {loading ? (
         <div className="loading-container">Cargando tarifas...</div>
       ) : (
-        <div className="tarifas-table">
+        <div className="tarifas-table mobile-table-wrap">
           <table>
             <thead>
               <tr>
@@ -260,7 +260,7 @@ export const Tarifas = () => {
         icon={<GraduationCap size={20} />}
       />
 
-      <div className="tarifas-table">
+      <div className="tarifas-table mobile-table-wrap">
         {loadingReglas ? (
           <div className="loading-container">Cargando configuración de horas...</div>
         ) : (

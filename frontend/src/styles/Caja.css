@@ -974,9 +974,6 @@
 .btn-action.btn-danger:hover {
   background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%);
 }
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
 
 .metodo-monto {
   font-size: 24px;
@@ -1424,6 +1421,49 @@
 
 /* Responsive */
 @media (max-width: 768px) {
+  .caja-container {
+    padding: 14px;
+  }
+
+  .actions-bar {
+    flex-direction: column;
+  }
+
+  .btn-action {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .search-bar {
+    flex-direction: column;
+  }
+
+  .btn-search {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .detalle-pago-row {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .btn-icon-danger {
+    margin-top: 0 !important;
+    width: 100%;
+    height: 36px;
+  }
+
+  .metodo-total-monto,
+  .diferencia-monto,
+  .stat-value-large {
+    font-size: 22px;
+  }
+
+  .form-input-large {
+    font-size: 18px;
+  }
+
   .caja-resumen-grid {
     grid-template-columns: 1fr;
   }

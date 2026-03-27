@@ -4,14 +4,14 @@
   margin: 0 auto;
 }
 
-.detalle-header {
+.estudiante-detalle-container .detalle-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 24px;
 }
 
-.btn-back {
+.estudiante-detalle-container .btn-back {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -26,17 +26,17 @@
   transition: all 0.2s;
 }
 
-.btn-back:hover {
+.estudiante-detalle-container .btn-back:hover {
   background: var(--surface-2);
   border-color: var(--border);
 }
 
-.header-actions {
+.estudiante-detalle-container .header-actions {
   display: flex;
   gap: 12px;
 }
 
-.btn-action {
+.estudiante-detalle-container .btn-action {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -51,26 +51,26 @@
   transition: all 0.2s;
 }
 
-.btn-action:hover {
+.estudiante-detalle-container .btn-action:hover {
   background: var(--primary-600);
   transform: translateY(-1px);
 }
 
-.btn-action.btn-action-success {
+.estudiante-detalle-container .btn-action.btn-action-success {
   background: #059669;
 }
 
-.btn-action.btn-action-success:hover {
+.estudiante-detalle-container .btn-action.btn-action-success:hover {
   background: #047857;
 }
 
-.btn-action:disabled {
+.estudiante-detalle-container .btn-action:disabled {
   opacity: 0.6;
   cursor: not-allowed;
   transform: none;
 }
 
-.btn-action:disabled:hover {
+.estudiante-detalle-container .btn-action:disabled:hover {
   transform: none;
 }
 
@@ -733,15 +733,37 @@
     padding: 16px;
   }
 
-  .detalle-header {
+  .estudiante-detalle-container .detalle-header {
     flex-direction: column;
     gap: 16px;
     align-items: flex-start;
   }
 
+  .estudiante-detalle-container .header-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .estudiante-detalle-container .btn-action {
+    width: 100%;
+    justify-content: center;
+  }
+
   .info-principal {
     flex-direction: column;
     text-align: center;
+    gap: 16px;
+    padding: 18px 14px;
+  }
+
+  .foto-grande img,
+  .foto-placeholder-grande {
+    width: 130px;
+    height: 130px;
+  }
+
+  .info-basica h1 {
+    font-size: 22px;
   }
 
   .detalle-grid {
@@ -756,5 +778,20 @@
 
   .info-row .value {
     text-align: left;
+  }
+
+  .progreso-bar {
+    height: 30px;
+  }
+
+  .progreso-text {
+    left: 10px;
+    right: 10px;
+    text-align: center;
+    font-size: 12px;
+  }
+
+  .detalle-metodo {
+    flex: 0 0 90px;
   }
 }

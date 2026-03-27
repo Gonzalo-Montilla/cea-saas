@@ -149,7 +149,7 @@ const CierreFinanciero = () => {
             </div>
           </div>
 
-          <div className="cierre-table">
+          <div className="cierre-table mobile-table-wrap">
             <h3>Detalle por caja</h3>
             {data.cajas.length === 0 ? (
               <div className="cierre-empty">Sin cajas en el período.</div>

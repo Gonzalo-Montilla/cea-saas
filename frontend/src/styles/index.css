@@ -552,3 +552,70 @@ a {
   text-decoration: none;
   color: inherit;
 }
+
+/* Shared responsive helpers */
+.mobile-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mobile-table-wrap table {
+  min-width: 820px;
+}
+
+@media (max-width: 768px) {
+  .page-header-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 1rem;
+  }
+
+  .page-header-title {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .page-header-title h1 {
+    font-size: 22px;
+    line-height: 1.2;
+  }
+
+  .page-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .mobile-table-wrap table {
+    min-width: 720px;
+  }
+
+  .mobile-table-wrap th,
+  .mobile-table-wrap td {
+    white-space: nowrap;
+  }
+
+  .modal-box {
+    width: calc(100vw - 16px);
+    max-height: 88vh;
+    margin: 8px;
+  }
+
+  .modal-header,
+  .modal-body,
+  .modal-footer {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .modal-footer {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .modal-footer button {
+    width: 100%;
+  }
+}

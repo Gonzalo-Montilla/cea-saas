@@ -72,3 +72,28 @@
 .alertas-error {
   color: #b91c1c;
 }
+
+@media (max-width: 768px) {
+  .alertas-container {
+    padding: 14px;
+  }
+
+  .alertas-filter {
+    width: 100%;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .alertas-filter label,
+  .alertas-filter select {
+    width: 100%;
+  }
+
+  .alertas-card {
+    padding: 12px;
+  }
+
+  .alerta-item {
+    padding: 10px;
+  }
+}
