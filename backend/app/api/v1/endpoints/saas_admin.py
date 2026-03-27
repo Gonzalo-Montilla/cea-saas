@@ -1326,7 +1326,9 @@ def update_tenant_admin(
     if requested_status is not None:
         if requested_status == "TRIAL":
             requested_is_demo = True
-        elif requested_is_demo is None:
+        else:
+            # Non-trial statuses always represent paid/operational tenants.
+            # Force demo off to avoid status reverting to TRIAL on save.
             requested_is_demo = False
     if requested_is_demo is not None:
         if requested_is_demo:
@@ -1904,6 +1906,9 @@ def record_tenant_payment(
         tenant.next_billing_at = base + timedelta(days=_cycle_days(tenant.billing_cycle))
     if payload.set_status_active:
         tenant.subscription_status = "ACTIVE"
+        if tenant.is_demo:
+            tenant.is_demo = False
+            tenant.demo_ends_at = None
 
     _write_audit_log(
         db=db,
