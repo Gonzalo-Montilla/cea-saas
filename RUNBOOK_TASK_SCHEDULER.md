@@ -88,3 +88,14 @@ Verificar:
 crontab -l
 tail -n 100 /var/log/siaec_saas_automation.log
 ```
+
+Precheck recomendado (antes de dejarlo en automático):
+
+```bash
+cd /opt/siaec/SAAS-CEA/backend
+/opt/siaec/SAAS-CEA/backend/.venv/bin/python -m scripts.precheck_saas_automation
+```
+
+Esperado:
+- `PRECHECK OK` o `PRECHECK OK WITH WARNINGS`
+- Si aparece `PRECHECK FAILED`, corregir antes de depender del cron.

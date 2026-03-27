@@ -910,6 +910,24 @@ export const SaasAdmin = () => {
     ],
     [summary]
   );
+  const dunningStageRows = useMemo(
+    () => {
+      const stages = ['PRE_DUE_3D', 'OVERDUE_0D', 'OVERDUE_3D', 'OVERDUE_7D', 'OVERDUE_14D'];
+      const labels: Record<string, string> = {
+        PRE_DUE_3D: 'Por vencer (3 días)',
+        OVERDUE_0D: 'Vence hoy',
+        OVERDUE_3D: 'Vencido 3+ días',
+        OVERDUE_7D: 'Vencido 7+ días',
+        OVERDUE_14D: 'Vencido 14+ días',
+      };
+      return stages.map((code) => ({
+        code,
+        label: labels[code] || code,
+        count: Number(dunningSummary?.stage_counts?.[code] || 0),
+      }));
+    },
+    [dunningSummary]
+  );
 
   const resumenIncomeTopTenants = useMemo(
     () => (resumenIncomeData.by_tenant || []).slice(0, 8),
@@ -2391,6 +2409,26 @@ export const SaasAdmin = () => {
             <span>Vencidos: <strong>{Number(dunningSummary?.past_due_total || 0)}</strong></span>
             <span>Recordatorios 30d: <strong>{Number(dunningSummary?.reminders_sent_30d || 0)}</strong></span>
             <span>Recuperado post-recordatorio: <strong>{money(Number(dunningSummary?.recovered_after_reminder_30d || 0))}</strong></span>
+          </div>
+        )}
+        {canBilling && (
+          <div className="saas-table-wrap bo-table-wrap">
+            <table className="saas-table bo-table">
+              <thead>
+                <tr>
+                  <th>Etapa de cobranza</th>
+                  <th>Recordatorios (30d)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dunningStageRows.map((row) => (
+                  <tr key={`dunning-stage-${row.code}`}>
+                    <td>{row.label}</td>
+                    <td>{row.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
         {!!resumenDataQuality && (

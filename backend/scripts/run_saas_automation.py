@@ -196,7 +196,7 @@ def main() -> None:
     if lock_path.exists():
         print("SKIP: saas_automation already running (lock file present).")
         return
-    lock_path.write_text(datetime.utcnow().isoformat(), encoding="utf-8")
+    lock_path.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
     db = SessionLocal()
     try:
         result = run_all(db)
