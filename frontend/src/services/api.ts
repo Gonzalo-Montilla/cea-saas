@@ -1229,8 +1229,20 @@ export const saasAdminAPI = {
     recovered_after_reminder_30d: number;
     stage_recovery: Record<string, { payments: number; amount: number }>;
     stage_conversion_pct: Record<string, number>;
+    monthly_performance: Array<{
+      month: string;
+      reminders_sent: number;
+      recovered_payments: number;
+      recovered_amount: number;
+    }>;
   }> => {
     const response = await api.get('/saas-admin/billing/dunning-summary');
+    return response.data;
+  },
+  exportBillingDunningSummaryCsv: async (): Promise<Blob> => {
+    const response = await api.get('/saas-admin/billing/dunning-summary/export.csv', {
+      responseType: 'blob',
+    });
     return response.data;
   },
   getBillingAgingSummary: async (): Promise<{

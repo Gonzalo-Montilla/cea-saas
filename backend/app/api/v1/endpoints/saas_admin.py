@@ -2666,6 +2666,7 @@ def get_billing_dunning_summary(
     _require_saas_module(_admin, MODULE_BILLING, "consultar resumen de cobranza inteligente")
     now = datetime.utcnow()
     rolling_30d_start = now - timedelta(days=30)
+    rolling_180d_start = now - timedelta(days=180)
 
     stage_counts: dict[str, int] = {}
     for code, _label, _threshold in DUNNING_STAGE_RULES:
@@ -2716,6 +2717,61 @@ def get_billing_dunning_summary(
         func.coalesce(SaasBillingEvent.paid_at, SaasBillingEvent.created_at) >= rolling_30d_start,
     ).order_by(func.coalesce(SaasBillingEvent.paid_at, SaasBillingEvent.created_at).asc(), SaasBillingEvent.id.asc()).all()
 
+    # Tendencia mensual (últimos 6 meses): recordatorios enviados vs recuperación atribuida.
+    month_keys: list[str] = []
+    cursor = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    for _ in range(6):
+        month_keys.append(f"{cursor.year}-{cursor.month:02d}")
+        cursor = (cursor - timedelta(days=1)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    month_keys = list(reversed(month_keys))
+    monthly_map: dict[str, dict[str, float | int | str]] = {
+        key: {
+            "month": key,
+            "reminders_sent": 0,
+            "recovered_payments": 0,
+            "recovered_amount": 0.0,
+        }
+        for key in month_keys
+    }
+
+    reminder_events_180 = db.query(SaasBillingEvent).filter(
+        SaasBillingEvent.event_type == "OVERDUE_REMINDER_SENT",
+        SaasBillingEvent.created_at >= rolling_180d_start,
+    ).order_by(SaasBillingEvent.tenant_id.asc(), SaasBillingEvent.due_at.asc(), SaasBillingEvent.created_at.asc(), SaasBillingEvent.id.asc()).all()
+    reminder_timeline_180: dict[tuple[int, str], list[tuple[datetime, str]]] = {}
+    for reminder in reminder_events_180:
+        tenant_id = int(reminder.tenant_id or 0)
+        due_key = reminder.due_at.isoformat() if reminder.due_at else "__none__"
+        stage_match = re.search(r"stage=([A-Z0-9_]+)", str(reminder.notes or ""))
+        stage_code = str(stage_match.group(1) if stage_match else "UNKNOWN")
+        reminder_timeline_180.setdefault((tenant_id, due_key), []).append((reminder.created_at, stage_code))
+        month_key = f"{reminder.created_at.year}-{reminder.created_at.month:02d}" if reminder.created_at else ""
+        if month_key in monthly_map:
+            monthly_map[month_key]["reminders_sent"] = int(monthly_map[month_key]["reminders_sent"] or 0) + 1
+
+    payment_events_180 = db.query(SaasBillingEvent).filter(
+        SaasBillingEvent.event_type == "PAYMENT_RECORDED",
+        SaasBillingEvent.status == "PAID",
+        func.coalesce(SaasBillingEvent.paid_at, SaasBillingEvent.created_at) >= rolling_180d_start,
+    ).order_by(func.coalesce(SaasBillingEvent.paid_at, SaasBillingEvent.created_at).asc(), SaasBillingEvent.id.asc()).all()
+    for payment in payment_events_180:
+        tenant_id = int(payment.tenant_id or 0)
+        due_key = payment.due_at.isoformat() if payment.due_at else "__none__"
+        timeline = reminder_timeline_180.get((tenant_id, due_key)) or []
+        if not timeline:
+            continue
+        payment_ts = payment.paid_at or payment.created_at
+        if not payment_ts:
+            continue
+        eligible = [row for row in timeline if row[0] <= payment_ts]
+        if not eligible:
+            continue
+        month_key = f"{payment_ts.year}-{payment_ts.month:02d}"
+        if month_key not in monthly_map:
+            continue
+        monthly_map[month_key]["recovered_payments"] = int(monthly_map[month_key]["recovered_payments"] or 0) + 1
+        monthly_map[month_key]["recovered_amount"] = float(monthly_map[month_key]["recovered_amount"] or 0.0) + float(payment.amount or 0)
+
     stage_recovery: dict[str, dict[str, float | int]] = {
         code: {"payments": 0, "amount": 0.0}
         for code, _label, _threshold in DUNNING_STAGE_RULES
@@ -2763,7 +2819,53 @@ def get_billing_dunning_summary(
         "recovered_after_reminder_30d": float(recovered_after_reminder_30d),
         "stage_recovery": stage_recovery,
         "stage_conversion_pct": stage_conversion_pct,
+        "monthly_performance": [monthly_map[key] for key in month_keys],
     }
+
+
+@router.get("/billing/dunning-summary/export.csv")
+def export_billing_dunning_summary_csv(
+    db: Session = Depends(get_db),
+    _admin: Usuario = Depends(get_saas_admin_user),
+):
+    _require_saas_module(_admin, MODULE_BILLING, "exportar resumen de cobranza inteligente")
+    summary = get_billing_dunning_summary(db=db, _admin=_admin)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow(["section", "stage", "sent_30d", "recovered_payments_30d", "recovered_amount_30d", "conversion_pct_30d"])
+    stage_counts = summary.get("stage_counts") or {}
+    stage_recovery = summary.get("stage_recovery") or {}
+    stage_conversion_pct = summary.get("stage_conversion_pct") or {}
+    for code, _label, _threshold in DUNNING_STAGE_RULES:
+        bucket = stage_recovery.get(code) or {}
+        writer.writerow([
+            "stage_performance",
+            code,
+            int(stage_counts.get(code, 0) or 0),
+            int(bucket.get("payments", 0) or 0),
+            float(bucket.get("amount", 0.0) or 0.0),
+            float(stage_conversion_pct.get(code, 0.0) or 0.0),
+        ])
+
+    writer.writerow([])
+    writer.writerow(["section", "month", "reminders_sent", "recovered_payments", "recovered_amount"])
+    for row in (summary.get("monthly_performance") or []):
+        writer.writerow([
+            "monthly_performance",
+            row.get("month"),
+            int(row.get("reminders_sent", 0) or 0),
+            int(row.get("recovered_payments", 0) or 0),
+            float(row.get("recovered_amount", 0.0) or 0.0),
+        ])
+
+    filename = f"saas_dunning_summary_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/billing/aging-summary")

@@ -315,6 +315,7 @@ export const SaasAdmin = () => {
   const [processingOverdueCheck, setProcessingOverdueCheck] = useState(false);
   const [processingCycleCharges, setProcessingCycleCharges] = useState(false);
   const [sendingOverdueReminders, setSendingOverdueReminders] = useState(false);
+  const [dunningExporting, setDunningExporting] = useState(false);
   const [savingLeadId, setSavingLeadId] = useState<number | null>(null);
   const [receiptActionEventId, setReceiptActionEventId] = useState<number | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<null | {
@@ -929,6 +930,15 @@ export const SaasAdmin = () => {
         conversionPct: Number(dunningSummary?.stage_conversion_pct?.[code] || 0),
       }));
     },
+    [dunningSummary]
+  );
+  const dunningMonthlyRows = useMemo(
+    () => (dunningSummary?.monthly_performance || []).map((row: any) => ({
+      month: String(row?.month || ''),
+      remindersSent: Number(row?.reminders_sent || 0),
+      recoveredAmount: Number(row?.recovered_amount || 0),
+      recoveredPayments: Number(row?.recovered_payments || 0),
+    })),
     [dunningSummary]
   );
 
@@ -1938,6 +1948,25 @@ export const SaasAdmin = () => {
     }
   };
 
+  const exportDunningCsv = async () => {
+    try {
+      setDunningExporting(true);
+      const blob = await saasAdminAPI.exportBillingDunningSummaryCsv();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `saas_dunning_summary_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'No se pudo exportar resumen de cobranza');
+    } finally {
+      setDunningExporting(false);
+    }
+  };
+
   return (
     <div className="saas-admin-container">
       {!hasCurrentViewAccess && (
@@ -2412,6 +2441,9 @@ export const SaasAdmin = () => {
             <span>Vencidos: <strong>{Number(dunningSummary?.past_due_total || 0)}</strong></span>
             <span>Recordatorios 30d: <strong>{Number(dunningSummary?.reminders_sent_30d || 0)}</strong></span>
             <span>Recuperado post-recordatorio: <strong>{money(Number(dunningSummary?.recovered_after_reminder_30d || 0))}</strong></span>
+            <button type="button" className="btn-secondary" onClick={() => void exportDunningCsv()} disabled={dunningExporting}>
+              {dunningExporting ? 'Exportando...' : 'Exportar dunning CSV'}
+            </button>
           </div>
         )}
         {canBilling && (
@@ -2595,6 +2627,29 @@ export const SaasAdmin = () => {
                   <Tooltip formatter={(value: any) => money(Number(value || 0))} />
                   <Bar dataKey="amount" fill="var(--chart-1)" radius={[6, 6, 0, 0]} />
                 </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+          {canBilling && (
+            <div className="saas-chart-card">
+              <h4>Dunning: enviados vs recuperado (6 meses)</h4>
+              <ResponsiveContainer width="100%" height={240}>
+                <LineChart data={dunningMonthlyRows}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" />
+                  <YAxis yAxisId="left" allowDecimals={false} />
+                  <YAxis yAxisId="right" orientation="right" />
+                  <Tooltip formatter={(value: any, name: any) => {
+                    if (name === 'recoveredAmount') return [money(Number(value || 0)), 'Recuperado'];
+                    if (name === 'remindersSent') return [Number(value || 0), 'Recordatorios'];
+                    if (name === 'recoveredPayments') return [Number(value || 0), 'Pagos atribuidos'];
+                    return [value, name];
+                  }} />
+                  <Legend />
+                  <Line yAxisId="left" type="monotone" dataKey="remindersSent" name="Recordatorios" stroke="var(--chart-4)" strokeWidth={2} />
+                  <Line yAxisId="left" type="monotone" dataKey="recoveredPayments" name="Pagos atribuidos" stroke="var(--chart-5)" strokeWidth={2} />
+                  <Line yAxisId="right" type="monotone" dataKey="recoveredAmount" name="Recuperado" stroke="var(--chart-2)" strokeWidth={2} />
+                </LineChart>
               </ResponsiveContainer>
             </div>
           )}
