@@ -1227,6 +1227,8 @@ export const saasAdminAPI = {
     stage_counts: Record<string, number>;
     payments_after_reminder_30d: number;
     recovered_after_reminder_30d: number;
+    stage_recovery: Record<string, { payments: number; amount: number }>;
+    stage_conversion_pct: Record<string, number>;
   }> => {
     const response = await api.get('/saas-admin/billing/dunning-summary');
     return response.data;

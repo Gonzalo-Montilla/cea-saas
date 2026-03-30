@@ -923,7 +923,10 @@ export const SaasAdmin = () => {
       return stages.map((code) => ({
         code,
         label: labels[code] || code,
-        count: Number(dunningSummary?.stage_counts?.[code] || 0),
+        sent: Number(dunningSummary?.stage_counts?.[code] || 0),
+        recoveredPayments: Number(dunningSummary?.stage_recovery?.[code]?.payments || 0),
+        recoveredAmount: Number(dunningSummary?.stage_recovery?.[code]?.amount || 0),
+        conversionPct: Number(dunningSummary?.stage_conversion_pct?.[code] || 0),
       }));
     },
     [dunningSummary]
@@ -2417,14 +2420,20 @@ export const SaasAdmin = () => {
               <thead>
                 <tr>
                   <th>Etapa de cobranza</th>
-                  <th>Recordatorios (30d)</th>
+                  <th>Enviados (30d)</th>
+                  <th>Pagos atribuidos</th>
+                  <th>Recuperado</th>
+                  <th>Conversión</th>
                 </tr>
               </thead>
               <tbody>
                 {dunningStageRows.map((row) => (
                   <tr key={`dunning-stage-${row.code}`}>
                     <td>{row.label}</td>
-                    <td>{row.count}</td>
+                    <td>{row.sent}</td>
+                    <td>{row.recoveredPayments}</td>
+                    <td>{money(row.recoveredAmount)}</td>
+                    <td>{row.conversionPct.toFixed(1)}%</td>
                   </tr>
                 ))}
               </tbody>

@@ -2698,25 +2698,58 @@ def get_billing_dunning_summary(
         ),
     ).scalar() or 0
 
-    reminded_tenant_ids_rows = db.query(SaasBillingEvent.tenant_id).filter(
+    reminder_events = db.query(SaasBillingEvent).filter(
         SaasBillingEvent.event_type == "OVERDUE_REMINDER_SENT",
         SaasBillingEvent.created_at >= rolling_30d_start,
-    ).distinct().all()
-    reminded_tenant_ids = [int(row[0]) for row in reminded_tenant_ids_rows if row and row[0] is not None]
+    ).order_by(SaasBillingEvent.tenant_id.asc(), SaasBillingEvent.due_at.asc(), SaasBillingEvent.created_at.asc(), SaasBillingEvent.id.asc()).all()
+    reminder_timeline: dict[tuple[int, str], list[tuple[datetime, str]]] = {}
+    for reminder in reminder_events:
+        tenant_id = int(reminder.tenant_id or 0)
+        due_key = reminder.due_at.isoformat() if reminder.due_at else "__none__"
+        stage_match = re.search(r"stage=([A-Z0-9_]+)", str(reminder.notes or ""))
+        stage_code = str(stage_match.group(1) if stage_match else "UNKNOWN")
+        reminder_timeline.setdefault((tenant_id, due_key), []).append((reminder.created_at, stage_code))
+
+    payment_events = db.query(SaasBillingEvent).filter(
+        SaasBillingEvent.event_type == "PAYMENT_RECORDED",
+        SaasBillingEvent.status == "PAID",
+        func.coalesce(SaasBillingEvent.paid_at, SaasBillingEvent.created_at) >= rolling_30d_start,
+    ).order_by(func.coalesce(SaasBillingEvent.paid_at, SaasBillingEvent.created_at).asc(), SaasBillingEvent.id.asc()).all()
+
+    stage_recovery: dict[str, dict[str, float | int]] = {
+        code: {"payments": 0, "amount": 0.0}
+        for code, _label, _threshold in DUNNING_STAGE_RULES
+    }
     recovered_after_reminder_30d = 0.0
     payments_after_reminder_30d = 0
-    if reminded_tenant_ids:
-        recovered_after_reminder_30d_raw, payments_after_reminder_30d_raw = db.query(
-            func.coalesce(func.sum(SaasBillingEvent.amount), 0),
-            func.count(SaasBillingEvent.id),
-        ).filter(
-            SaasBillingEvent.event_type == "PAYMENT_RECORDED",
-            SaasBillingEvent.status == "PAID",
-            SaasBillingEvent.tenant_id.in_(reminded_tenant_ids),
-            func.coalesce(SaasBillingEvent.paid_at, SaasBillingEvent.created_at) >= rolling_30d_start,
-        ).first()
-        recovered_after_reminder_30d = float(recovered_after_reminder_30d_raw or 0)
-        payments_after_reminder_30d = int(payments_after_reminder_30d_raw or 0)
+    for payment in payment_events:
+        tenant_id = int(payment.tenant_id or 0)
+        due_key = payment.due_at.isoformat() if payment.due_at else "__none__"
+        timeline = reminder_timeline.get((tenant_id, due_key)) or []
+        if not timeline:
+            continue
+        payment_ts = payment.paid_at or payment.created_at
+        if not payment_ts:
+            continue
+        eligible = [row for row in timeline if row[0] <= payment_ts]
+        if not eligible:
+            continue
+        stage_code = str(eligible[-1][1] or "UNKNOWN")
+        amount = float(payment.amount or 0)
+        recovered_after_reminder_30d += amount
+        payments_after_reminder_30d += 1
+        bucket = stage_recovery.get(stage_code)
+        if bucket is None:
+            stage_recovery[stage_code] = {"payments": 1, "amount": amount}
+        else:
+            bucket["payments"] = int(bucket.get("payments", 0) or 0) + 1
+            bucket["amount"] = float(bucket.get("amount", 0.0) or 0.0) + amount
+
+    stage_conversion_pct: dict[str, float] = {}
+    for code, _label, _threshold in DUNNING_STAGE_RULES:
+        sent_count = float(stage_counts.get(code, 0) or 0)
+        recovered_count = float((stage_recovery.get(code) or {}).get("payments", 0) or 0)
+        stage_conversion_pct[code] = float((recovered_count / sent_count) * 100.0) if sent_count > 0 else 0.0
 
     return {
         "generated_at": now.isoformat(),
@@ -2728,6 +2761,8 @@ def get_billing_dunning_summary(
         "stage_counts": stage_counts,
         "payments_after_reminder_30d": int(payments_after_reminder_30d),
         "recovered_after_reminder_30d": float(recovered_after_reminder_30d),
+        "stage_recovery": stage_recovery,
+        "stage_conversion_pct": stage_conversion_pct,
     }
 
 
