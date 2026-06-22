@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
   BarChart3, DollarSign, Users, TrendingUp, AlertCircle,
   Calendar, CreditCard, PieChart, Download
@@ -27,6 +27,7 @@ interface DashboardData {
   ranking_referidos: any[];
   lista_estudiantes_registrados: any[];
   lista_estudiantes_pagos: any[];
+  lista_egresos_caja: any[];
   lista_otros_movimientos: any[];
 }
 
@@ -238,13 +239,15 @@ export const Reportes = () => {
       ['Ingresos por periodo'],
       ['Periodo', 'Ingresos']
     ];
-    datosIngresosLinea.forEach((d) => rows.push([d.mes, d.ingresos]));
+    datosIngresosLinea.forEach((d: { mes: string; ingresos: number }) => rows.push([d.mes, d.ingresos]));
     rows.push([]);
     rows.push(['Métodos de pago', 'Monto', 'Porcentaje']);
-    datosMetodosPago.forEach((d) => rows.push([d.nombre, d.valor, d.porcentaje]));
+    datosMetodosPago.forEach((d: { nombre: string; valor: number; porcentaje: number }) =>
+      rows.push([d.nombre, d.valor, d.porcentaje])
+    );
     rows.push([]);
     rows.push(['Egresos por categoría', 'Monto']);
-    datosEgresos.forEach((d) => rows.push([d.categoria, d.monto]));
+    datosEgresos.forEach((d: { categoria: string; monto: number }) => rows.push([d.categoria, d.monto]));
     downloadCSV(`reportes_${new Date().toISOString().slice(0, 10)}.csv`, rows);
   };
 
@@ -469,7 +472,7 @@ export const Reportes = () => {
                 formatter={(value: any) => formatearMoneda(value)}
               />
               <Bar dataKey="valor" name="Monto">
-                {datosMetodosPago.map((entry, index) => (
+                {datosMetodosPago.map((_entry: any, index: number) => (
                   <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                 ))}
               </Bar>
@@ -490,12 +493,16 @@ export const Reportes = () => {
                 cx="50%"
                 cy="50%"
                 labelLine={false}
-                label={({ nombre, porcentaje }) => `${nombre}: ${typeof porcentaje === 'number' ? porcentaje.toFixed(1) : '0.0'}%`}
+                label={(props: any) => {
+                  const nombre = props?.nombre ?? '';
+                  const porcentaje = props?.porcentaje;
+                  return `${nombre}: ${typeof porcentaje === 'number' ? porcentaje.toFixed(1) : '0.0'}%`;
+                }}
                 outerRadius={100}
                 fill="var(--chart-5)"
                 dataKey="valor"
               >
-                {datosEstudiantes.map((entry, index) => (
+                {datosEstudiantes.map((entry: any, index: number) => (
                   <Cell key={`cell-${index}`} fill={entry.color || CHART_COLORS[index % CHART_COLORS.length]} />
                 ))}
               </Pie>

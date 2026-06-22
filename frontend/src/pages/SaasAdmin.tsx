@@ -111,8 +111,15 @@ const money = (value: number) =>
   new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(value || 0);
 
 const planLabel = (plan?: string | null) => PLAN_LABELS[String(plan || '').toUpperCase()] || String(plan || '-');
-const normalizeBillingCycle = (value?: string | null) =>
-  String(value || '').toUpperCase() === 'MONTHLY' ? 'QUARTERLY' : (value || 'QUARTERLY');
+type BillingCycle = NonNullable<SaasTenantItem['billing_cycle']>;
+const BILLING_CYCLE_VALUES: BillingCycle[] = ['MONTHLY', 'QUARTERLY', 'SEMIANNUAL', 'YEARLY'];
+const normalizeBillingCycle = (value?: string | null): BillingCycle => {
+  const normalized = String(value || '').toUpperCase();
+  if (normalized === 'MONTHLY') return 'QUARTERLY';
+  return BILLING_CYCLE_VALUES.includes(normalized as BillingCycle)
+    ? (normalized as BillingCycle)
+    : 'QUARTERLY';
+};
 const normalizeComparableDate = (value?: string | null) => {
   const raw = String(value || '').trim();
   if (!raw) return null;
@@ -289,7 +296,6 @@ export const SaasAdmin = () => {
     by_tenant: [],
     payments: [],
   });
-  const [tenantMonthlyFeeDrafts, setTenantMonthlyFeeDrafts] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(false);
   const [resumenLoading, setResumenLoading] = useState(false);
   const [usersLoading, setUsersLoading] = useState(false);
@@ -1062,11 +1068,6 @@ export const SaasAdmin = () => {
   const restoreTenantProfileDraft = () => {
     if (!tenantProfileBaseline) return;
     updateTenantDraft(tenantProfileBaseline.id, () => ({ ...tenantProfileBaseline }));
-    setTenantMonthlyFeeDrafts((prev) => {
-      const next = { ...prev };
-      delete next[tenantProfileBaseline.id];
-      return next;
-    });
     setInfoMessage('Cambios descartados. La ficha volvió al último estado guardado.');
   };
 

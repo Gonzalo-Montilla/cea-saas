@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { instructoresAPI } from '../services/api';
 import { 
-  UserCheck, Search, Plus, Eye, Star, Phone, Award, 
-  AlertCircle, Filter, X, AlertTriangle, Clock, ChevronDown
+  UserCheck, Search, Plus, Eye, Star,
+  AlertCircle, X, ChevronDown
 } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { InstructorForm } from '../components/InstructorForm';

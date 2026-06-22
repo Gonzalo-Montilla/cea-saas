@@ -12,9 +12,7 @@ import {
   DollarSign,
   Edit,
   Download,
-  BookOpen,
   PlusCircle,
-  Car as CarIcon,
   AlertCircle,
   Award
 } from 'lucide-react';

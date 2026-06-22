@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, User, Camera, RotateCcw, Check, Upload, FileText, AlertCircle, Award, Calendar, ArrowRight, ArrowLeft } from 'lucide-react';
+import { X, User, Camera, RotateCcw, Check, Upload, FileText, AlertCircle, Award, ArrowRight, ArrowLeft } from 'lucide-react';
 import { instructoresAPI, authAPI, usuariosAPI } from '../services/api';
 import { ModalBase } from './ui/ModalBase';
 import '../styles/InstructorForm.css';

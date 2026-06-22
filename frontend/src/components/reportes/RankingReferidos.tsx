@@ -1,4 +1,4 @@
-import { Trophy, Users, DollarSign, GraduationCap, Phone, Calendar, ChevronDown, ChevronUp } from 'lucide-react';
+import { Trophy, Users, DollarSign, GraduationCap, Phone, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState } from 'react';
 
 interface Referido {

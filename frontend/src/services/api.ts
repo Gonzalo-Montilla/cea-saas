@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { LoginRequest, RegisterRequest, TokenResponse, Usuario, Estudiante } from '../types';
+import type { LoginRequest, RegisterRequest, TokenResponse, Usuario } from '../types';
 
 const isLocalHost = (host: string): boolean => {
   const normalized = (host || '').trim().toLowerCase();
@@ -368,8 +368,8 @@ export const estudiantesAPI = {
     return response.data;
   },
 
-  getById: async (id: number): Promise<Estudiante> => {
-    const response = await api.get<Estudiante>(`/estudiantes/${id}`);
+  getById: async (id: number): Promise<any> => {
+    const response = await api.get(`/estudiantes/${id}`);
     return response.data;
   },
 
@@ -378,13 +378,13 @@ export const estudiantesAPI = {
     return response.data;
   },
 
-  reactivar: async (id: number): Promise<Estudiante> => {
-    const response = await api.put<Estudiante>(`/estudiantes/${id}/reactivar`);
+  reactivar: async (id: number): Promise<any> => {
+    const response = await api.put(`/estudiantes/${id}/reactivar`);
     return response.data;
   },
 
-  update: async (id: number, data: Partial<Estudiante>): Promise<Estudiante> => {
-    const response = await api.put<Estudiante>(`/estudiantes/${id}`, data);
+  update: async (id: number, data: any): Promise<any> => {
+    const response = await api.put(`/estudiantes/${id}`, data);
     return response.data;
   },
 
@@ -392,32 +392,32 @@ export const estudiantesAPI = {
     await api.delete(`/estudiantes/${id}`);
   },
 
-  definirServicio: async (id: number, data: any): Promise<Estudiante> => {
-    const response = await api.put<Estudiante>(`/estudiantes/${id}/definir-servicio`, data);
+  definirServicio: async (id: number, data: any): Promise<any> => {
+    const response = await api.put(`/estudiantes/${id}/definir-servicio`, data);
     return response.data;
   },
 
   ampliarServicio: async (
     id: number,
     data: { tipo_servicio_nuevo: string; valor_total_curso?: number | null; observaciones?: string | null }
-  ): Promise<Estudiante> => {
-    const response = await api.put<Estudiante>(`/estudiantes/${id}/ampliar-servicio`, data);
+  ): Promise<any> => {
+    const response = await api.put(`/estudiantes/${id}/ampliar-servicio`, data);
     return response.data;
   },
 
   corregirServicio: async (
     id: number,
     data: { tipo_servicio_nuevo: string; valor_total_curso?: number | null; motivo: string; password: string }
-  ): Promise<Estudiante> => {
-    const response = await api.put<Estudiante>(`/estudiantes/${id}/corregir-servicio`, data);
+  ): Promise<any> => {
+    const response = await api.put(`/estudiantes/${id}/corregir-servicio`, data);
     return response.data;
   },
 
   acreditarHoras: async (
     id: number,
     data: { tipo: string; horas: number; observaciones?: string | null; instructor_id?: number | null; vehiculo_id?: number | null }
-  ): Promise<Estudiante> => {
-    const response = await api.post<Estudiante>(`/estudiantes/${id}/acreditar-horas`, data);
+  ): Promise<any> => {
+    const response = await api.post(`/estudiantes/${id}/acreditar-horas`, data);
     return response.data;
   },
 
@@ -548,8 +548,10 @@ export const cajaAPI = {
   registrarPago: async (data: {
     estudiante_id: number;
     monto: number;
-    metodo_pago: string;
+    metodo_pago?: string;
     concepto: string;
+    es_pago_mixto?: boolean;
+    detalles_pago?: Array<{ metodo_pago: string; monto: number }>;
     referencia_pago?: string | null;
     observaciones?: string | null;
   }): Promise<any> => {
@@ -1188,7 +1190,7 @@ export const saasAdminAPI = {
       next_billing_at?: string | null;
       set_status_active?: boolean;
     }
-  ): Promise<{ tenant: Partial<SaasTenantItem>; event: SaasBillingEventItem; receipt?: any; receipt_sent?: boolean }> => {
+  ): Promise<{ tenant: Partial<SaasTenantItem>; event: SaasBillingEventItem; receipt?: any; receipt_sent?: boolean; receipts_enabled?: boolean }> => {
     const response = await api.post(`/saas-admin/billing/tenants/${tenantId}/record-payment`, data);
     return response.data;
   },

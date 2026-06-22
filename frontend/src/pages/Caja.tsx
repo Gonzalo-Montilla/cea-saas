@@ -149,7 +149,6 @@ export const Caja = () => {
   const [pendingPdf, setPendingPdf] = useState<PendingPdf | null>(null);
   const [showConfirmarCierreCaja, setShowConfirmarCierreCaja] = useState(false);
 
-  const soloDigitos = (value: string) => value.replace(/\D/g, '');
   const formatDocumentoBusqueda = (value: string) => {
     return value.toUpperCase().replace(/[^A-Z0-9\-]/g, '').slice(0, 20);
   };
