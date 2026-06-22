@@ -33,6 +33,16 @@ export const ModalBase = ({
   const titleId = labelledBy || `ui-modal-title-${internalId}`;
   const modalRef = useRef<HTMLDivElement | null>(null);
   const previouslyFocusedElementRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  const closeDisabledRef = useRef(closeDisabled);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    closeDisabledRef.current = closeDisabled;
+  }, [closeDisabled]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -43,7 +53,13 @@ export const ModalBase = ({
       'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
     );
 
-    if (focusableElements && focusableElements.length > 0) {
+    const firstFormField = modalRef.current?.querySelector<HTMLElement>(
+      'input:not([disabled]), select:not([disabled]), textarea:not([disabled])'
+    );
+
+    if (firstFormField) {
+      firstFormField.focus();
+    } else if (focusableElements && focusableElements.length > 0) {
       focusableElements[0].focus();
     } else {
       modalRef.current?.focus();
@@ -52,9 +68,9 @@ export const ModalBase = ({
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!modalRef.current) return;
 
-      if (event.key === 'Escape' && onClose && !closeDisabled) {
+      if (event.key === 'Escape' && onCloseRef.current && !closeDisabledRef.current) {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
@@ -89,7 +105,7 @@ export const ModalBase = ({
       document.removeEventListener('keydown', handleKeyDown);
       previouslyFocusedElementRef.current?.focus();
     };
-  }, [isOpen, onClose, closeDisabled]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
