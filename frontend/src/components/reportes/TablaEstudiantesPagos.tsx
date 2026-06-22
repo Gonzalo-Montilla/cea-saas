@@ -84,7 +84,7 @@ export const TablaEstudiantesPagos = ({ pagos }: TablaEstudiantesPagosProps) => 
       </div>
 
       {pagos.length === 0 ? (
-        <div className="tabla-empty">
+        <div className="tabla-empty" role="status" aria-live="polite">
           <DollarSign size={48} />
           <p>No hay pagos registrados en este período</p>
         </div>

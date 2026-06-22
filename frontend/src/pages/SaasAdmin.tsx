@@ -18,6 +18,8 @@ import {
 } from 'recharts';
 import { useAuth } from '../contexts/AuthContext';
 import { authAPI } from '../services/api';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { ModalBase } from '../components/ui/ModalBase';
 import {
   saasAdminAPI,
   type SaasAuditLogItem,
@@ -397,6 +399,12 @@ export const SaasAdmin = () => {
   const [mfaCodesCopied, setMfaCodesCopied] = useState(false);
   const [mfaCodesAcknowledge, setMfaCodesAcknowledge] = useState(false);
   const [closingAllSessions, setClosingAllSessions] = useState(false);
+  const [confirmDataQualityFixKey, setConfirmDataQualityFixKey] = useState<string | null>(null);
+  const [pendingOpenTenantProfile, setPendingOpenTenantProfile] = useState<SaasTenantItem | null>(null);
+  const [showUnsavedTenantChangeConfirm, setShowUnsavedTenantChangeConfirm] = useState(false);
+  const [showUnsavedTenantCloseConfirm, setShowUnsavedTenantCloseConfirm] = useState(false);
+  const [showCloseCredentialsConfirm, setShowCloseCredentialsConfirm] = useState(false);
+  const [showCloseSessionsConfirm, setShowCloseSessionsConfirm] = useState(false);
   const [newUser, setNewUser] = useState({
     email: '',
     password: '',
@@ -693,10 +701,8 @@ export const SaasAdmin = () => {
     }
   };
 
-  const runResumenDataQualityFix = async (checkKey: string) => {
+  const executeResumenDataQualityFix = async (checkKey: string) => {
     try {
-      const confirmFix = window.confirm('Se ejecutará una autocorrección de datos. ¿Deseas continuar?');
-      if (!confirmFix) return;
       setResumenDataQualityFixingKey(checkKey);
       const result = await saasAdminAPI.runSummaryDataQualityFix(checkKey);
       setInfoMessage(result?.summary || `Autocorrección ejecutada: ${checkKey}`);
@@ -711,7 +717,12 @@ export const SaasAdmin = () => {
       setError(err?.response?.data?.detail || 'No se pudo ejecutar la autocorrección');
     } finally {
       setResumenDataQualityFixingKey(null);
+      setConfirmDataQualityFixKey(null);
     }
+  };
+
+  const runResumenDataQualityFix = (checkKey: string) => {
+    setConfirmDataQualityFixKey(checkKey);
   };
 
   const exportResumenIncomeCsv = () => {
@@ -1011,9 +1022,21 @@ export const SaasAdmin = () => {
 
   const openTenantProfile = (tenant: SaasTenantItem) => {
     if (tenantProfileId !== null && tenantProfileDirty && tenantProfileId !== tenant.id) {
-      const proceed = window.confirm('Tienes cambios sin guardar en la ficha actual. ¿Deseas descartarlos y abrir otra escuela?');
-      if (!proceed) return;
+      setPendingOpenTenantProfile(tenant);
+      setShowUnsavedTenantChangeConfirm(true);
+      return;
     }
+    setTenantProfileId(tenant.id);
+    setTenantProfileBaseline({ ...tenant });
+    setError('');
+    setInfoMessage('');
+  };
+
+  const confirmOpenTenantProfile = () => {
+    if (!pendingOpenTenantProfile) return;
+    const tenant = pendingOpenTenantProfile;
+    setShowUnsavedTenantChangeConfirm(false);
+    setPendingOpenTenantProfile(null);
     setTenantProfileId(tenant.id);
     setTenantProfileBaseline({ ...tenant });
     setError('');
@@ -1023,9 +1046,15 @@ export const SaasAdmin = () => {
   const closeTenantProfile = () => {
     if (savingTenantId !== null) return;
     if (tenantProfileDirty) {
-      const proceed = window.confirm('Hay cambios sin guardar. ¿Deseas cerrar la ficha y perder esos cambios?');
-      if (!proceed) return;
+      setShowUnsavedTenantCloseConfirm(true);
+      return;
     }
+    setTenantProfileId(null);
+    setTenantProfileBaseline(null);
+  };
+
+  const confirmCloseTenantProfile = () => {
+    setShowUnsavedTenantCloseConfirm(false);
     setTenantProfileId(null);
     setTenantProfileBaseline(null);
   };
@@ -1726,18 +1755,24 @@ export const SaasAdmin = () => {
     });
   };
 
-  const closeConvertLeadModal = () => {
+  const finalizeCloseConvertLeadModal = () => {
     if (conversionResult && !credentialsCopied) {
-      const confirmClose = window.confirm(
-        'Aún no has copiado las credenciales temporales. ¿Seguro que quieres cerrar?'
-      );
-      if (!confirmClose) return;
+      setShowCloseCredentialsConfirm(false);
     }
+    setShowCloseCredentialsConfirm(false);
     setConversionModalLead(null);
     setConversionError('');
     setConversionResult(null);
     setShowTemporaryPassword(false);
     setCredentialsCopied(false);
+  };
+
+  const closeConvertLeadModal = () => {
+    if (conversionResult && !credentialsCopied) {
+      setShowCloseCredentialsConfirm(true);
+      return;
+    }
+    finalizeCloseConvertLeadModal();
   };
 
   const onSubmitConvertLead = async () => {
@@ -1908,14 +1943,10 @@ export const SaasAdmin = () => {
   };
 
   const closeAllMySessions = async () => {
-    const confirmed = window.confirm(
-      'Se cerrarán todas tus sesiones activas (incluyendo otros dispositivos). ¿Deseas continuar?'
-    );
-    if (!confirmed) return;
     try {
       setClosingAllSessions(true);
       await authAPI.logoutAllSessions();
-      setMfaMessage('Sesiones cerradas correctamente. Redirigiendo al login...');
+      setMfaMessage('Sesiones cerradas con éxito. Redirigiendo al inicio de sesión...');
       setTimeout(() => {
         window.location.href = '/login-saas';
       }, 900);
@@ -1923,6 +1954,7 @@ export const SaasAdmin = () => {
       setMfaMessage(err?.response?.data?.detail || 'No se pudieron cerrar todas las sesiones');
     } finally {
       setClosingAllSessions(false);
+      setShowCloseSessionsConfirm(false);
     }
   };
 
@@ -2093,7 +2125,7 @@ export const SaasAdmin = () => {
           <button
             type="button"
             className="btn-danger"
-            onClick={() => void closeAllMySessions()}
+            onClick={() => setShowCloseSessionsConfirm(true)}
             disabled={closingAllSessions}
           >
             {closingAllSessions ? 'Cerrando sesiones...' : 'Cerrar todas mis sesiones'}
@@ -2209,7 +2241,7 @@ export const SaasAdmin = () => {
           <div className="saas-search">
             <input
               type="text"
-              placeholder="Buscar por tenant, asunto o owner"
+              placeholder="Buscar por escuela, asunto o responsable"
               value={supportSearch}
               onChange={(e) => setSupportSearch(e.target.value)}
             />
@@ -2966,7 +2998,7 @@ export const SaasAdmin = () => {
           <div className="saas-search">
             <input
               type="text"
-              placeholder="Buscar por nombre, codigo de escuela o correo"
+              placeholder="Buscar por nombre, código de escuela o correo"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -3054,7 +3086,7 @@ export const SaasAdmin = () => {
           <div className="saas-search">
             <input
               type="text"
-              placeholder="Buscar por tenant, referencia o nota"
+              placeholder="Buscar por escuela, referencia o nota"
               value={billingSearch}
               onChange={(e) => setBillingSearch(e.target.value)}
             />
@@ -3266,7 +3298,7 @@ export const SaasAdmin = () => {
           />
           <input
             type="text"
-            placeholder="Scopes (coma) ej: saas_admin o saas_audit_read"
+            placeholder="Permisos (separados por coma), ej: saas_admin o saas_audit_read"
             value={newUser.permisos_modulos}
             onChange={(e) => {
               setNewUserProfile('CUSTOM');
@@ -3499,9 +3531,13 @@ export const SaasAdmin = () => {
       )}
 
       {createTenantModalOpen && (
-        <div className="saas-modal-backdrop" onClick={closeCreateTenantModal}>
-          <div className="saas-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Nueva escuela (alta interna)</h3>
+        <ModalBase
+          isOpen={createTenantModalOpen}
+          title="Nueva escuela (alta interna)"
+          onClose={closeCreateTenantModal}
+          closeDisabled={creatingTenant}
+          size="lg"
+        >
             <div className="saas-modal-grid">
               <label>
                 Nombre escuela
@@ -3651,20 +3687,22 @@ export const SaasAdmin = () => {
             </label>
             <div className="saas-user-actions">
               <button type="button" className="btn-secondary" onClick={closeCreateTenantModal} disabled={creatingTenant}>
-                Cerrar
+                Cancelar
               </button>
               <button type="button" className="btn-primary" onClick={() => void onCreateTenant()} disabled={creatingTenant}>
                 {creatingTenant ? 'Creando...' : 'Crear escuela'}
               </button>
             </div>
-          </div>
-        </div>
+        </ModalBase>
       )}
 
       {createTenantSuccessModal && (
-        <div className="saas-modal-backdrop" onClick={() => setCreateTenantSuccessModal(null)}>
-          <div className="saas-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Escuela creada correctamente</h3>
+        <ModalBase
+          isOpen={Boolean(createTenantSuccessModal)}
+          title="Escuela creada correctamente"
+          onClose={() => setCreateTenantSuccessModal(null)}
+          size="md"
+        >
             <div className="saas-conversion-result">
               <p><strong>Escuela:</strong> {createTenantSuccessModal.tenantSlug}</p>
               <p><strong>Admin:</strong> {createTenantSuccessModal.adminEmail}</p>
@@ -3679,13 +3717,17 @@ export const SaasAdmin = () => {
                 Cerrar
               </button>
             </div>
-          </div>
-        </div>
+        </ModalBase>
       )}
 
       {tenantProfile && (
-        <div className="saas-modal-backdrop" onClick={closeTenantProfile}>
-          <div className="saas-modal saas-modal-profile" onClick={(e) => e.stopPropagation()}>
+        <ModalBase
+          isOpen={Boolean(tenantProfile)}
+          title="Perfil de escuela"
+          onClose={closeTenantProfile}
+          closeDisabled={savingTenantId === tenantProfile.id}
+          size="lg"
+        >
             <div className="saas-tenant-profile-head">
               {tenantProfile.logo_url ? (
                 <img
@@ -3944,14 +3986,17 @@ export const SaasAdmin = () => {
                 Cerrar
               </button>
             </div>
-          </div>
-        </div>
+        </ModalBase>
       )}
 
       {branchModalTenant && (
-        <div className="saas-modal-backdrop" onClick={closeBranchModal}>
-          <div className="saas-modal saas-modal-branches" onClick={(e) => e.stopPropagation()}>
-            <h3>Sucursales - {branchModalTenant.display_name || branchModalTenant.nombre}</h3>
+        <ModalBase
+          isOpen={Boolean(branchModalTenant)}
+          title={`Sucursales - ${branchModalTenant.display_name || branchModalTenant.nombre}`}
+          onClose={closeBranchModal}
+          closeDisabled={branchModalSaving}
+          size="lg"
+        >
             {branchModalLoading ? (
               <p>Cargando configuración de sucursales...</p>
             ) : (
@@ -4102,18 +4147,21 @@ export const SaasAdmin = () => {
                 Cerrar
               </button>
             </div>
-          </div>
-        </div>
+        </ModalBase>
       )}
 
       {paymentModalTenant && (
-        <div className="saas-modal-backdrop" onClick={closePaymentModal}>
-          <div className="saas-modal" onClick={(e) => e.stopPropagation()}>
+        <ModalBase
+          isOpen={Boolean(paymentModalTenant)}
+          title="Registrar pago SaaS"
+          onClose={closePaymentModal}
+          closeDisabled={recordingPayment}
+          size="md"
+        >
             {(() => {
               const paymentPricing = computeTenantPricingPreview(paymentModalTenant);
               return (
                 <>
-            <h3>Registrar pago SaaS</h3>
             <p>
               Tenant: <strong>{paymentModalTenant.display_name || paymentModalTenant.nombre}</strong> ({paymentModalTenant.slug})
             </p>
@@ -4191,15 +4239,17 @@ export const SaasAdmin = () => {
                 </>
               );
             })()}
-          </div>
-        </div>
+        </ModalBase>
       )}
 
       {receiptPreview && (
-        <div className="saas-modal-backdrop" onClick={closeReceiptPreviewModal}>
-          <div className="saas-modal saas-modal-receipt-preview" onClick={(e) => e.stopPropagation()}>
+        <ModalBase
+          isOpen={Boolean(receiptPreview)}
+          title="Vista previa del recibo"
+          onClose={closeReceiptPreviewModal}
+          size="lg"
+        >
             <div className="saas-card-header bo-card-header">
-              <h3>Vista previa del recibo</h3>
               <span>{receiptPreview.receiptNumber}.pdf</span>
             </div>
             <div className="saas-receipt-preview-toolbar">
@@ -4250,14 +4300,17 @@ export const SaasAdmin = () => {
                 Descargar PDF
               </button>
             </div>
-          </div>
-        </div>
+        </ModalBase>
       )}
 
       {conversionModalLead && (
-        <div className="saas-modal-backdrop" onClick={closeConvertLeadModal}>
-          <div className="saas-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Convertir lead a tenant demo</h3>
+        <ModalBase
+          isOpen={Boolean(conversionModalLead)}
+          title="Convertir lead a escuela demo"
+          onClose={closeConvertLeadModal}
+          closeDisabled={submittingConversion}
+          size="md"
+        >
             <p>
               Lead: <strong>{conversionModalLead.escuela_nombre}</strong>
             </p>
@@ -4329,20 +4382,22 @@ export const SaasAdmin = () => {
             )}
             <div className="saas-user-actions">
               <button type="button" className="btn-secondary" onClick={closeConvertLeadModal}>
-                Cerrar
+                Cancelar
               </button>
               <button type="button" className="btn-primary" onClick={() => void onSubmitConvertLead()} disabled={submittingConversion}>
                 {submittingConversion ? 'Convirtiendo...' : 'Confirmar conversión'}
               </button>
             </div>
-          </div>
-        </div>
+        </ModalBase>
       )}
 
       {supportDescriptionModal && (
-        <div className="saas-modal-backdrop" onClick={() => setSupportDescriptionModal(null)}>
-          <div className="saas-modal" onClick={(e) => e.stopPropagation()}>
-            <h3>Detalle de solicitud</h3>
+        <ModalBase
+          isOpen={Boolean(supportDescriptionModal)}
+          title="Detalle de solicitud"
+          onClose={() => setSupportDescriptionModal(null)}
+          size="md"
+        >
             <p>
               Ticket <strong>#{supportDescriptionModal.ticketId}</strong> - {supportDescriptionModal.tenantName}
             </p>
@@ -4355,9 +4410,67 @@ export const SaasAdmin = () => {
                 Cerrar
               </button>
             </div>
-          </div>
-        </div>
+        </ModalBase>
       )}
+
+      <ConfirmDialog
+        isOpen={Boolean(confirmDataQualityFixKey)}
+        title="Autocorrección de datos"
+        message="Se ejecutará una autocorrección de datos. ¿Deseas continuar?"
+        confirmText="Sí, ejecutar"
+        cancelText="Cancelar"
+        isLoading={Boolean(resumenDataQualityFixingKey)}
+        onCancel={() => setConfirmDataQualityFixKey(null)}
+        onConfirm={() => {
+          if (confirmDataQualityFixKey) void executeResumenDataQualityFix(confirmDataQualityFixKey);
+        }}
+      />
+
+      <ConfirmDialog
+        isOpen={showUnsavedTenantChangeConfirm}
+        title="Cambios sin guardar"
+        message="Tienes cambios sin guardar en la ficha actual. ¿Deseas descartarlos y abrir otra escuela?"
+        confirmText="Descartar y abrir"
+        cancelText="Volver"
+        onCancel={() => {
+          setShowUnsavedTenantChangeConfirm(false);
+          setPendingOpenTenantProfile(null);
+        }}
+        onConfirm={confirmOpenTenantProfile}
+      />
+
+      <ConfirmDialog
+        isOpen={showUnsavedTenantCloseConfirm}
+        title="Cerrar ficha"
+        message="Hay cambios sin guardar. ¿Deseas cerrar la ficha y perder esos cambios?"
+        confirmText="Sí, cerrar ficha"
+        cancelText="Seguir editando"
+        onCancel={() => setShowUnsavedTenantCloseConfirm(false)}
+        onConfirm={confirmCloseTenantProfile}
+      />
+
+      <ConfirmDialog
+        isOpen={showCloseCredentialsConfirm}
+        title="Cerrar conversión"
+        message="Aún no has copiado las credenciales temporales. ¿Seguro que quieres cerrar?"
+        confirmText="Sí, cerrar conversión"
+        cancelText="Volver"
+        confirmVariant="danger"
+        onCancel={() => setShowCloseCredentialsConfirm(false)}
+        onConfirm={finalizeCloseConvertLeadModal}
+      />
+
+      <ConfirmDialog
+        isOpen={showCloseSessionsConfirm}
+        title="Cerrar todas mis sesiones"
+        message="Se cerrarán todas tus sesiones activas (incluyendo otros dispositivos). ¿Deseas continuar?"
+        confirmText="Sí, cerrar sesiones"
+        cancelText="Cancelar"
+        confirmVariant="danger"
+        isLoading={closingAllSessions}
+        onCancel={() => setShowCloseSessionsConfirm(false)}
+        onConfirm={() => void closeAllMySessions()}
+      />
       </>
       )}
     </div>

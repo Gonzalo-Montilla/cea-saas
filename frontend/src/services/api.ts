@@ -1689,6 +1689,51 @@ export const tarifasAPI = {
   }
 };
 
+export interface ConceptoIngresoTenant {
+  id: number;
+  nombre: string;
+  categoria: string;
+  valor_default: number;
+  activo: boolean;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface ConceptoIngresoCreatePayload {
+  nombre: string;
+  categoria: string;
+  valor_default: number;
+  activo?: boolean;
+}
+
+export interface ConceptoIngresoUpdatePayload {
+  nombre?: string;
+  categoria?: string;
+  valor_default?: number;
+  activo?: boolean;
+}
+
+export const conceptosIngresoAPI = {
+  getAll: async (params?: { include_inactivos?: boolean }): Promise<ConceptoIngresoTenant[]> => {
+    const queryParams = new URLSearchParams();
+    if (params?.include_inactivos) queryParams.append('include_inactivos', 'true');
+    const query = queryParams.toString();
+    const response = await api.get<ConceptoIngresoTenant[]>(`/conceptos-ingreso${query ? `?${query}` : ''}`);
+    return response.data;
+  },
+  create: async (data: ConceptoIngresoCreatePayload): Promise<ConceptoIngresoTenant> => {
+    const response = await api.post<ConceptoIngresoTenant>('/conceptos-ingreso', data);
+    return response.data;
+  },
+  update: async (id: number, data: ConceptoIngresoUpdatePayload): Promise<ConceptoIngresoTenant> => {
+    const response = await api.put<ConceptoIngresoTenant>(`/conceptos-ingreso/${id}`, data);
+    return response.data;
+  },
+  delete: async (id: number): Promise<void> => {
+    await api.delete(`/conceptos-ingreso/${id}`);
+  }
+};
+
 export interface TenantServiceRule {
   tipo_servicio: string;
   horas_teoricas_requeridas: number;

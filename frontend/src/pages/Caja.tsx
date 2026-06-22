@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Search, DollarSign, TrendingUp, TrendingDown, AlertCircle, Plus, X, ChevronDown, Download } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
-import { cajaAPI } from '../services/api';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { ModalBase } from '../components/ui/ModalBase';
+import { ToastAlert } from '../components/ui/ToastAlert';
+import { cajaAPI, conceptosIngresoAPI, type ConceptoIngresoTenant } from '../services/api';
 import '../styles/Caja.css';
 
 interface CajaActual {
@@ -56,14 +59,32 @@ interface EstudianteFinanciero {
   ultimo_pago_monto?: number;
 }
 
+type PendingPdf =
+  | { kind: 'pago'; id: number }
+  | { kind: 'egreso'; id: number }
+  | { kind: 'movimiento'; id: number }
+  | { kind: 'cierre'; id: number };
+
+const categoriasIngreso = [
+  { value: 'ESTUDIANTE_NO_REGISTRADO', label: 'Estudiante no registrado' },
+  { value: 'PAGO_PRESTAMO_EMPLEADO', label: 'Pago préstamo empleado' },
+  { value: 'VENTA_MATERIAL', label: 'Venta material / trámites' },
+  { value: 'INGRESO_ADMINISTRATIVO', label: 'Ingreso administrativo' },
+  { value: 'OTROS', label: 'Otros' }
+];
+
+const MONTOS_RAPIDOS_PAGO = [20000, 50000, 100000];
+
 export const Caja = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const pagoSectionRef = useRef<HTMLDivElement | null>(null);
   const [cajaActual, setCajaActual] = useState<CajaActual | null>(null);
   const [hayCajaAbierta, setHayCajaAbierta] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   
-  // Estados para secciones colapsables (cerradas por defecto)
-  const [mostrarCajaFisica, setMostrarCajaFisica] = useState(false);
+  // Estados para secciones colapsables
+  const [mostrarCajaFisica, setMostrarCajaFisica] = useState(true);
   const [mostrarMetodosDigitales, setMostrarMetodosDigitales] = useState(false);
   const [mostrarCreditos, setMostrarCreditos] = useState(false);
   const [mostrarResumen, setMostrarResumen] = useState(false);
@@ -71,6 +92,7 @@ export const Caja = () => {
   // Estados para abrir caja
   const [showAbrirCaja, setShowAbrirCaja] = useState(false);
   const [saldoInicial, setSaldoInicial] = useState('');
+  const [abriendoCaja, setAbriendoCaja] = useState(false);
   
   // Estados para buscar estudiante
   const [cedula, setCedula] = useState('');
@@ -90,17 +112,23 @@ export const Caja = () => {
   const [categoriaEgreso, setCategoriaEgreso] = useState('OTROS');
   const [montoEgreso, setMontoEgreso] = useState('');
   const [metodoEgreso, setMetodoEgreso] = useState('EFECTIVO');
+  const [registrandoEgreso, setRegistrandoEgreso] = useState(false);
 
   // Estados para movimientos generales (ingreso/egreso)
   const [showMovimientoGeneral, setShowMovimientoGeneral] = useState(false);
   const [tipoMovimientoGeneral] = useState<'INGRESO'>('INGRESO');
+  const [conceptosIngreso, setConceptosIngreso] = useState<ConceptoIngresoTenant[]>([]);
+  const [cargandoConceptosIngreso, setCargandoConceptosIngreso] = useState(false);
+  const [conceptoIngresoSeleccionadoId, setConceptoIngresoSeleccionadoId] = useState('');
   const [conceptoMovimiento, setConceptoMovimiento] = useState('');
   const [categoriaMovimiento, setCategoriaMovimiento] = useState('OTROS');
   const [terceroNombre, setTerceroNombre] = useState('');
   const [terceroDocumento, setTerceroDocumento] = useState('');
+  const [mostrarDatosTercero, setMostrarDatosTercero] = useState(false);
   const [esPagoMixtoMovimiento, setEsPagoMixtoMovimiento] = useState(false);
   const [metodoMovimiento, setMetodoMovimiento] = useState('EFECTIVO');
   const [montoMovimiento, setMontoMovimiento] = useState('');
+  const [registrandoMovimiento, setRegistrandoMovimiento] = useState(false);
   const [detallesMovimiento, setDetallesMovimiento] = useState<Array<{metodo: string, monto: string}>>([
     {metodo: 'EFECTIVO', monto: ''}
   ]);
@@ -110,12 +138,16 @@ export const Caja = () => {
   const [efectivoFisico, setEfectivoFisico] = useState('');
   const [observacionesCierre, setObservacionesCierre] = useState('');
   const [cerrandoCaja, setCerrandoCaja] = useState(false);
+  const [mostrarDetalleArqueo, setMostrarDetalleArqueo] = useState(false);
 
   // Confirmación previa de registro
   const [showConfirmacion, setShowConfirmacion] = useState(false);
   const [confirmacionItems, setConfirmacionItems] = useState<Array<{ label: string; valor: number }>>([]);
   const [confirmacionAction, setConfirmacionAction] = useState<null | (() => Promise<void>)>(null);
   const [confirmando, setConfirmando] = useState(false);
+  const [notificacion, setNotificacion] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [pendingPdf, setPendingPdf] = useState<PendingPdf | null>(null);
+  const [showConfirmarCierreCaja, setShowConfirmarCierreCaja] = useState(false);
 
   const soloDigitos = (value: string) => value.replace(/\D/g, '');
   const formatDocumentoBusqueda = (value: string) => {
@@ -144,6 +176,68 @@ export const Caja = () => {
         return 'CE';
       default:
         return 'CC';
+    }
+  };
+
+  const getTipoServicioLabel = (tipo?: string) => {
+    const labels: Record<string, string> = {
+      LICENCIA_A2: 'Licencia A2 (Moto)',
+      LICENCIA_B1: 'Licencia B1 (Automóvil)',
+      LICENCIA_C1: 'Licencia C1 (Camioneta)',
+      RECATEGORIZACION_C1: 'Recategorización C1',
+      COMBO_A2_B1: 'Combo A2 + B1',
+      COMBO_A2_C1: 'Combo A2 + C1',
+      CERTIFICADO_MOTO: 'Certificado Moto',
+      CERTIFICADO_B1: 'Certificado B1',
+      CERTIFICADO_C1: 'Certificado C1',
+      CERTIFICADO_B1_SIN_PRACTICA: 'Certificado B1 sin práctica',
+      CERTIFICADO_C1_SIN_PRACTICA: 'Certificado C1 sin práctica',
+      CERTIFICADO_A2_B1_SIN_PRACTICA: 'Certificado A2 + B1 sin práctica',
+      CERTIFICADO_A2_C1_SIN_PRACTICA: 'Certificado A2 + C1 sin práctica',
+      CERTIFICADO_A2_B1_CON_PRACTICA: 'Certificado A2 + B1 con práctica',
+      CERTIFICADO_A2_C1_CON_PRACTICA: 'Certificado A2 + C1 con práctica'
+    };
+    if (!tipo) return 'N/A';
+    return labels[tipo] || tipo;
+  };
+
+  const mostrarNotificacion = (type: 'success' | 'error' | 'info', message: string) => {
+    setNotificacion({ type, message });
+  };
+
+  const limpiarNotificacion = () => {
+    setNotificacion(null);
+  };
+
+  const getErrorMessage = (error: any, fallback: string) => error?.response?.data?.detail || fallback;
+  useEffect(() => {
+    if (!notificacion) return;
+    const timer = window.setTimeout(() => {
+      setNotificacion(null);
+    }, 4500);
+    return () => window.clearTimeout(timer);
+  }, [notificacion]);
+
+  const abrirPdfPendiente = async () => {
+    if (!pendingPdf) return;
+    try {
+      let blob: Blob;
+      if (pendingPdf.kind === 'pago') {
+        blob = await cajaAPI.getPagoReciboPdf(pendingPdf.id);
+      } else if (pendingPdf.kind === 'egreso') {
+        blob = await cajaAPI.getEgresoReciboPdf(pendingPdf.id);
+      } else if (pendingPdf.kind === 'movimiento') {
+        blob = await cajaAPI.getMovimientoReciboPdf(pendingPdf.id);
+      } else {
+        blob = await cajaAPI.getCierrePdf(pendingPdf.id);
+      }
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setPendingPdf(null);
+      mostrarNotificacion('info', 'Se abrió el PDF en una nueva pestaña.');
+    } catch (error: any) {
+      mostrarNotificacion('error', getErrorMessage(error, 'No se pudo abrir el PDF.'));
     }
   };
 
@@ -201,6 +295,7 @@ export const Caja = () => {
   
   useEffect(() => {
     cargarCajaActual();
+    cargarConceptosIngreso();
   }, []);
 
   useEffect(() => {
@@ -238,11 +333,25 @@ export const Caja = () => {
       setIsLoading(false);
     }
   };
+
+  const cargarConceptosIngreso = async () => {
+    try {
+      setCargandoConceptosIngreso(true);
+      const response = await conceptosIngresoAPI.getAll();
+      setConceptosIngreso(response || []);
+    } catch (error) {
+      console.error('Error al cargar conceptos configurables:', error);
+      setConceptosIngreso([]);
+    } finally {
+      setCargandoConceptosIngreso(false);
+    }
+  };
   
   const handleAbrirCaja = async () => {
     try {
+      setAbriendoCaja(true);
       if (!saldoInicial || parseFloat(saldoInicial) < 0) {
-        alert('El saldo inicial debe ser mayor o igual a cero');
+        mostrarNotificacion('error', 'El saldo inicial debe ser mayor o igual a cero.');
         return;
       }
       await cajaAPI.abrirCaja({
@@ -252,16 +361,18 @@ export const Caja = () => {
       setShowAbrirCaja(false);
       setSaldoInicial('');
       await cargarCajaActual();
-      alert('Caja abierta exitosamente');
+      mostrarNotificacion('success', 'Caja abierta con éxito.');
     } catch (error: any) {
-      alert(error.response?.data?.detail || 'Error al abrir caja');
+      mostrarNotificacion('error', getErrorMessage(error, 'No se pudo abrir la caja.'));
+    } finally {
+      setAbriendoCaja(false);
     }
   };
   
   const buscarEstudiantePorDocumento = async (documento: string) => {
     const cedulaLimpia = formatDocumentoBusqueda(documento);
     if (!cedulaLimpia) {
-      alert('Ingrese el documento del estudiante');
+      mostrarNotificacion('error', 'Ingrese el documento del estudiante.');
       return;
     }
     
@@ -270,7 +381,7 @@ export const Caja = () => {
       const response = await cajaAPI.buscarEstudiante(cedulaLimpia);
       setEstudiante(response);
     } catch (error: any) {
-      alert(error.response?.data?.detail || 'Estudiante no encontrado');
+      mostrarNotificacion('error', getErrorMessage(error, 'Estudiante no encontrado.'));
       setEstudiante(null);
     } finally {
       setBuscando(false);
@@ -280,10 +391,42 @@ export const Caja = () => {
   const handleBuscarEstudiante = async () => {
     await buscarEstudiantePorDocumento(cedula);
   };
+
+  const irARegistrarPago = () => {
+    pagoSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const aplicarMontoPago = (monto: number) => {
+    if (!Number.isFinite(monto) || monto <= 0) return;
+    const montoNormalizado = String(monto);
+    setMontoPago(montoNormalizado);
+    if (!esPagoMixto) {
+      setDetallesPago([{ metodo: detallesPago[0]?.metodo || 'EFECTIVO', monto: montoNormalizado }]);
+    }
+  };
+
+  const limpiarFormularioPago = () => {
+    setMontoPago('');
+    setEsPagoMixto(false);
+    setDetallesPago([{ metodo: detallesPago[0]?.metodo || 'EFECTIVO', monto: '' }]);
+  };
+
+  const limpiarFormularioMovimientoGeneral = () => {
+    setConceptoIngresoSeleccionadoId('');
+    setConceptoMovimiento('');
+    setCategoriaMovimiento('OTROS');
+    setTerceroNombre('');
+    setTerceroDocumento('');
+    setMostrarDatosTercero(false);
+    setEsPagoMixtoMovimiento(false);
+    setMetodoMovimiento('EFECTIVO');
+    setMontoMovimiento('');
+    setDetallesMovimiento([{ metodo: 'EFECTIVO', monto: '' }]);
+  };
   
   const handleRegistrarPago = async () => {
     if (!estudiante) {
-      alert('Debe buscar un estudiante primero');
+      mostrarNotificacion('error', 'Debe buscar un estudiante primero.');
       return;
     }
     
@@ -293,25 +436,28 @@ export const Caja = () => {
       // Validar que haya al menos 2 métodos
       const detallesConMonto = detallesPago.filter(d => parseFloat(d.monto) > 0);
       if (detallesConMonto.length < 2) {
-        alert('Pago mixto debe tener al menos 2 métodos con monto');
+        mostrarNotificacion('error', 'En pago mixto debes registrar al menos 2 métodos con monto.');
         return;
       }
       montoTotal = detallesPago.reduce((sum, d) => sum + (parseFloat(d.monto) || 0), 0);
     } else {
       if (!montoPago || isNaN(parseFloat(montoPago))) {
-        alert('Ingrese el monto a pagar');
+        mostrarNotificacion('error', 'Ingrese el monto a pagar.');
         return;
       }
       montoTotal = parseFloat(montoPago);
     }
     
     if (montoTotal <= 0) {
-      alert('El monto debe ser mayor a cero');
+      mostrarNotificacion('error', 'El monto debe ser mayor a cero.');
       return;
     }
     
     if (estudiante.saldo_pendiente && montoTotal > estudiante.saldo_pendiente) {
-      alert(`El monto (${formatCurrency(montoTotal)}) excede el saldo pendiente (${formatCurrency(estudiante.saldo_pendiente)})`);
+      mostrarNotificacion(
+        'error',
+        `El monto (${formatCurrency(montoTotal)}) excede el saldo pendiente (${formatCurrency(estudiante.saldo_pendiente)}).`
+      );
       return;
     }
     
@@ -350,15 +496,9 @@ export const Caja = () => {
           });
         }
         
-        alert('Pago registrado exitosamente');
+        mostrarNotificacion('success', 'Pago registrado con éxito.');
         if (pagoResponse?.id) {
-          const abrir = window.confirm('¿Desea abrir el recibo PDF del pago?');
-          if (abrir) {
-            const blob = await cajaAPI.getPagoReciboPdf(pagoResponse.id);
-            const url = URL.createObjectURL(blob);
-            window.open(url, '_blank');
-            setTimeout(() => URL.revokeObjectURL(url), 10000);
-          }
+          setPendingPdf({ kind: 'pago', id: pagoResponse.id });
         }
         setMontoPago('');
         setEsPagoMixto(false);
@@ -367,7 +507,7 @@ export const Caja = () => {
         setEstudiante(null);
         await cargarCajaActual();
       } catch (error: any) {
-        alert(error.response?.data?.detail || 'Error al registrar pago');
+        mostrarNotificacion('error', getErrorMessage(error, 'No se pudo registrar el pago.'));
       } finally {
         setRegistrandoPago(false);
       }
@@ -378,11 +518,11 @@ export const Caja = () => {
   
   const handleRegistrarEgreso = async () => {
     if (!conceptoEgreso.trim() || !montoEgreso) {
-      alert('Complete todos los campos');
+      mostrarNotificacion('error', 'Completa los campos obligatorios.');
       return;
     }
     if (parseFloat(montoEgreso) <= 0) {
-      alert('El monto debe ser mayor a cero');
+      mostrarNotificacion('error', 'El monto debe ser mayor a cero.');
       return;
     }
     
@@ -390,6 +530,7 @@ export const Caja = () => {
     setConfirmacionItems(resumenItems);
     setConfirmacionAction(() => async () => {
       try {
+        setRegistrandoEgreso(true);
         const egresoResponse = await cajaAPI.registrarEgreso({
           concepto: conceptoEgreso,
           categoria: categoriaEgreso,
@@ -399,22 +540,18 @@ export const Caja = () => {
           observaciones: null
         });
         
-        alert('Egreso registrado exitosamente');
+        mostrarNotificacion('success', 'Egreso registrado con éxito.');
         if (egresoResponse?.id) {
-          const abrir = window.confirm('¿Desea abrir el recibo PDF del egreso?');
-          if (abrir) {
-            const blob = await cajaAPI.getEgresoReciboPdf(egresoResponse.id);
-            const url = URL.createObjectURL(blob);
-            window.open(url, '_blank');
-            setTimeout(() => URL.revokeObjectURL(url), 10000);
-          }
+          setPendingPdf({ kind: 'egreso', id: egresoResponse.id });
         }
         setShowEgreso(false);
         setConceptoEgreso('');
         setMontoEgreso('');
         await cargarCajaActual();
       } catch (error: any) {
-        alert(error.response?.data?.detail || 'Error al registrar egreso');
+        mostrarNotificacion('error', getErrorMessage(error, 'No se pudo registrar el egreso.'));
+      } finally {
+        setRegistrandoEgreso(false);
       }
     });
     setConfirmando(false);
@@ -423,20 +560,20 @@ export const Caja = () => {
 
   const handleRegistrarMovimientoGeneral = async () => {
     if (!conceptoMovimiento.trim() || (!esPagoMixtoMovimiento && !montoMovimiento)) {
-      alert('Complete todos los campos');
+      mostrarNotificacion('error', 'Completa los campos obligatorios.');
       return;
     }
     const montoTotal = esPagoMixtoMovimiento
       ? detallesMovimiento.reduce((sum, d) => sum + (parseFloat(d.monto) || 0), 0)
       : parseFloat(montoMovimiento);
     if (montoTotal <= 0) {
-      alert('El monto debe ser mayor a cero');
+      mostrarNotificacion('error', 'El monto debe ser mayor a cero.');
       return;
     }
     if (esPagoMixtoMovimiento) {
       const detallesConMonto = detallesMovimiento.filter(d => parseFloat(d.monto) > 0);
       if (detallesConMonto.length < 2) {
-        alert('Pago mixto debe tener al menos 2 métodos con monto');
+        mostrarNotificacion('error', 'En pago mixto debes registrar al menos 2 métodos con monto.');
         return;
       }
     }
@@ -449,6 +586,7 @@ export const Caja = () => {
     setConfirmacionItems(resumenItems);
     setConfirmacionAction(() => async () => {
       try {
+        setRegistrandoMovimiento(true);
         const payload: any = {
           tipo: tipoMovimientoGeneral,
           concepto: conceptoMovimiento,
@@ -467,28 +605,17 @@ export const Caja = () => {
           payload.metodo_pago = metodoMovimiento;
         }
         const movimientoResponse = await cajaAPI.registrarMovimientoGeneral(payload);
-        alert('Movimiento registrado exitosamente');
+        mostrarNotificacion('success', 'Movimiento registrado con éxito.');
         if (movimientoResponse?.id) {
-          const abrir = window.confirm('¿Desea abrir el recibo PDF del ingreso?');
-          if (abrir) {
-            const blob = await cajaAPI.getMovimientoReciboPdf(movimientoResponse.id);
-            const url = URL.createObjectURL(blob);
-            window.open(url, '_blank');
-            setTimeout(() => URL.revokeObjectURL(url), 10000);
-          }
+          setPendingPdf({ kind: 'movimiento', id: movimientoResponse.id });
         }
         setShowMovimientoGeneral(false);
-        setConceptoMovimiento('');
-        setCategoriaMovimiento('OTROS');
-        setTerceroNombre('');
-        setTerceroDocumento('');
-        setEsPagoMixtoMovimiento(false);
-        setMetodoMovimiento('EFECTIVO');
-        setMontoMovimiento('');
-        setDetallesMovimiento([{metodo: 'EFECTIVO', monto: ''}]);
+        limpiarFormularioMovimientoGeneral();
         await cargarCajaActual();
       } catch (error: any) {
-        alert(error.response?.data?.detail || 'Error al registrar movimiento');
+        mostrarNotificacion('error', getErrorMessage(error, 'No se pudo registrar el movimiento.'));
+      } finally {
+        setRegistrandoMovimiento(false);
       }
     });
     setConfirmando(false);
@@ -497,39 +624,31 @@ export const Caja = () => {
   
   const handleCerrarCaja = async () => {
     if (!efectivoFisico) {
-      alert('Ingrese el efectivo físico contado');
+      mostrarNotificacion('error', 'Ingrese el efectivo físico contado.');
       return;
     }
-    
     if (!cajaActual) return;
-    
-    const confirmacion = window.confirm(
-      '¿Está seguro de cerrar la caja? Esta acción no se puede deshacer.'
-    );
-    
-    if (!confirmacion) return;
-    
+    setShowConfirmarCierreCaja(true);
+  };
+
+  const ejecutarCerrarCaja = async () => {
+    if (!cajaActual) return;
     try {
       setCerrandoCaja(true);
       await cajaAPI.cerrarCaja(cajaActual.id, {
         efectivo_fisico: parseFloat(efectivoFisico),
         observaciones_cierre: observacionesCierre || null
       });
-      
-      alert('Caja cerrada exitosamente');
-      const abrir = window.confirm('¿Desea abrir el soporte PDF de cierre de caja?');
-      if (abrir) {
-        const blob = await cajaAPI.getCierrePdf(cajaActual.id);
-        const url = URL.createObjectURL(blob);
-        window.open(url, '_blank');
-        setTimeout(() => URL.revokeObjectURL(url), 10000);
-      }
+
+      mostrarNotificacion('success', 'Caja cerrada con éxito.');
+      setPendingPdf({ kind: 'cierre', id: cajaActual.id });
+      setShowConfirmarCierreCaja(false);
       setShowCerrarCaja(false);
       setEfectivoFisico('');
       setObservacionesCierre('');
       await cargarCajaActual();
     } catch (error: any) {
-      alert(error.response?.data?.detail || 'Error al cerrar caja');
+      mostrarNotificacion('error', getErrorMessage(error, 'No se pudo cerrar la caja.'));
     } finally {
       setCerrandoCaja(false);
     }
@@ -553,6 +672,37 @@ export const Caja = () => {
       default: return 'gris';
     }
   };
+
+  const totalPagoActual = esPagoMixto
+    ? detallesPago.reduce((sum, d) => sum + (parseFloat(d.monto) || 0), 0)
+    : parseFloat(montoPago || '0') || 0;
+  const metodosActivosPago = esPagoMixto
+    ? detallesPago.filter((d) => parseFloat(d.monto) > 0).length
+    : totalPagoActual > 0 ? 1 : 0;
+  const saldoPendienteActual = Number(estudiante?.saldo_pendiente || 0);
+  const saldoDespuesPago = Math.max(saldoPendienteActual - totalPagoActual, 0);
+  const excedeSaldoEstudiante = Boolean(estudiante?.saldo_pendiente && totalPagoActual > Number(estudiante.saldo_pendiente));
+  const puedeRegistrarPago =
+    Boolean(estudiante) &&
+    totalPagoActual > 0 &&
+    (!esPagoMixto || metodosActivosPago >= 2) &&
+    !excedeSaldoEstudiante;
+  const montoEgresoNumero = parseFloat(montoEgreso || '0') || 0;
+  const puedeRegistrarEgreso = conceptoEgreso.trim().length > 0 && montoEgresoNumero > 0 && !registrandoEgreso;
+  const totalDigitalDia = Number(cajaActual?.total_ingresos_transferencia || 0) + Number(cajaActual?.total_ingresos_tarjeta || 0);
+  const totalCreditosDia = Number(cajaActual?.total_credismart || 0) + Number(cajaActual?.total_sistecredito || 0);
+  const totalRecaudadoDia = Number(cajaActual?.total_ingresos_efectivo || 0) + totalDigitalDia + totalCreditosDia;
+  const totalMovimientoActual = esPagoMixtoMovimiento
+    ? detallesMovimiento.reduce((sum, d) => sum + (parseFloat(d.monto) || 0), 0)
+    : parseFloat(montoMovimiento || '0') || 0;
+  const metodosActivosMovimiento = esPagoMixtoMovimiento
+    ? detallesMovimiento.filter((d) => parseFloat(d.monto) > 0).length
+    : totalMovimientoActual > 0 ? 1 : 0;
+  const puedeRegistrarMovimiento =
+    conceptoMovimiento.trim().length > 0 &&
+    totalMovimientoActual > 0 &&
+    (!esPagoMixtoMovimiento || metodosActivosMovimiento >= 2) &&
+    !registrandoMovimiento;
   
   if (isLoading) {
     return <div className="loading">Cargando...</div>;
@@ -563,47 +713,47 @@ export const Caja = () => {
       <div className="caja-container">
         <div className="caja-cerrada-card">
           <AlertCircle size={64} className="icon-warning" />
-          <h2>No hay caja abierta</h2>
+          <h2>Caja cerrada</h2>
           <p>Debe abrir una caja para comenzar a registrar movimientos</p>
           <button onClick={() => setShowAbrirCaja(true)} className="btn-primary-large">
             Abrir Caja
           </button>
         </div>
         
-        {showAbrirCaja && (
-      <div className="modal-overlay">
-            <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-              <div className="modal-header">
-                <h3>Abrir Caja</h3>
-                <button onClick={() => setShowAbrirCaja(false)} className="btn-icon">
-                  <X size={24} />
-                </button>
-              </div>
-              <div className="modal-body">
-                <div className="form-group">
-                  <label>Saldo Inicial en Efectivo</label>
-                  <input
-                    type="number"
-                    value={saldoInicial}
-                    onChange={(e) => setSaldoInicial(e.target.value)}
-                    placeholder="0"
-                    className="form-input"
+        <ModalBase
+          isOpen={showAbrirCaja}
+          title="Abrir Caja"
+          onClose={() => setShowAbrirCaja(false)}
+          closeDisabled={abriendoCaja}
+          size="sm"
+          footer={
+            <>
+              <button onClick={() => setShowAbrirCaja(false)} className="btn-secondary" disabled={abriendoCaja}>
+                Cancelar
+              </button>
+              <button
+                onClick={handleAbrirCaja}
+                className="btn-primary"
+                disabled={abriendoCaja || !saldoInicial || parseFloat(saldoInicial) < 0}
+              >
+                {abriendoCaja ? 'Abriendo...' : 'Abrir Caja'}
+              </button>
+            </>
+          }
+        >
+          <div className="form-group">
+            <label>Saldo Inicial en Efectivo</label>
+            <input
+              type="number"
+              value={saldoInicial}
+              onChange={(e) => setSaldoInicial(e.target.value)}
+              placeholder="0"
+              className="form-input"
               min="0"
               step="100"
-                  />
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button onClick={() => setShowAbrirCaja(false)} className="btn-secondary">
-                  Cancelar
-                </button>
-                <button onClick={handleAbrirCaja} className="btn-primary">
-                  Abrir Caja
-                </button>
-              </div>
-            </div>
+            />
           </div>
-        )}
+        </ModalBase>
       </div>
     );
   }
@@ -612,7 +762,7 @@ export const Caja = () => {
     <div className="caja-container">
       <PageHeader
         title="Caja y Pagos"
-        subtitle="Registro de ingresos, egresos y pagos"
+        subtitle="Pagos, ingresos y egresos del día"
         icon={<DollarSign size={20} />}
         actions={
           <button className="btn-nuevo" onClick={exportCajaCSV} disabled={!cajaActual}>
@@ -620,22 +770,61 @@ export const Caja = () => {
           </button>
         }
       />
+
+      {notificacion && (
+        <ToastAlert
+          type={notificacion.type}
+          message={notificacion.message}
+          onClose={limpiarNotificacion}
+        />
+      )}
+
+      {pendingPdf && (
+        <ToastAlert
+          type="info"
+          message="Tu comprobante está listo. ¿Quieres abrir el PDF ahora?"
+          actionLabel="Abrir PDF"
+          onAction={() => void abrirPdfPendiente()}
+          onClose={() => setPendingPdf(null)}
+        />
+      )}
+
+      <section className="caja-kpis-criticos" aria-label="Indicadores críticos de caja">
+        <article className="kpi-critico">
+          <p className="kpi-critico-label">Efectivo en caja</p>
+          <p className="kpi-critico-value">{formatCurrency(cajaActual?.saldo_efectivo_caja)}</p>
+          <p className="kpi-critico-note">Dinero físico esperado ahora</p>
+        </article>
+        <article className="kpi-critico">
+          <p className="kpi-critico-label">Ingresos del día</p>
+          <p className="kpi-critico-value success">{formatCurrency(totalRecaudadoDia)}</p>
+          <p className="kpi-critico-note">{cajaActual?.num_pagos || 0} pagos registrados</p>
+        </article>
+        <article className="kpi-critico">
+          <p className="kpi-critico-label">Egresos del día</p>
+          <p className="kpi-critico-value danger">{formatCurrency(cajaActual?.total_egresos)}</p>
+          <p className="kpi-critico-note">{cajaActual?.num_egresos || 0} egresos registrados</p>
+        </article>
+      </section>
       
       {/* =========================== CAJA FÍSICA =========================== */}
       <div className="seccion-caja-fisica">
-        <h3 
+        <button
+          type="button"
           className="section-title-main collapsable" 
           onClick={() => setMostrarCajaFisica(!mostrarCajaFisica)}
+          aria-expanded={mostrarCajaFisica}
+          aria-controls="caja-fisica-panel"
         >
-          💵 Caja Física (Dinero Real en Mano)
+          💵 Caja física
           <ChevronDown 
             size={24} 
             className={`chevron-icon ${mostrarCajaFisica ? '' : 'rotated'}`}
           />
-        </h3>
+        </button>
         
         {mostrarCajaFisica && (
-        <div className="caja-resumen-grid-main">
+        <div className="caja-resumen-grid-main" id="caja-fisica-panel">
           <div className="stat-card">
             <div className="stat-icon" style={{ backgroundColor: '#e0f2fe' }}>
               <DollarSign size={24} color="#0284c7" />
@@ -682,24 +871,27 @@ export const Caja = () => {
       
       {/* =========================== MÉTODOS DIGITALES (FUERA DE CAJA) =========================== */}
       <div className="metodos-digitales-section">
-        <h3 
+        <button
+          type="button"
           className="section-title-main collapsable" 
           onClick={() => setMostrarMetodosDigitales(!mostrarMetodosDigitales)}
+          aria-expanded={mostrarMetodosDigitales}
+          aria-controls="metodos-digitales-panel"
         >
-          💳 Métodos Digitales (No en Caja Física)
+          💳 Ingresos digitales
           <ChevronDown 
             size={24} 
             className={`chevron-icon ${mostrarMetodosDigitales ? '' : 'rotated'}`}
           />
-        </h3>
+        </button>
         
         {mostrarMetodosDigitales && (
-        <>
-        <p className="section-subtitle-white">Dinero recibido pero NO está en caja física - Solo para control y registro</p>
+        <div id="metodos-digitales-panel">
+        <p className="section-subtitle-white">Ingresos que no pasan por efectivo en caja.</p>
         
         {/* Transferencias */}
         <div className="metodo-grupo">
-          <h4 className="metodo-grupo-titulo">Transferencias Electrónicas</h4>
+          <h4 className="metodo-grupo-titulo">Transferencias</h4>
           <div className="metodos-grid">
             <div className="metodo-card transferencia">
               <div className="metodo-header">
@@ -758,26 +950,29 @@ export const Caja = () => {
             </div>
           </div>
         </div>
-        </>
+        </div>
         )}
       </div>
       
       {/* =========================== CRÉDITOS FINANCIERAS (FUERA DE CAJA) =========================== */}
       <div className="creditos-section">
-        <h3 
+        <button
+          type="button"
           className="section-title-main collapsable" 
           onClick={() => setMostrarCreditos(!mostrarCreditos)}
+          aria-expanded={mostrarCreditos}
+          aria-controls="creditos-panel"
         >
-          🏦 Créditos Financieras (No en Caja)
+          🏦 Créditos por cobrar
           <ChevronDown 
             size={24} 
             className={`chevron-icon ${mostrarCreditos ? '' : 'rotated'}`}
           />
-        </h3>
+        </button>
         
         {mostrarCreditos && (
-        <>
-        <p className="section-subtitle">Pagos diferidos - La financiera pagará después. NO entra a caja física.</p>
+        <div id="creditos-panel">
+        <p className="section-subtitle">Pagos diferidos que la financiera transfiere después.</p>
         <div className="metodos-grid">
           <div className="metodo-card credismart">
             <div className="metodo-header">
@@ -797,31 +992,34 @@ export const Caja = () => {
             <p className="metodo-detalle">Pendiente de pago por financiera</p>
           </div>
         </div>
-        </>
+        </div>
         )}
       </div>
       
       {/* =========================== RESUMEN GENERAL DEL DÍA =========================== */}
       <div className="resumen-general">
-        <h3 
+        <button
+          type="button"
           className="section-title-main collapsable" 
           onClick={() => setMostrarResumen(!mostrarResumen)}
+          aria-expanded={mostrarResumen}
+          aria-controls="resumen-dia-panel"
         >
-          📊 Resumen General del Día
+          📊 Resumen del día
           <ChevronDown 
             size={24} 
             className={`chevron-icon ${mostrarResumen ? '' : 'rotated'}`}
           />
-        </h3>
+        </button>
         
         {mostrarResumen && (
-        <div className="stats-row">
+        <div className="stats-row" id="resumen-dia-panel">
           <div className="stat-summary efectivo">
             <div className="stat-summary-icon">💵</div>
             <div className="stat-summary-content">
               <span className="stat-summary-label">Efectivo en Caja</span>
               <span className="stat-summary-value success">{formatCurrency(cajaActual?.saldo_efectivo_caja)}</span>
-              <span className="stat-summary-detalle">Dinero físico que debe haber al contar</span>
+              <span className="stat-summary-detalle">Disponible para arqueo</span>
             </div>
           </div>
           
@@ -829,11 +1027,8 @@ export const Caja = () => {
             <div className="stat-summary-icon">💳</div>
             <div className="stat-summary-content">
               <span className="stat-summary-label">Métodos Digitales</span>
-              <span className="stat-summary-value">{formatCurrency(
-                Number(cajaActual?.total_ingresos_transferencia || 0) + 
-                Number(cajaActual?.total_ingresos_tarjeta || 0)
-              )}</span>
-              <span className="stat-summary-detalle">Transferencias + Tarjetas (no en caja)</span>
+              <span className="stat-summary-value">{formatCurrency(totalDigitalDia)}</span>
+              <span className="stat-summary-detalle">Transferencias y tarjetas</span>
             </div>
           </div>
           
@@ -841,11 +1036,8 @@ export const Caja = () => {
             <div className="stat-summary-icon">🏦</div>
             <div className="stat-summary-content">
               <span className="stat-summary-label">Créditos</span>
-              <span className="stat-summary-value">{formatCurrency(
-                Number(cajaActual?.total_credismart || 0) + 
-                Number(cajaActual?.total_sistecredito || 0)
-              )}</span>
-              <span className="stat-summary-detalle">Por cobrar a financieras (no en caja)</span>
+              <span className="stat-summary-value">{formatCurrency(totalCreditosDia)}</span>
+              <span className="stat-summary-detalle">Pendiente de giro</span>
             </div>
           </div>
           
@@ -853,13 +1045,7 @@ export const Caja = () => {
             <div className="stat-summary-icon">✅</div>
             <div className="stat-summary-content">
               <span className="stat-summary-label">TOTAL RECAUDADO</span>
-              <span className="stat-summary-value-large">{formatCurrency(
-                Number(cajaActual?.total_ingresos_efectivo || 0) + 
-                Number(cajaActual?.total_ingresos_transferencia || 0) + 
-                Number(cajaActual?.total_ingresos_tarjeta || 0) + 
-                Number(cajaActual?.total_credismart || 0) + 
-                Number(cajaActual?.total_sistecredito || 0)
-              )}</span>
+              <span className="stat-summary-value-large">{formatCurrency(totalRecaudadoDia)}</span>
               <span className="stat-summary-detalle">Todos los ingresos del día ({cajaActual?.num_pagos || 0} pagos)</span>
             </div>
           </div>
@@ -867,79 +1053,106 @@ export const Caja = () => {
         )}
       </div>
 
-      {showConfirmacion && (
-        <div className="modal-overlay confirmacion-overlay">
-          <div className="modal-box confirmacion-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <div className="confirmacion-header">
-                <span className="confirmacion-icon">
-                  <AlertCircle size={20} />
-                </span>
-                <div>
-                  <h3>ADVERTENCIA</h3>
-                  <p className="confirmacion-subtitulo">Verifica el resumen antes de continuar</p>
-                </div>
+      <ConfirmDialog
+        isOpen={showConfirmacion}
+        title="Confirmar registro"
+        message="Revisa el resumen antes de continuar."
+        confirmText="Sí, registrar"
+        cancelText="Cancelar"
+        isLoading={confirmando}
+        onCancel={() => setShowConfirmacion(false)}
+        onConfirm={() => {
+          if (!confirmacionAction || confirmando) return;
+          void (async () => {
+            setConfirmando(true);
+            setShowConfirmacion(false);
+            await confirmacionAction();
+            setConfirmacionAction(null);
+            setConfirmando(false);
+          })();
+        }}
+      >
+        <div className="confirmacion-resumen">
+          <h4>RESUMEN</h4>
+          <div className="confirmacion-lista">
+            {confirmacionItems.map((item, index) => (
+              <div key={`${item.label}-${index}`} className="confirmacion-item">
+                <span className="confirmacion-label">{item.label}</span>
+                <span className="confirmacion-valor">{formatCurrency(item.valor)}</span>
               </div>
-              <button onClick={() => setShowConfirmacion(false)} className="btn-icon">
-                <X size={24} />
-              </button>
-            </div>
-            <div className="modal-body">
-              <p className="confirmacion-texto">¿Estás seguro de registrar el movimiento?</p>
-              <div className="confirmacion-resumen">
-                <h4>RESUMEN</h4>
-                <div className="confirmacion-lista">
-                  {confirmacionItems.map((item, index) => (
-                    <div key={`${item.label}-${index}`} className="confirmacion-item">
-                      <span className="confirmacion-label">{item.label}</span>
-                      <span className="confirmacion-valor">{formatCurrency(item.valor)}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button onClick={() => setShowConfirmacion(false)} className="btn-secondary">
-                Cancelar
-              </button>
-              <button
-                onClick={async () => {
-                  if (!confirmacionAction || confirmando) return;
-                  setConfirmando(true);
-                  setShowConfirmacion(false);
-                  await confirmacionAction();
-                  setConfirmacionAction(null);
-                  setConfirmando(false);
-                }}
-                className="btn-primary"
-                disabled={!confirmacionAction || confirmando}
-              >
-                {confirmando ? 'Procesando...' : 'Confirmar'}
-              </button>
-            </div>
+            ))}
           </div>
         </div>
-      )}
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        isOpen={showConfirmarCierreCaja}
+        title="Confirmar cierre de caja"
+        message="Esta acción cierra la caja del día y no se puede deshacer."
+        confirmText="Sí, cerrar caja"
+        cancelText="Cancelar"
+        confirmVariant="danger"
+        isLoading={cerrandoCaja}
+        onCancel={() => setShowConfirmarCierreCaja(false)}
+        onConfirm={() => void ejecutarCerrarCaja()}
+      />
 
       {/* Acciones rápidas */}
-      <div className="actions-bar">
-        <button onClick={() => setShowEgreso(true)} className="btn-action">
-          <Plus size={20} />
-          Registrar Egreso
-        </button>
-        <button onClick={() => setShowMovimientoGeneral(true)} className="btn-action">
-          <Plus size={20} />
-          Registrar Otro Concepto
-        </button>
-        <button onClick={() => setShowCerrarCaja(true)} className="btn-action btn-danger">
-          <X size={20} />
-          Cerrar Caja
-        </button>
+      <div className="acciones-caja-panel">
+        <div className="acciones-caja-header">
+          <h3>Acciones rápidas</h3>
+          <p>Usa estos atajos para registrar movimientos del día más rápido.</p>
+        </div>
+        <div className="actions-bar">
+          <button type="button" onClick={irARegistrarPago} className="btn-action btn-action-primary">
+            <span className="btn-action-icon" aria-hidden="true">
+              <DollarSign size={18} />
+            </span>
+            <span className="btn-action-copy">
+              <strong>Registrar pago</strong>
+              <small>Buscar estudiante por documento</small>
+            </span>
+          </button>
+          <button type="button" onClick={() => setShowMovimientoGeneral(true)} className="btn-action">
+            <span className="btn-action-icon" aria-hidden="true">
+              <Plus size={18} />
+            </span>
+            <span className="btn-action-copy">
+              <strong>Registrar otro concepto</strong>
+              <small>Ingresos administrativos y adicionales</small>
+            </span>
+          </button>
+          <button type="button" onClick={() => setShowEgreso(true)} className="btn-action">
+            <span className="btn-action-icon" aria-hidden="true">
+              <TrendingDown size={18} />
+            </span>
+            <span className="btn-action-copy">
+              <strong>Registrar egreso</strong>
+              <small>Gastos y salidas de caja</small>
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setMostrarDetalleArqueo(false);
+              setShowCerrarCaja(true);
+            }}
+            className="btn-action btn-danger btn-action-critical"
+          >
+            <span className="btn-action-icon" aria-hidden="true">
+              <X size={18} />
+            </span>
+            <span className="btn-action-copy">
+              <strong>Cerrar caja</strong>
+              <small>Arqueo final y cierre del día</small>
+            </span>
+          </button>
+        </div>
       </div>
       
       {/* Buscar y Registrar Pago */}
       <div className="main-content-grid">
-        <div className="search-section">
+        <div className="search-section" ref={pagoSectionRef}>
           <h2>Registrar Pago</h2>
           
           <div className="search-bar">
@@ -959,6 +1172,16 @@ export const Caja = () => {
             <button type="button" onClick={() => void handleBuscarEstudiante()} disabled={buscando} className="btn-search">
               <Search size={20} />
               {buscando ? 'Buscando...' : 'Buscar'}
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                setCedula('');
+                setEstudiante(null);
+              }}
+            >
+              Limpiar
             </button>
           </div>
           
@@ -981,7 +1204,7 @@ export const Caja = () => {
               <div className="financial-info">
                 <div className="info-row">
                   <span>Servicio:</span>
-                  <strong>{estudiante.tipo_servicio || 'N/A'}</strong>
+                  <strong>{getTipoServicioLabel(estudiante.tipo_servicio)}</strong>
                 </div>
                 <div className="info-row">
                   <span>Valor Total:</span>
@@ -1007,6 +1230,45 @@ export const Caja = () => {
               
               <div className="pago-form">
                 <h4>Registrar Pago</h4>
+                <div className="pago-quick-actions">
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => {
+                      if (!estudiante?.saldo_pendiente) return;
+                      const saldo = Number(estudiante.saldo_pendiente);
+                      aplicarMontoPago(saldo);
+                    }}
+                  >
+                    Usar saldo pendiente
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => navigate(`/estudiantes/${estudiante.id}`)}
+                  >
+                    Ver detalle del estudiante
+                  </button>
+                </div>
+                <div className="monto-atajos">
+                  <span className="monto-atajos-label">Montos rápidos:</span>
+                  <div className="monto-atajos-grid">
+                    {MONTOS_RAPIDOS_PAGO.map((monto) => (
+                      <button
+                        key={monto}
+                        type="button"
+                        className="btn-monto-atajo"
+                        onClick={() => aplicarMontoPago(monto)}
+                        aria-label={`Usar monto rápido de ${formatCurrency(monto)}`}
+                      >
+                        {formatCurrency(monto)}
+                      </button>
+                    ))}
+                    <button type="button" className="btn-monto-atajo btn-monto-limpiar" onClick={limpiarFormularioPago}>
+                      Limpiar pago
+                    </button>
+                  </div>
+                </div>
                 
                 {/* Toggle para pago mixto */}
                 <div className="form-group">
@@ -1065,10 +1327,12 @@ export const Caja = () => {
                 ) : (
                   // PAGO MIXTO
                   <div className="pago-mixto-container">
+                    <p className="pago-mixto-ayuda">Distribuye el valor entre 2 o más métodos de pago.</p>
                     {detallesPago.map((detalle, index) => (
                       <div key={index} className="detalle-pago-row">
+                        <div className="detalle-pago-index">Método {index + 1}</div>
                         <div className="form-group" style={{flex: 1}}>
-                          <label>Método {index + 1}</label>
+                          <label>Tipo de pago</label>
                           <select
                             value={detalle.metodo}
                             onChange={(e) => {
@@ -1104,13 +1368,14 @@ export const Caja = () => {
                             step="100"
                           />
                         </div>
-                        {detallesPago.length > 1 && (
+                        {detallesPago.length > 2 && (
                           <button
+                            type="button"
                             onClick={() => {
                               setDetallesPago(detallesPago.filter((_, i) => i !== index));
                             }}
                             className="btn-icon-danger"
-                            style={{marginTop: '24px'}}
+                            aria-label={`Quitar método ${index + 1}`}
                           >
                             <X size={20} />
                           </button>
@@ -1134,7 +1399,18 @@ export const Caja = () => {
                   </div>
                 )}
                 
-              <button type="button" onClick={handleRegistrarPago} disabled={registrandoPago} className="btn-primary-full">
+                <div className="pago-preview-resumen">
+                  <div className="pago-preview-item">
+                    <span>Total a registrar</span>
+                    <strong>{formatCurrency(totalPagoActual)}</strong>
+                  </div>
+                  <div className="pago-preview-item">
+                    <span>Saldo luego del pago</span>
+                    <strong className={saldoDespuesPago === 0 ? 'success' : ''}>{formatCurrency(saldoDespuesPago)}</strong>
+                  </div>
+                </div>
+
+              <button type="button" onClick={handleRegistrarPago} disabled={registrandoPago || !puedeRegistrarPago} className="btn-primary-full">
                   {registrandoPago ? 'Registrando...' : 'Registrar Pago'}
                 </button>
               </div>
@@ -1144,91 +1420,127 @@ export const Caja = () => {
       </div>
       
       {/* Modal Egreso */}
-      {showEgreso && (
-      <div className="modal-overlay">
-          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Registrar Egreso</h3>
-              <button onClick={() => setShowEgreso(false)} className="btn-icon">
-                <X size={24} />
-              </button>
-            </div>
-            <div className="modal-body">
-              <div className="form-group">
-                <label>Concepto *</label>
-                <input
-                  type="text"
-                  value={conceptoEgreso}
-                  onChange={(e) => setConceptoEgreso(e.target.value.toUpperCase())}
-                  placeholder="Descripción del gasto"
-                  className="form-input"
-                />
-              </div>
-              <div className="form-group">
-                <label>Categoría</label>
-                <select value={categoriaEgreso} onChange={(e) => setCategoriaEgreso(e.target.value)} className="form-select">
-                  <option value="COMBUSTIBLE">Combustible</option>
-                  <option value="MANTENIMIENTO_VEHICULO">Mantenimiento Vehículo</option>
-                  <option value="SERVICIOS_PUBLICOS">Servicios Públicos</option>
-                  <option value="NOMINA">Nómina</option>
-                  <option value="PAPELERIA">Papelería</option>
-                  <option value="ASEO">Aseo</option>
-                  <option value="ALQUILER">Alquiler</option>
-                  <option value="OTROS">Otros</option>
-                </select>
-              </div>
-              <div className="form-group">
-                <label>Monto *</label>
-                <input
-                  type="number"
-                  value={montoEgreso}
-                  onChange={(e) => setMontoEgreso(e.target.value)}
-                  placeholder="0"
-                  className="form-input"
-                  min="0"
-                  step="100"
-                />
-              </div>
-              <div className="form-group">
-                <label>Método de Pago</label>
-                <select value={metodoEgreso} onChange={(e) => setMetodoEgreso(e.target.value)} className="form-select">
-                  <option value="EFECTIVO">Efectivo</option>
-                  <option value="NEQUI">Nequi</option>
-                  <option value="DAVIPLATA">Daviplata</option>
-                  <option value="TRANSFERENCIA_BANCARIA">Transferencia Bancaria</option>
-                  <option value="TARJETA_DEBITO">Tarjeta Débito</option>
-                  <option value="TARJETA_CREDITO">Tarjeta Crédito</option>
-                  <option value="CREDISMART">CrediSmart</option>
-                  <option value="SISTECREDITO">Sistecredito</option>
-                </select>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button onClick={() => setShowEgreso(false)} className="btn-secondary">
-                Cancelar
-              </button>
-              <button type="button" onClick={handleRegistrarEgreso} className="btn-primary">
-                Registrar Egreso
-              </button>
-            </div>
-          </div>
+      <ModalBase
+        isOpen={showEgreso}
+        title="Registrar Egreso"
+        onClose={() => setShowEgreso(false)}
+        closeDisabled={registrandoEgreso}
+        size="md"
+        footer={
+          <>
+            <button onClick={() => setShowEgreso(false)} className="btn-secondary" disabled={registrandoEgreso}>
+              Cancelar
+            </button>
+            <button type="button" onClick={handleRegistrarEgreso} className="btn-primary" disabled={!puedeRegistrarEgreso}>
+              {registrandoEgreso ? 'Registrando...' : 'Registrar Egreso'}
+            </button>
+          </>
+        }
+      >
+        <div className="form-group">
+          <label>Concepto *</label>
+          <input
+            type="text"
+            value={conceptoEgreso}
+            onChange={(e) => setConceptoEgreso(e.target.value.toUpperCase())}
+            placeholder="Descripción del gasto"
+            className="form-input"
+          />
         </div>
-      )}
+        <div className="form-group">
+          <label>Categoría</label>
+          <select value={categoriaEgreso} onChange={(e) => setCategoriaEgreso(e.target.value)} className="form-select">
+            <option value="COMBUSTIBLE">Combustible</option>
+            <option value="MANTENIMIENTO_VEHICULO">Mantenimiento Vehículo</option>
+            <option value="SERVICIOS_PUBLICOS">Servicios Públicos</option>
+            <option value="NOMINA">Nómina</option>
+            <option value="PAPELERIA">Papelería</option>
+            <option value="ASEO">Aseo</option>
+            <option value="ALQUILER">Alquiler</option>
+            <option value="OTROS">Otros</option>
+          </select>
+        </div>
+        <div className="form-group">
+          <label>Monto *</label>
+          <input
+            type="number"
+            value={montoEgreso}
+            onChange={(e) => setMontoEgreso(e.target.value)}
+            placeholder="0"
+            className="form-input"
+            min="0"
+            step="100"
+          />
+        </div>
+        <div className="form-group">
+          <label>Método de Pago</label>
+          <select value={metodoEgreso} onChange={(e) => setMetodoEgreso(e.target.value)} className="form-select">
+            <option value="EFECTIVO">Efectivo</option>
+            <option value="NEQUI">Nequi</option>
+            <option value="DAVIPLATA">Daviplata</option>
+            <option value="TRANSFERENCIA_BANCARIA">Transferencia Bancaria</option>
+            <option value="TARJETA_DEBITO">Tarjeta Débito</option>
+            <option value="TARJETA_CREDITO">Tarjeta Crédito</option>
+            <option value="CREDISMART">CrediSmart</option>
+            <option value="SISTECREDITO">Sistecredito</option>
+          </select>
+        </div>
+      </ModalBase>
 
       {/* Modal Movimiento General */}
-      {showMovimientoGeneral && (
-        <div className="modal-overlay">
-          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Registrar Otro Concepto</h3>
-              <button onClick={() => setShowMovimientoGeneral(false)} className="btn-icon">
-                <X size={24} />
-              </button>
-            </div>
-            <div className="modal-body">
+      <ModalBase
+        isOpen={showMovimientoGeneral}
+        title="Registrar Otro Concepto"
+        onClose={() => setShowMovimientoGeneral(false)}
+        closeDisabled={registrandoMovimiento}
+        size="md"
+        footer={
+          <>
+            <button onClick={() => setShowMovimientoGeneral(false)} className="btn-secondary" disabled={registrandoMovimiento}>
+              Cancelar
+            </button>
+            <button type="button" onClick={limpiarFormularioMovimientoGeneral} className="btn-secondary" disabled={registrandoMovimiento}>
+              Limpiar
+            </button>
+            <button type="button" onClick={handleRegistrarMovimientoGeneral} className="btn-primary" disabled={!puedeRegistrarMovimiento}>
+              {registrandoMovimiento ? 'Guardando...' : 'Guardar'}
+            </button>
+          </>
+        }
+      >
+        <div className="movimiento-ayuda">
+          Si aplica, selecciona un concepto preconfigurado. Luego ajusta el valor final antes de guardar.
+        </div>
               <div className="form-group">
                 <label>Tipo</label>
                 <input className="form-input readonly" readOnly value="Ingreso" />
+              </div>
+              <div className="form-group">
+                <label>Concepto preconfigurado (opcional)</label>
+                <select
+                  value={conceptoIngresoSeleccionadoId}
+                  onChange={(e) => {
+                    const selectedId = e.target.value;
+                    setConceptoIngresoSeleccionadoId(selectedId);
+                    if (!selectedId) return;
+                    const seleccionado = conceptosIngreso.find((concepto) => String(concepto.id) === selectedId);
+                    if (!seleccionado) return;
+                    setConceptoMovimiento(seleccionado.nombre);
+                    setCategoriaMovimiento(seleccionado.categoria || 'OTROS');
+                    setMontoMovimiento(String(seleccionado.valor_default ?? ''));
+                  }}
+                  className="form-select"
+                  disabled={cargandoConceptosIngreso}
+                >
+                  <option value="">
+                    {cargandoConceptosIngreso ? 'Cargando conceptos...' : 'Seleccione (opcional)'}
+                  </option>
+                  {conceptosIngreso.map((concepto) => (
+                    <option key={concepto.id} value={concepto.id}>
+                      {concepto.nombre} - {new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(Number(concepto.valor_default || 0))}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="form-group">
                 <label>Categoría *</label>
@@ -1237,13 +1549,12 @@ export const Caja = () => {
                   onChange={(e) => setCategoriaMovimiento(e.target.value)}
                   className="form-select"
                 >
-                  <option value="ESTUDIANTE_NO_REGISTRADO">Estudiante no registrado</option>
-                  <option value="PAGO_PRESTAMO_EMPLEADO">Pago préstamo empleado</option>
-                  <option value="VENTA_MATERIAL">Venta material / trámites</option>
-                  <option value="INGRESO_ADMINISTRATIVO">Ingreso administrativo</option>
-                  <option value="OTROS">Otros</option>
+                  {categoriasIngreso.map((categoria) => (
+                    <option key={categoria.value} value={categoria.value}>{categoria.label}</option>
+                  ))}
                 </select>
               </div>
+
               <div className="form-group">
                 <label>Concepto *</label>
                 <input
@@ -1251,26 +1562,6 @@ export const Caja = () => {
                   value={conceptoMovimiento}
                   onChange={(e) => setConceptoMovimiento(e.target.value.toUpperCase())}
                   placeholder="Descripción del movimiento"
-                  className="form-input"
-                />
-              </div>
-              <div className="form-group">
-                <label>Pagó / Tercero</label>
-                <input
-                  type="text"
-                  value={terceroNombre}
-                  onChange={(e) => setTerceroNombre(e.target.value.toUpperCase())}
-                  placeholder="Nombre de quien paga"
-                  className="form-input"
-                />
-              </div>
-              <div className="form-group">
-                <label>Documento (opcional)</label>
-                <input
-                  type="text"
-                  value={terceroDocumento}
-                  onChange={(e) => setTerceroDocumento(e.target.value.toUpperCase())}
-                  placeholder="Documento"
                   className="form-input"
                 />
               </div>
@@ -1292,6 +1583,7 @@ export const Caja = () => {
                   <span className="checkbox-text">Pago Mixto (varios métodos)</span>
                 </label>
               </div>
+
               {!esPagoMixtoMovimiento ? (
                 <>
                   <div className="form-group">
@@ -1326,10 +1618,12 @@ export const Caja = () => {
                 </>
               ) : (
                 <div className="pago-mixto-container">
+                  <p className="pago-mixto-ayuda">Distribuye el valor entre 2 o más métodos de pago.</p>
                   {detallesMovimiento.map((detalle, index) => (
                     <div key={index} className="detalle-pago-row">
+                      <div className="detalle-pago-index">Método {index + 1}</div>
                       <div className="form-group" style={{flex: 1}}>
-                        <label>Método {index + 1}</label>
+                        <label>Tipo de pago</label>
                         <select
                           value={detalle.metodo}
                           onChange={(e) => {
@@ -1365,13 +1659,14 @@ export const Caja = () => {
                           step="100"
                         />
                       </div>
-                      {detallesMovimiento.length > 1 && (
+                      {detallesMovimiento.length > 2 && (
                         <button
+                          type="button"
                           onClick={() => {
                             setDetallesMovimiento(detallesMovimiento.filter((_, i) => i !== index));
                           }}
                           className="btn-icon-danger"
-                          style={{marginTop: '24px'}}
+                          aria-label={`Quitar método ${index + 1}`}
                         >
                           <X size={20} />
                         </button>
@@ -1392,117 +1687,164 @@ export const Caja = () => {
                   </div>
                 </div>
               )}
-            </div>
-            <div className="modal-footer">
-              <button onClick={() => setShowMovimientoGeneral(false)} className="btn-secondary">
-                Cancelar
+
+              <button
+                type="button"
+                className="movimiento-tercero-toggle"
+                onClick={() => setMostrarDatosTercero((prev) => !prev)}
+                aria-expanded={mostrarDatosTercero}
+                aria-controls="movimiento-tercero-detalle"
+              >
+                Datos de quién paga (opcional)
+                <ChevronDown size={18} className={`chevron-icon ${mostrarDatosTercero ? '' : 'rotated'}`} />
               </button>
-              <button type="button" onClick={handleRegistrarMovimientoGeneral} className="btn-primary">
-                Guardar
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+
+              {mostrarDatosTercero && (
+                <div className="movimiento-tercero-box" id="movimiento-tercero-detalle">
+                  <div className="form-group">
+                    <label>Pagó / Tercero</label>
+                    <input
+                      type="text"
+                      value={terceroNombre}
+                      onChange={(e) => setTerceroNombre(e.target.value.toUpperCase())}
+                      placeholder="Nombre de quien paga"
+                      className="form-input"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Documento (opcional)</label>
+                    <input
+                      type="text"
+                      value={terceroDocumento}
+                      onChange={(e) => setTerceroDocumento(e.target.value.toUpperCase())}
+                      placeholder="Documento"
+                      className="form-input"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="pago-preview-resumen">
+                <div className="pago-preview-item">
+                  <span>Total a registrar</span>
+                  <strong>{formatCurrency(totalMovimientoActual)}</strong>
+                </div>
+                <div className="pago-preview-item">
+                  <span>Métodos con monto</span>
+                  <strong>{metodosActivosMovimiento}</strong>
+                </div>
+              </div>
+      </ModalBase>
       
       {/* Modal Cerrar Caja - Arqueo */}
-      {showCerrarCaja && cajaActual && (
-      <div className="modal-overlay">
-          <div className="modal-box modal-large" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>📋 Arqueo y Cierre de Caja</h3>
-              <button onClick={() => setShowCerrarCaja(false)} className="btn-icon">
-                <X size={24} />
+      <ModalBase
+        isOpen={Boolean(showCerrarCaja && cajaActual)}
+        title="📋 Arqueo y Cierre de Caja"
+        onClose={() => setShowCerrarCaja(false)}
+        closeDisabled={cerrandoCaja}
+        size="lg"
+        footer={
+          <>
+            <button onClick={() => setShowCerrarCaja(false)} className="btn-secondary" disabled={cerrandoCaja}>
+              Cancelar
+            </button>
+            <button onClick={handleCerrarCaja} className="btn-danger" disabled={cerrandoCaja || !efectivoFisico}>
+              {cerrandoCaja ? 'Cerrando...' : 'Cerrar Caja'}
+            </button>
+          </>
+        }
+      >
+        {cajaActual && (
+          <>
+            {/* Resumen de Transacciones */}
+            <div className="cierre-resumen-rapido">
+                <div className="cierre-resumen-item">
+                  <span>Ingresos totales</span>
+                  <strong className="success">{formatCurrency(cajaActual.total_ingresos)}</strong>
+                </div>
+                <div className="cierre-resumen-item">
+                  <span>Egresos totales</span>
+                  <strong className="danger">{formatCurrency(cajaActual.total_egresos)}</strong>
+                </div>
+                <div className="cierre-resumen-item">
+                  <span>Efectivo teórico</span>
+                  <strong>{formatCurrency(cajaActual.saldo_efectivo_caja)}</strong>
+                </div>
+                <div className="cierre-resumen-item">
+                  <span>Movimientos</span>
+                  <strong>{cajaActual.num_pagos || 0} pagos / {cajaActual.num_egresos || 0} egresos</strong>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="toggle-detalle-arqueo"
+                onClick={() => setMostrarDetalleArqueo((prev) => !prev)}
+                aria-expanded={mostrarDetalleArqueo}
+                aria-controls="detalle-arqueo-metodos"
+              >
+                {mostrarDetalleArqueo ? 'Ocultar detalle por método' : 'Ver detalle por método'}
+                <ChevronDown size={18} className={`chevron-icon ${mostrarDetalleArqueo ? '' : 'rotated'}`} />
               </button>
-            </div>
-            <div className="modal-body">
-              {/* Resumen de Transacciones */}
-              <div className="arqueo-transacciones">
-                <h4>📊 Resumen de Transacciones del Día</h4>
-                <div className="transacciones-grid">
-                  <div className="transaccion-grupo">
-                    <h5>📈 Ingresos por Método</h5>
-                    <div className="transaccion-detalle">
-                      <span>Efectivo:</span>
-                      <strong className="success">{formatCurrency(cajaActual.total_ingresos_efectivo)}</strong>
+
+              {mostrarDetalleArqueo && (
+                <div className="arqueo-transacciones" id="detalle-arqueo-metodos">
+                  <h4>📊 Detalle por método</h4>
+                  <div className="transacciones-grid">
+                    <div className="transaccion-grupo">
+                      <h5>📈 Ingresos por Método</h5>
+                      <div className="transaccion-detalle">
+                        <span>Efectivo:</span>
+                        <strong className="success">{formatCurrency(cajaActual.total_ingresos_efectivo)}</strong>
+                      </div>
+                      <div className="transaccion-detalle">
+                        <span>Nequi:</span>
+                        <strong className="success">{formatCurrency(cajaActual.total_nequi || 0)}</strong>
+                      </div>
+                      <div className="transaccion-detalle">
+                        <span>Daviplata:</span>
+                        <strong className="success">{formatCurrency(cajaActual.total_daviplata || 0)}</strong>
+                      </div>
+                      <div className="transaccion-detalle">
+                        <span>Transferencia Bancaria:</span>
+                        <strong className="success">{formatCurrency(cajaActual.total_transferencia_bancaria || 0)}</strong>
+                      </div>
+                      <div className="transaccion-detalle">
+                        <span>Tarjeta Débito:</span>
+                        <strong className="success">{formatCurrency(cajaActual.total_tarjeta_debito || 0)}</strong>
+                      </div>
+                      <div className="transaccion-detalle">
+                        <span>Tarjeta Crédito:</span>
+                        <strong className="success">{formatCurrency(cajaActual.total_tarjeta_credito || 0)}</strong>
+                      </div>
+                      <div className="transaccion-detalle">
+                        <span>CrediSmart:</span>
+                        <strong className="success">{formatCurrency(cajaActual.total_credismart || 0)}</strong>
+                      </div>
+                      <div className="transaccion-detalle">
+                        <span>Sistecredito:</span>
+                        <strong className="success">{formatCurrency(cajaActual.total_sistecredito || 0)}</strong>
+                      </div>
                     </div>
-                    <div className="transaccion-detalle">
-                      <span>Nequi:</span>
-                      <strong className="success">{formatCurrency(cajaActual.total_nequi || 0)}</strong>
-                    </div>
-                    <div className="transaccion-detalle">
-                      <span>Daviplata:</span>
-                      <strong className="success">{formatCurrency(cajaActual.total_daviplata || 0)}</strong>
-                    </div>
-                    <div className="transaccion-detalle">
-                      <span>Transferencia Bancaria:</span>
-                      <strong className="success">{formatCurrency(cajaActual.total_transferencia_bancaria || 0)}</strong>
-                    </div>
-                    <div className="transaccion-detalle">
-                      <span>Tarjeta Débito:</span>
-                      <strong className="success">{formatCurrency(cajaActual.total_tarjeta_debito || 0)}</strong>
-                    </div>
-                    <div className="transaccion-detalle">
-                      <span>Tarjeta Crédito:</span>
-                      <strong className="success">{formatCurrency(cajaActual.total_tarjeta_credito || 0)}</strong>
-                    </div>
-                    <div className="transaccion-detalle">
-                      <span>CrediSmart:</span>
-                      <strong className="success">{formatCurrency(cajaActual.total_credismart || 0)}</strong>
-                    </div>
-                    <div className="transaccion-detalle">
-                      <span>Sistecredito:</span>
-                      <strong className="success">{formatCurrency(cajaActual.total_sistecredito || 0)}</strong>
-                    </div>
-                    <div className="transaccion-total">
-                      <span>TOTAL INGRESOS:</span>
-                      <strong>{formatCurrency(
-                        Number(cajaActual.total_ingresos_efectivo || 0) + 
-                        Number(cajaActual.total_ingresos_transferencia || 0) + 
-                        Number(cajaActual.total_ingresos_tarjeta || 0) + 
-                        Number(cajaActual.total_credismart || 0) + 
-                        Number(cajaActual.total_sistecredito || 0)
-                      )}</strong>
-                    </div>
-                  </div>
-                  
-                  <div className="transaccion-grupo">
-                    <h5>📉 Egresos por Método</h5>
-                    <div className="transaccion-detalle">
-                      <span>Efectivo:</span>
-                      <strong className="danger">{formatCurrency(cajaActual.total_egresos_efectivo)}</strong>
-                    </div>
-                    <div className="transaccion-detalle">
-                      <span>Transferencias:</span>
-                      <strong className="danger">{formatCurrency(cajaActual.total_egresos_transferencia)}</strong>
-                    </div>
-                    <div className="transaccion-detalle">
-                      <span>Tarjetas:</span>
-                      <strong className="danger">{formatCurrency(cajaActual.total_egresos_tarjeta)}</strong>
-                    </div>
-                    <div className="transaccion-total">
-                      <span>TOTAL EGRESOS:</span>
-                      <strong>{formatCurrency(
-                        Number(cajaActual.total_egresos_efectivo || 0) + 
-                        Number(cajaActual.total_egresos_transferencia || 0) + 
-                        Number(cajaActual.total_egresos_tarjeta || 0)
-                      )}</strong>
-                    </div>
-                  </div>
-                  
-                  <div className="transaccion-grupo resumen">
-                    <h5>📝 Resumen General</h5>
-                    <div className="transaccion-detalle">
-                      <span>Total Pagos Recibidos:</span>
-                      <strong>{cajaActual.num_pagos || 0}</strong>
-                    </div>
-                    <div className="transaccion-detalle">
-                      <span>Total Egresos Realizados:</span>
-                      <strong>{cajaActual.num_egresos || 0}</strong>
+
+                    <div className="transaccion-grupo">
+                      <h5>📉 Egresos por Método</h5>
+                      <div className="transaccion-detalle">
+                        <span>Efectivo:</span>
+                        <strong className="danger">{formatCurrency(cajaActual.total_egresos_efectivo)}</strong>
+                      </div>
+                      <div className="transaccion-detalle">
+                        <span>Transferencias:</span>
+                        <strong className="danger">{formatCurrency(cajaActual.total_egresos_transferencia)}</strong>
+                      </div>
+                      <div className="transaccion-detalle">
+                        <span>Tarjetas:</span>
+                        <strong className="danger">{formatCurrency(cajaActual.total_egresos_tarjeta)}</strong>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
+              )}
               
               {/* Resumen de Caja (Arqueo) */}
               <div className="arqueo-resumen">
@@ -1581,18 +1923,9 @@ export const Caja = () => {
                   rows={3}
                 />
               </div>
-            </div>
-            <div className="modal-footer">
-              <button onClick={() => setShowCerrarCaja(false)} className="btn-secondary" disabled={cerrandoCaja}>
-                Cancelar
-              </button>
-              <button onClick={handleCerrarCaja} className="btn-danger" disabled={cerrandoCaja || !efectivoFisico}>
-                {cerrandoCaja ? 'Cerrando...' : 'Cerrar Caja'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </ModalBase>
     </div>
   );
 };

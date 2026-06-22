@@ -140,7 +140,7 @@
 }
 
 .tabla-historial tbody tr:hover {
-  background: var(--gray-50);
+  background: var(--surface-2);
 }
 
 .tabla-historial td {
@@ -167,7 +167,7 @@
 }
 
 .diferencia.sobrante {
-  color: var(--info-color);
+  color: #2563eb;
 }
 
 .diferencia.faltante {
@@ -185,13 +185,13 @@
 }
 
 .badge-cerrada {
-  background: var(--success-light);
-  color: var(--success-dark);
+  background: #dcfce7;
+  color: #166534;
 }
 
 .badge-abierta {
-  background: var(--warning-light);
-  color: var(--warning-dark);
+  background: #fef3c7;
+  color: #92400e;
 }
 
 /* ==================== BOTONES TABLA ==================== */
@@ -223,7 +223,7 @@
   align-items: center;
   justify-content: center;
   padding: 4rem;
-  background: white;
+  background: var(--surface);
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   color: var(--text-muted);
@@ -234,64 +234,6 @@
   margin-bottom: 1rem;
 }
 
-/* ==================== MODAL ==================== */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  padding: 2rem;
-}
-
-.modal-content-historial {
-  background: white;
-  border-radius: 12px;
-  width: 100%;
-  max-width: 900px;
-  max-height: 90vh;
-  overflow-y: auto;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
-}
-
-.modal-header-historial {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1.5rem;
-  border-bottom: 1px solid var(--border-color);
-  position: sticky;
-  top: 0;
-  background: white;
-  z-index: 10;
-}
-
-.modal-header-historial h2 {
-  margin: 0;
-  color: var(--text-dark);
-  font-size: 1.5rem;
-}
-
-.btn-cerrar-modal {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 0.5rem;
-  border-radius: 4px;
-  transition: all 0.2s;
-}
-
-.btn-cerrar-modal:hover {
-  background: var(--gray-100);
-  color: var(--text-dark);
-}
-
 .modal-body-historial {
   padding: 1.5rem;
 }
@@ -300,34 +242,44 @@
 .seccion-detalle {
   margin-bottom: 2rem;
   padding: 1.5rem;
-  background: var(--gray-50);
+  background: var(--surface-2);
   border-radius: 8px;
 }
 
 .seccion-detalle h3 {
   margin: 0 0 1rem 0;
-  color: var(--text-dark);
+  color: var(--text-primary);
   font-size: 1.125rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
 }
 
-/* Sección colapsable */
-.seccion-colapsable h3 {
+.titulo-colapsable {
+  margin: 0 0 1rem 0;
+  color: var(--text-primary);
+  font-size: 1.125rem;
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
   cursor: pointer;
   user-select: none;
   transition: color 0.2s;
 }
 
-.seccion-colapsable h3:hover {
+.titulo-colapsable:hover {
   color: var(--primary-color);
 }
 
-.titulo-colapsable {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.titulo-colapsable:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 8px;
 }
 
 /* ==================== INFO GRID ==================== */
@@ -351,7 +303,7 @@
 
 .info-value {
   font-size: 1rem;
-  color: var(--text-dark);
+  color: var(--text-primary);
   font-weight: 600;
 }
 
@@ -368,7 +320,7 @@
 }
 
 .metodo-grupo {
-  background: white;
+  background: var(--surface);
   padding: 1rem;
   border-radius: 6px;
   border: 1px solid var(--border-color);
@@ -376,7 +328,7 @@
 
 .metodo-grupo h4 {
   margin: 0 0 0.75rem 0;
-  color: var(--text-dark);
+  color: var(--text-primary);
   font-size: 0.875rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -398,7 +350,7 @@
 
 .metodo-item .monto {
   font-weight: 600;
-  color: var(--text-dark);
+  color: var(--text-primary);
 }
 
 .metodo-item .monto.negativo {
@@ -467,7 +419,7 @@
 
 /* ==================== TOTALES ==================== */
 .seccion-totales {
-  background: white;
+  background: var(--surface);
   border: 2px solid var(--primary-color);
 }
 
@@ -485,7 +437,7 @@
 
 .total-item span:first-child {
   font-weight: 600;
-  color: var(--text-dark);
+  color: var(--text-primary);
 }
 
 .total-valor {
@@ -502,7 +454,7 @@
 }
 
 .destacado-total {
-  background: var(--primary-light);
+  background: rgba(37, 99, 235, 0.12);
   padding: 1rem !important;
   margin: -1.5rem -1.5rem 0 -1.5rem;
   border-radius: 0 0 8px 8px;
@@ -524,13 +476,13 @@
 .observacion-item strong {
   display: block;
   margin-bottom: 0.5rem;
-  color: var(--text-dark);
+  color: var(--text-primary);
 }
 
 .observacion-item p {
   margin: 0;
   padding: 0.75rem;
-  background: white;
+  background: var(--surface);
   border-left: 3px solid var(--primary-color);
   border-radius: 4px;
   color: var(--text-muted);
@@ -561,7 +513,7 @@
 }
 
 .btn-pdf:hover:not(:disabled) {
-  background: var(--danger-hover);
+  background: #b91c1c;
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(220, 38, 38, 0.3);
 }
@@ -598,11 +550,6 @@
 
   .tabla-container {
     overflow-x: auto;
-  }
-
-  .modal-content-historial {
-    width: 95%;
-    max-height: 95vh;
   }
 
   .arqueo-grid {

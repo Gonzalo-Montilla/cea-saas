@@ -207,18 +207,6 @@
   cursor: pointer;
 }
 
-.modal-box {
-  background: #fff;
-  border-radius: 10px;
-  padding: 16px;
-  max-width: 560px;
-  width: 92%;
-}
-
-.modal-adjunto {
-  max-width: 820px;
-}
-
 .adjunto-preview {
   width: 100%;
   max-height: 70vh;
@@ -231,7 +219,6 @@
   border: none;
 }
 
-.modal-header,
 .modal-footer {
   display: flex;
   justify-content: space-between;

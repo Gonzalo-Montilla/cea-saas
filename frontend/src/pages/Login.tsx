@@ -52,7 +52,7 @@ export const Login = () => {
     try {
       const normalizedTenant = tenantSlug.trim().toLowerCase();
       if (!normalizedTenant) {
-        setError('Ingresa el codigo de tu escuela.');
+        setError('Ingresa el código de tu escuela.');
         return;
       }
       localStorage.setItem('tenant_slug', normalizedTenant);
@@ -64,10 +64,10 @@ export const Login = () => {
         return;
       }
       await login(email, password, normalizedTenant);
-      navigate('/dashboard');
+      navigate('/');
     } catch (err: any) {
       console.error('Error al iniciar sesión:', err);
-      setError(err.response?.data?.detail || 'Error al iniciar sesión. Verifica tus credenciales.');
+      setError(err.response?.data?.detail || 'No se pudo iniciar sesión. Verifica tus credenciales.');
     } finally {
       setIsLoading(false);
     }
@@ -88,15 +88,19 @@ export const Login = () => {
               id="email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (error) setError('');
+              }}
               required
               disabled={isLoading}
               placeholder="correo@ejemplo.com"
+              autoComplete="username"
             />
           </div>
 
           <div className="form-group">
-            <label htmlFor="tenantSlug">Codigo de escuela (slug)</label>
+            <label htmlFor="tenantSlug">Código de escuela (slug)</label>
             <input
               id="tenantSlug"
               type="text"
@@ -104,6 +108,7 @@ export const Login = () => {
               onChange={(e) => {
                 const value = e.target.value;
                 setTenantSlug(value);
+                if (error) setError('');
                 void loadTenantPreview(value);
               }}
               onBlur={() => {
@@ -113,7 +118,10 @@ export const Login = () => {
               disabled={isLoading}
               placeholder="ejemplo: conduce-bien"
             />
-            <small className="onboarding-help">Es el mismo codigo de escuela que se genera en el registro.</small>
+            <small className="onboarding-help">Es el mismo código de escuela que se genera en el registro.</small>
+            {tenantSlug.trim() && (
+              <small className="tenant-preview">Escuela detectada: {tenantDisplayName}</small>
+            )}
           </div>
 
           <div className="form-group">
@@ -123,23 +131,28 @@ export const Login = () => {
                 id="password"
                 type={showPassword ? 'text' : 'password'}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (error) setError('');
+                }}
                 required
                 disabled={isLoading}
                 placeholder="••••••••"
+                autoComplete="current-password"
               />
               <button
                 type="button"
                 className="toggle-password"
                 onClick={() => setShowPassword((prev) => !prev)}
                 aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                disabled={isLoading}
               >
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
           </div>
 
-          {error && <div className="error-message">{error}</div>}
+          {error && <div className="error-message" role="alert" aria-live="assertive">{error}</div>}
 
           <button type="submit" className="login-button" disabled={isLoading}>
             {isLoading ? 'Iniciando sesión...' : 'Iniciar Sesión'}

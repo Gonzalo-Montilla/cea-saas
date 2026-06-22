@@ -4,8 +4,9 @@ import { instructoresAPI } from '../services/api';
 import {
   ArrowLeft, UserCheck, Mail, Phone, Award, Calendar, Edit, Star, BookOpen, 
   Car, Users, TrendingUp, AlertCircle, FileText, Download, AlertTriangle, 
-  CheckCircle, Clock, XCircle, Eye, X
+  CheckCircle, Clock, XCircle, Eye
 } from 'lucide-react';
+import { ModalBase } from '../components/ui/ModalBase';
 import '../styles/InstructorDetalle.css';
 
 interface Estadisticas {
@@ -67,7 +68,7 @@ export const InstructorDetalle = () => {
       setInstructor(data);
     } catch (err) {
       console.error('Error al cargar instructor:', err);
-      setError('Error al cargar los datos del instructor');
+      setError('No se pudieron cargar los datos del instructor.');
     } finally {
       setIsLoading(false);
     }
@@ -609,32 +610,35 @@ export const InstructorDetalle = () => {
 
       {/* Modal de Vista Previa PDF */}
       {pdfPreview && (
-      <div className="pdf-preview-modal">
-          <div className="pdf-preview-content" onClick={(e) => e.stopPropagation()}>
-            <div className="pdf-preview-header">
-              <h3>{pdfPreview.nombre}</h3>
-              <div className="pdf-preview-actions">
-                <button 
-                  className="btn-descargar"
-                  onClick={() => descargarDocumento(pdfPreview.url, `${pdfPreview.nombre}.pdf`)}
-                >
-                  <Download size={18} /> Descargar
-                </button>
-                <button className="btn-cerrar" onClick={cerrarVistaPrevia}>
-                  <X size={20} />
-                </button>
-              </div>
-            </div>
-            <div className="pdf-preview-body">
-              <iframe 
-                src={pdfPreview.url} 
-                title={pdfPreview.nombre}
-                width="100%"
-                height="100%"
-              />
-            </div>
+        <ModalBase
+          isOpen={Boolean(pdfPreview)}
+          title={pdfPreview.nombre}
+          onClose={cerrarVistaPrevia}
+          size="lg"
+          footer={
+            <>
+              <button type="button" className="btn-secondary" onClick={cerrarVistaPrevia}>
+                Cerrar
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => descargarDocumento(pdfPreview.url, `${pdfPreview.nombre}.pdf`)}
+              >
+                <Download size={16} /> Descargar
+              </button>
+            </>
+          }
+        >
+          <div className="pdf-preview-body">
+            <iframe 
+              src={pdfPreview.url} 
+              title={pdfPreview.nombre}
+              width="100%"
+              height="100%"
+            />
           </div>
-        </div>
+        </ModalBase>
       )}
     </div>
   );

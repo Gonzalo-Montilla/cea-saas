@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { X, User, Camera, RotateCcw, Check, Upload, FileText, AlertCircle, Award, Calendar, ArrowRight, ArrowLeft } from 'lucide-react';
 import { instructoresAPI, authAPI, usuariosAPI } from '../services/api';
+import { ModalBase } from './ui/ModalBase';
 import '../styles/InstructorForm.css';
 import '../styles/InstructorFormExtras.css';
 
@@ -239,7 +240,7 @@ export const InstructorForm = ({ instructor, onClose, onSuccess }: InstructorFor
       setUsuarioId(nuevoUsuario.id);
       setStep(2); // Ir a captura de foto
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Error al crear usuario');
+      setError(err.response?.data?.detail || 'No se pudo crear el usuario.');
     } finally {
       setLoading(false);
     }
@@ -255,7 +256,7 @@ export const InstructorForm = ({ instructor, onClose, onSuccess }: InstructorFor
       const data = await usuariosAPI.getAll({ search: busquedaUsuario.trim() });
       setUsuariosEncontrados(data || []);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Error al buscar usuarios');
+      setError(err.response?.data?.detail || 'No se pudieron buscar los usuarios.');
       setUsuariosEncontrados([]);
     } finally {
       setBuscandoUsuarios(false);
@@ -320,23 +321,20 @@ export const InstructorForm = ({ instructor, onClose, onSuccess }: InstructorFor
       
       onSuccess();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Error al guardar instructor');
+      setError(err.response?.data?.detail || 'No se pudo guardar el instructor.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-      <div className="modal-overlay">
-      <div className="modal-content-large" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>
-            {instructor ? 'Editar Instructor' : `Nuevo Instructor - Paso ${step} de 4`}
-          </h2>
-          <button className="btn-close" onClick={onClose}>
-            <X size={24} />
-          </button>
-        </div>
+    <ModalBase
+      isOpen={true}
+      title={instructor ? 'Editar Instructor' : `Nuevo Instructor - Paso ${step} de 4`}
+      onClose={onClose}
+      closeDisabled={loading}
+      size="lg"
+    >
 
         {error && (
           <div className="error-alert">
@@ -857,7 +855,6 @@ export const InstructorForm = ({ instructor, onClose, onSuccess }: InstructorFor
             </div>
           </form>
         )}
-      </div>
-    </div>
+    </ModalBase>
   );
 };

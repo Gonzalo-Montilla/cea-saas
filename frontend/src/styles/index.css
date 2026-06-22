@@ -17,7 +17,10 @@
   --surface-2: #f8fafc;
   --text-primary: #0f172a;
   --text-secondary: #475569;
+  --text-muted: #64748b;
   --border: #e5e7eb;
+  --primary-hover: #1e40af;
+  --focus-ring: 0 0 0 3px rgba(29, 78, 216, 0.18);
   --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
   --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08);
   --radius-sm: 8px;
@@ -59,7 +62,10 @@
   --surface-2: #172338;
   --text-primary: #e2e8f0;
   --text-secondary: #94a3b8;
+  --text-muted: #94a3b8;
   --border: #253248;
+  --primary-hover: #3b82f6;
+  --focus-ring: 0 0 0 3px rgba(96, 165, 250, 0.26);
   --shadow-sm: 0 1px 2px rgba(2, 6, 23, 0.35);
   --shadow-md: 0 12px 28px rgba(2, 6, 23, 0.45);
   --chart-1: #60a5fa;
@@ -186,7 +192,25 @@ input, textarea, select {
 input:focus, textarea:focus, select:focus {
   outline: none;
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.12);
+  box-shadow: var(--focus-ring);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.btn-icon:focus-visible,
+.btn-icon-action:focus-visible,
+.btn-icon-danger:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
 }
 
 table {
@@ -246,6 +270,27 @@ thead th {
 
 .muted {
   color: var(--text-secondary);
+}
+
+.error-message {
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  background: rgba(239, 68, 68, 0.1);
+  color: #991b1b;
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.loading-container,
+.empty-state {
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  padding: 16px;
+  text-align: center;
+  font-size: 14px;
 }
 
 /* Estados */
@@ -398,6 +443,35 @@ thead th {
   box-shadow: none;
 }
 
+:root[data-theme='dark'] .btn-danger {
+  background: rgba(248, 113, 113, 0.18);
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.45);
+}
+
+:root[data-theme='dark'] .btn-danger:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.28);
+}
+
+:root[data-theme='dark'] .badge-warning {
+  background: rgba(251, 191, 36, 0.2);
+  border-color: rgba(251, 191, 36, 0.4);
+  color: #fde68a;
+}
+
+:root[data-theme='dark'] .badge-danger {
+  background: rgba(248, 113, 113, 0.2);
+  border-color: rgba(248, 113, 113, 0.42);
+  color: #fecaca;
+}
+
+:root[data-theme='dark'] .error-message,
+:root[data-theme='dark'] .bo-alert-error {
+  border-color: rgba(248, 113, 113, 0.4);
+  background: rgba(248, 113, 113, 0.16);
+  color: #fecaca;
+}
+
 /* Shared status badges */
 .bo-status {
   display: inline-flex;
@@ -507,7 +581,6 @@ thead th {
 .btn-eliminar,
 .btn-reset,
 .btn-pagar,
-.btn-cerrar,
 .btn-buscar,
 .btn-add,
 .filtro-btn,
@@ -538,7 +611,6 @@ thead th {
 .btn-eliminar:hover,
 .btn-reset:hover,
 .btn-pagar:hover,
-.btn-cerrar:hover,
 .btn-buscar:hover,
 .btn-add:hover,
 .filtro-btn:hover,
@@ -597,25 +669,4 @@ a {
     white-space: nowrap;
   }
 
-  .modal-box {
-    width: calc(100vw - 16px);
-    max-height: 88vh;
-    margin: 8px;
-  }
-
-  .modal-header,
-  .modal-body,
-  .modal-footer {
-    padding-left: 14px;
-    padding-right: 14px;
-  }
-
-  .modal-footer {
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .modal-footer button {
-    width: 100%;
-  }
 }

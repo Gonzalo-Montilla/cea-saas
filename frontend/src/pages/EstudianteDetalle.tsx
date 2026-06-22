@@ -18,6 +18,8 @@ import {
   AlertCircle,
   Award
 } from 'lucide-react';
+import { ModalBase } from '../components/ui/ModalBase';
+import { ToastAlert } from '../components/ui/ToastAlert';
 import '../styles/EstudianteDetalle.css';
 import '../styles/DefinirServicioModal.css';
 
@@ -134,6 +136,7 @@ export const EstudianteDetalle = () => {
   const [runtNumero, setRuntNumero] = useState('');
   const [runtError, setRuntError] = useState('');
   const [runtSaving, setRuntSaving] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: 'error' | 'info' | 'success'; message: string } | null>(null);
   const [editForm, setEditForm] = useState({
     primer_nombre: '',
     segundo_nombre: '',
@@ -186,7 +189,7 @@ export const EstudianteDetalle = () => {
       setEstudiante(data);
     } catch (err) {
       console.error('Error al cargar estudiante:', err);
-      setError('Error al cargar los datos del estudiante');
+      setError('No se pudieron cargar los datos del estudiante.');
     } finally {
       setIsLoading(false);
     }
@@ -207,7 +210,7 @@ export const EstudianteDetalle = () => {
       });
     } catch (err) {
       console.error('Error al descargar contrato:', err);
-      alert('No se pudo cargar el contrato');
+      setFeedback({ type: 'error', message: 'No se pudo cargar el contrato.' });
     }
   };
 
@@ -226,7 +229,7 @@ export const EstudianteDetalle = () => {
       });
     } catch (err: any) {
       console.error('Error al descargar Habeas firmado:', err);
-      alert(err?.response?.data?.detail || 'No se pudo cargar el Habeas firmado');
+      setFeedback({ type: 'error', message: err?.response?.data?.detail || 'No se pudo cargar el Habeas firmado.' });
     }
   };
 
@@ -257,7 +260,7 @@ export const EstudianteDetalle = () => {
       await abrirCertificadoPreview();
     } catch (err: any) {
       console.error('Error al generar certificado:', err);
-      alert(err?.response?.data?.detail || 'No se pudo generar el certificado.');
+      setFeedback({ type: 'error', message: err?.response?.data?.detail || 'No se pudo generar el certificado.' });
     }
   };
 
@@ -265,7 +268,7 @@ export const EstudianteDetalle = () => {
     if (!id) return;
     const runtNormalizado = runtNumero.trim().toUpperCase();
     if (!/^[A-Z0-9/-]{4,40}$/.test(runtNormalizado)) {
-      setRuntError("Numero RUNT invalido. Usa 4-40 caracteres alfanumericos, '-' o '/'.");
+      setRuntError("Número RUNT inválido. Usa 4-40 caracteres alfanuméricos, '-' o '/'.");
       return;
     }
     setRuntSaving(true);
@@ -276,8 +279,8 @@ export const EstudianteDetalle = () => {
       setShowRuntModal(false);
       await abrirCertificadoPreview();
     } catch (err: any) {
-      console.error('Error al guardar numero RUNT:', err);
-      setRuntError(err?.response?.data?.detail || 'No se pudo guardar el numero RUNT.');
+      console.error('Error al guardar número RUNT:', err);
+      setRuntError(err?.response?.data?.detail || 'No se pudo guardar el número RUNT.');
     } finally {
       setRuntSaving(false);
     }
@@ -436,7 +439,7 @@ export const EstudianteDetalle = () => {
       setEstudiante(actualizado);
       setShowCorregirModal(false);
     } catch (err: any) {
-      setCorregirError(err.response?.data?.detail || 'Error al corregir el servicio');
+      setCorregirError(err.response?.data?.detail || 'No se pudo corregir el servicio.');
     } finally {
       setCorregirLoading(false);
     }
@@ -553,7 +556,7 @@ export const EstudianteDetalle = () => {
       setShowAmpliarModal(false);
     } catch (err: any) {
       console.error('Error al ampliar servicio:', err);
-      setAmpliarError(err.response?.data?.detail || 'Error al ampliar el servicio');
+      setAmpliarError(err.response?.data?.detail || 'No se pudo ampliar el servicio.');
     } finally {
       setAmpliarSaving(false);
     }
@@ -692,10 +695,10 @@ export const EstudianteDetalle = () => {
   const saldoAlDia = Number(estudiante?.saldo_pendiente ?? 0) <= 0;
   const estadoCertificable = ['LISTO_EXAMEN', 'GRADUADO'].includes(estudiante?.estado || '');
   const certificadoBloqueos = [
-    !teoricasCompletas ? 'Horas teoricas incompletas' : '',
-    !practicasCompletas ? 'Horas practicas incompletas' : '',
+    !teoricasCompletas ? 'Horas teóricas incompletas' : '',
+    !practicasCompletas ? 'Horas prácticas incompletas' : '',
     !saldoAlDia ? 'Saldo pendiente' : '',
-    !estadoCertificable ? 'Estado academico no habilitado' : '',
+    !estadoCertificable ? 'Estado académico no habilitado' : '',
   ].filter(Boolean);
   const puedeGenerarCertificado = certificadoBloqueos.length === 0;
 
@@ -721,15 +724,17 @@ export const EstudianteDetalle = () => {
 
   return (
     <div className="estudiante-detalle-container">
+      {feedback && (
+        <ToastAlert type={feedback.type} message={feedback.message} onClose={() => setFeedback(null)} />
+      )}
       {showEditModal && (
-      <div className="modal-overlay">
-          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Editar Estudiante</h2>
-              <button className="btn-close" onClick={() => setShowEditModal(false)}>
-                ✕
-              </button>
-            </div>
+        <ModalBase
+          isOpen={showEditModal}
+          title="Editar Estudiante"
+          onClose={() => setShowEditModal(false)}
+          closeDisabled={isSaving}
+          size="lg"
+        >
             <form className="modal-form" onSubmit={(e) => e.preventDefault()}>
               {editError && <div className="error-message">{editError}</div>}
               <div className="form-group">
@@ -936,27 +941,25 @@ export const EstudianteDetalle = () => {
                   onChange={(e) => handleEditChange('contacto_emergencia_telefono', e.target.value)}
                 />
               </div>
-              <div className="modal-footer" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                <button type="button" className="btn-outline" onClick={() => setShowEditModal(false)}>
+              <div className="modal-footer">
+                <button type="button" className="btn-secondary" onClick={() => setShowEditModal(false)}>
                   Cancelar
                 </button>
-                <button type="button" className="btn" onClick={handleGuardarEdicion} disabled={isSaving}>
+                <button type="button" className="btn-primary" onClick={handleGuardarEdicion} disabled={isSaving}>
                   {isSaving ? 'Guardando...' : 'Guardar'}
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </ModalBase>
       )}
       {showAmpliarModal && (
-        <div className="modal-overlay">
-          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Ampliar Servicio a Combo</h2>
-              <button className="btn-close" onClick={() => setShowAmpliarModal(false)}>
-                ✕
-              </button>
-            </div>
+        <ModalBase
+          isOpen={showAmpliarModal}
+          title="Ampliar Servicio a Combo"
+          onClose={() => setShowAmpliarModal(false)}
+          closeDisabled={ampliarSaving}
+          size="md"
+        >
             <form className="modal-form" onSubmit={(e) => e.preventDefault()}>
               {ampliarError && <div className="error-message">{ampliarError}</div>}
               <div className="form-group">
@@ -1026,27 +1029,25 @@ export const EstudianteDetalle = () => {
                   placeholder="OBSERVACIONES (OPCIONAL)"
                 />
               </div>
-              <div className="modal-footer" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                <button type="button" className="btn-outline" onClick={() => setShowAmpliarModal(false)}>
+              <div className="modal-footer">
+                <button type="button" className="btn-secondary" onClick={() => setShowAmpliarModal(false)}>
                   Cancelar
                 </button>
-                <button type="button" className="btn" onClick={handleGuardarAmpliacion} disabled={ampliarSaving}>
+                <button type="button" className="btn-primary" onClick={handleGuardarAmpliacion} disabled={ampliarSaving}>
                   {ampliarSaving ? 'Guardando...' : 'Guardar'}
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </ModalBase>
       )}
       {showCorregirModal && (
-        <div className="modal-overlay">
-          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Corregir servicio</h2>
-              <button className="btn-close" onClick={cerrarCorregirServicio}>
-                ✕
-              </button>
-            </div>
+        <ModalBase
+          isOpen={showCorregirModal}
+          title="Corregir servicio"
+          onClose={cerrarCorregirServicio}
+          closeDisabled={corregirLoading}
+          size="md"
+        >
             <form className="modal-form" onSubmit={(e) => e.preventDefault()}>
               {corregirError && <div className="error-message">{corregirError}</div>}
               <div className="form-group">
@@ -1103,31 +1104,29 @@ export const EstudianteDetalle = () => {
                   required
                 />
               </div>
-              <div className="modal-footer" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                <button type="button" className="btn-outline" onClick={cerrarCorregirServicio}>
+              <div className="modal-footer">
+                <button type="button" className="btn-secondary" onClick={cerrarCorregirServicio}>
                   Cancelar
                 </button>
-                <button type="button" className="btn" onClick={guardarCorreccionServicio} disabled={corregirLoading}>
+                <button type="button" className="btn-primary" onClick={guardarCorreccionServicio} disabled={corregirLoading}>
                   {corregirLoading ? 'Guardando...' : 'Guardar'}
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </ModalBase>
       )}
       {showRuntModal && (
-        <div className="modal-overlay">
-          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2>Registrar numero RUNT</h2>
-              <button className="btn-close" onClick={() => setShowRuntModal(false)}>
-                ✕
-              </button>
-            </div>
+        <ModalBase
+          isOpen={showRuntModal}
+          title="Registrar número RUNT"
+          onClose={() => setShowRuntModal(false)}
+          closeDisabled={runtSaving}
+          size="md"
+        >
             <form className="modal-form" onSubmit={(e) => e.preventDefault()}>
               {runtError && <div className="error-message">{runtError}</div>}
               <div className="form-group">
-                <label>Numero RUNT del certificado *</label>
+                <label>Número RUNT del certificado *</label>
                 <input
                   className="form-input"
                   value={runtNumero}
@@ -1137,40 +1136,41 @@ export const EstudianteDetalle = () => {
                   autoFocus
                 />
                 <small className="help-text">
-                  Este dato se solicita una sola vez y quedara bloqueado para el certificado.
+                  Este dato se solicita una sola vez y quedará bloqueado para el certificado.
                 </small>
               </div>
-              <div className="modal-footer" style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-                <button type="button" className="btn-outline" onClick={() => setShowRuntModal(false)}>
+              <div className="modal-footer">
+                <button type="button" className="btn-secondary" onClick={() => setShowRuntModal(false)}>
                   Cancelar
                 </button>
-                <button type="button" className="btn" onClick={guardarRuntYGenerar} disabled={runtSaving}>
+                <button type="button" className="btn-primary" onClick={guardarRuntYGenerar} disabled={runtSaving}>
                   {runtSaving ? 'Guardando...' : 'Guardar y generar'}
                 </button>
               </div>
             </form>
-          </div>
-        </div>
+        </ModalBase>
       )}
       {pdfPreview && (
-        <div className="pdf-preview-modal">
-          <div className="pdf-preview-content" onClick={(e) => e.stopPropagation()}>
-            <div className="pdf-preview-header">
-              <h3>{pdfPreview.title}</h3>
-              <div className="pdf-preview-actions">
-                <button className="btn-descargar" onClick={descargarPdfPreview}>
-                  <Download size={18} /> Descargar
-                </button>
-                <button className="btn-cerrar" onClick={cerrarPdfPreview}>
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div className="pdf-preview-body">
-              <iframe src={pdfPreview.url} title={pdfPreview.title} />
-            </div>
+        <ModalBase
+          isOpen={Boolean(pdfPreview)}
+          title={pdfPreview.title}
+          onClose={cerrarPdfPreview}
+          size="lg"
+          footer={
+            <>
+              <button type="button" className="btn-secondary" onClick={cerrarPdfPreview}>
+                Cerrar
+              </button>
+              <button type="button" className="btn-primary" onClick={descargarPdfPreview}>
+                <Download size={16} /> Descargar
+              </button>
+            </>
+          }
+        >
+          <div className="pdf-preview-body">
+            <iframe src={pdfPreview.url} title={pdfPreview.title} />
           </div>
-        </div>
+        </ModalBase>
       )}
       {/* Header */}
       <div className="detalle-header">

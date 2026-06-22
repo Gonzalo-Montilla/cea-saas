@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Car, Plus, Search, X, Pencil, Trash2, Eye } from 'lucide-react';
+import { Car, Plus, Search, Pencil, Trash2, Eye } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { instructoresAPI, uploadsAPI, vehiculosAPI } from '../services/api';
 import '../styles/Vehiculos.css';
 import { useNavigate } from 'react-router-dom';
+import { ModalBase } from '../components/ui/ModalBase';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { ToastAlert } from '../components/ui/ToastAlert';
 
 interface Vehiculo {
   id: number;
@@ -25,6 +28,7 @@ interface Vehiculo {
 }
 
 const tiposVehiculo = ['MOTO', 'AUTO', 'CAMION', 'BUS', 'OTRO'];
+type ToastType = 'success' | 'error' | 'info';
 
 export const Vehiculos = () => {
   const navigate = useNavigate();
@@ -41,6 +45,10 @@ export const Vehiculos = () => {
 
   const [mostrarModal, setMostrarModal] = useState(false);
   const [vehiculoEditar, setVehiculoEditar] = useState<Vehiculo | null>(null);
+  const [vehiculoEliminar, setVehiculoEliminar] = useState<Vehiculo | null>(null);
+  const [guardandoVehiculo, setGuardandoVehiculo] = useState(false);
+  const [eliminandoVehiculo, setEliminandoVehiculo] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: ToastType; message: string } | null>(null);
 
   const [placa, setPlaca] = useState('');
   const [tipo, setTipo] = useState('');
@@ -58,6 +66,13 @@ export const Vehiculos = () => {
   const [fotoArchivo, setFotoArchivo] = useState<File | null>(null);
   const [responsableId, setResponsableId] = useState('');
   const [instructores, setInstructores] = useState<any[]>([]);
+
+  const getErrorMessage = (err: any, fallback: string) => {
+    const detail = err?.response?.data?.detail;
+    if (Array.isArray(detail)) return detail[0]?.msg || fallback;
+    if (typeof detail === 'string') return detail;
+    return fallback;
+  };
 
   useEffect(() => {
     const handler = setTimeout(() => {
@@ -103,7 +118,7 @@ export const Vehiculos = () => {
       setTotalVehiculos(response.total || 0);
     } catch (err) {
       console.error('Error al cargar vehículos:', err);
-      setError('Error al cargar la lista de vehículos');
+      setError('No se pudo cargar la lista de vehículos.');
       setVehiculos([]);
     } finally {
       setLoading(false);
@@ -127,6 +142,7 @@ export const Vehiculos = () => {
     setFotoUrl('');
     setFotoArchivo(null);
     setResponsableId('');
+    setError('');
     setMostrarModal(true);
   };
 
@@ -147,6 +163,7 @@ export const Vehiculos = () => {
     setFotoUrl(vehiculo.foto_url || '');
     setFotoArchivo(null);
     setResponsableId(vehiculo.responsable_instructor_id ? String(vehiculo.responsable_instructor_id) : '');
+    setError('');
     setMostrarModal(true);
   };
 
@@ -159,17 +176,16 @@ export const Vehiculos = () => {
         setFotoUrl(res.foto_url);
         setFotoArchivo(file);
       } catch (err: any) {
-        const detail = err?.response?.data?.detail;
-        const msg = Array.isArray(detail) ? detail[0]?.msg : detail;
-        alert(msg || 'Error al subir foto');
+        setFeedback({ type: 'error', message: getErrorMessage(err, 'No se pudo subir la foto.') });
       }
     };
     reader.readAsDataURL(file);
   };
 
   const guardarVehiculo = async () => {
+    if (guardandoVehiculo) return;
     if (!placa.trim()) {
-      alert('La placa es obligatoria');
+      setFeedback({ type: 'info', message: 'La placa es obligatoria.' });
       return;
     }
     const payload = {
@@ -189,26 +205,39 @@ export const Vehiculos = () => {
       responsable_instructor_id: responsableId ? parseInt(responsableId, 10) : null
     };
     try {
+      setGuardandoVehiculo(true);
       if (vehiculoEditar) {
         await vehiculosAPI.update(vehiculoEditar.id, payload);
+        setFeedback({ type: 'success', message: `Vehículo ${payload.placa} actualizado con éxito.` });
       } else {
         await vehiculosAPI.create(payload);
+        setFeedback({ type: 'success', message: `Vehículo ${payload.placa} creado con éxito.` });
       }
       setMostrarModal(false);
       await cargarVehiculos();
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Error al guardar el vehículo');
+      setFeedback({ type: 'error', message: getErrorMessage(err, 'No se pudo guardar el vehículo.') });
+    } finally {
+      setGuardandoVehiculo(false);
     }
   };
 
-  const eliminarVehiculo = async (vehiculo: Vehiculo) => {
-    const confirmacion = window.confirm(`¿Desactivar el vehículo ${vehiculo.placa}?`);
-    if (!confirmacion) return;
+  const eliminarVehiculo = (vehiculo: Vehiculo) => {
+    setVehiculoEliminar(vehiculo);
+  };
+
+  const confirmarEliminarVehiculo = async () => {
+    if (!vehiculoEliminar || eliminandoVehiculo) return;
     try {
-      await vehiculosAPI.delete(vehiculo.id);
+      setEliminandoVehiculo(true);
+      await vehiculosAPI.delete(vehiculoEliminar.id);
+      setFeedback({ type: 'success', message: `Vehículo ${vehiculoEliminar.placa} desactivado con éxito.` });
       await cargarVehiculos();
+      setVehiculoEliminar(null);
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Error al desactivar el vehículo');
+      setFeedback({ type: 'error', message: getErrorMessage(err, 'No se pudo desactivar el vehículo.') });
+    } finally {
+      setEliminandoVehiculo(false);
     }
   };
 
@@ -302,14 +331,29 @@ export const Vehiculos = () => {
                         </span>
                       </td>
                       <td className="acciones">
-                        <button className="btn-icon" onClick={() => navigate(`/vehiculos/${vehiculo.id}`)} title="Hoja de vida">
+                        <button
+                          className="btn-icon"
+                          onClick={() => navigate(`/vehiculos/${vehiculo.id}`)}
+                          title="Ver hoja de vida"
+                          aria-label={`Ver hoja de vida de ${vehiculo.placa}`}
+                        >
                           <Eye size={16} />
                         </button>
-                        <button className="btn-icon" onClick={() => abrirModalEditar(vehiculo)}>
+                        <button
+                          className="btn-icon"
+                          onClick={() => abrirModalEditar(vehiculo)}
+                          title="Editar vehículo"
+                          aria-label={`Editar vehículo ${vehiculo.placa}`}
+                        >
                           <Pencil size={16} />
                         </button>
                         {vehiculo.is_active && (
-                          <button className="btn-icon danger" onClick={() => eliminarVehiculo(vehiculo)}>
+                          <button
+                            className="btn-icon danger"
+                            onClick={() => eliminarVehiculo(vehiculo)}
+                            title="Desactivar vehículo"
+                            aria-label={`Desactivar vehículo ${vehiculo.placa}`}
+                          >
                             <Trash2 size={16} />
                           </button>
                         )}
@@ -335,16 +379,33 @@ export const Vehiculos = () => {
         </div>
       )}
 
+      {feedback && (
+        <ToastAlert
+          type={feedback.type}
+          message={feedback.message}
+          onClose={() => setFeedback(null)}
+        />
+      )}
+
       {mostrarModal && (
-      <div className="modal-overlay">
-          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>{vehiculoEditar ? 'Editar Vehículo' : 'Nuevo Vehículo'}</h3>
-              <button className="btn-icon" onClick={() => setMostrarModal(false)}>
-                <X size={20} />
+        <ModalBase
+          isOpen={mostrarModal}
+          title={vehiculoEditar ? 'Editar Vehículo' : 'Nuevo Vehículo'}
+          onClose={() => setMostrarModal(false)}
+          closeDisabled={guardandoVehiculo}
+          size="md"
+          footer={
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setMostrarModal(false)} disabled={guardandoVehiculo}>
+                Cancelar
+              </button>
+              <button className="btn-primary" onClick={() => void guardarVehiculo()} disabled={guardandoVehiculo}>
+                {guardandoVehiculo ? 'Guardando...' : 'Guardar'}
               </button>
             </div>
-            <div className="modal-body">
+          }
+        >
+          <div className="modal-body">
               <div className="form-group">
                 <label>Placa *</label>
                 <input value={placa} onChange={(e) => setPlaca(e.target.value.toUpperCase())} />
@@ -442,18 +503,21 @@ export const Vehiculos = () => {
                   </label>
                 </div>
               )}
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setMostrarModal(false)}>
-                Cancelar
-              </button>
-              <button className="btn-primary" onClick={guardarVehiculo}>
-                Guardar
-              </button>
-            </div>
           </div>
-        </div>
+        </ModalBase>
       )}
+
+      <ConfirmDialog
+        isOpen={Boolean(vehiculoEliminar)}
+        title="Desactivar vehículo"
+        message={`¿Deseas desactivar el vehículo ${vehiculoEliminar?.placa || ''}?`}
+        confirmText="Sí, desactivar"
+        cancelText="Cancelar"
+        confirmVariant="danger"
+        isLoading={eliminandoVehiculo}
+        onCancel={() => setVehiculoEliminar(null)}
+        onConfirm={() => void confirmarEliminarVehiculo()}
+      />
     </div>
   );
 };

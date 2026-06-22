@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { Banknote, CreditCard, Wallet, Download } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { cajaFuerteAPI } from '../services/api';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { ToastAlert } from '../components/ui/ToastAlert';
 import '../styles/CajaFuerte.css';
 
 const DENOMINACIONES = [100000, 50000, 20000, 10000, 5000, 2000, 1000, 500, 200, 100, 50];
@@ -59,6 +61,9 @@ export default function CajaFuerte() {
   const [categoriaSeleccionada, setCategoriaSeleccionada] = useState('OTROS');
   const [categoriaCustom, setCategoriaCustom] = useState('');
   const [editandoId, setEditandoId] = useState<number | null>(null);
+  const [eliminarMovimientoId, setEliminarMovimientoId] = useState<number | null>(null);
+  const [eliminandoMovimiento, setEliminandoMovimiento] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
   const totalMovimiento = useMemo(
     () => movDenoms.reduce((acc, item) => acc + item.denominacion * item.cantidad, 0),
@@ -154,7 +159,7 @@ export default function CajaFuerte() {
         };
         if (form.metodo_pago === 'EFECTIVO') {
           if (totalMovimiento !== Number(form.monto)) {
-            alert('Las denominaciones no cuadran con el monto del movimiento.');
+            setFeedback({ type: 'info', message: 'Las denominaciones no cuadran con el monto del movimiento.' });
             return;
           }
           payloadUpdate.inventario_items = movDenoms.map((i) => ({
@@ -174,7 +179,7 @@ export default function CajaFuerte() {
         };
         if (form.metodo_pago === 'EFECTIVO') {
           if (totalMovimiento !== Number(form.monto)) {
-            alert('Las denominaciones no cuadran con el monto del movimiento.');
+            setFeedback({ type: 'info', message: 'Las denominaciones no cuadran con el monto del movimiento.' });
             return;
           }
           payload.inventario_items = movDenoms.map((i) => ({
@@ -184,8 +189,12 @@ export default function CajaFuerte() {
         }
         await cajaFuerteAPI.crearMovimiento(payload);
       }
+      setFeedback({
+        type: 'success',
+        message: editandoId ? 'Movimiento actualizado con éxito.' : 'Movimiento registrado con éxito.',
+      });
     } catch (error: any) {
-      alert(error?.response?.data?.detail || 'Error al registrar el movimiento');
+      setFeedback({ type: 'error', message: error?.response?.data?.detail || 'No se pudo registrar el movimiento.' });
       return;
     }
     setForm({
@@ -234,14 +243,22 @@ export default function CajaFuerte() {
     }
   };
 
-  const handleEliminar = async (id: number) => {
-    const ok = window.confirm('¿Eliminar este movimiento?');
-    if (!ok) return;
+  const handleEliminar = (id: number) => {
+    setEliminarMovimientoId(id);
+  };
+
+  const confirmarEliminar = async () => {
+    if (!eliminarMovimientoId || eliminandoMovimiento) return;
     try {
-      await cajaFuerteAPI.eliminarMovimiento(id);
+      setEliminandoMovimiento(true);
+      await cajaFuerteAPI.eliminarMovimiento(eliminarMovimientoId);
+      setFeedback({ type: 'success', message: 'Movimiento eliminado con éxito.' });
       await cargarTodo();
     } catch (error: any) {
-      alert(error?.response?.data?.detail || 'Error al eliminar el movimiento');
+      setFeedback({ type: 'error', message: error?.response?.data?.detail || 'No se pudo eliminar el movimiento.' });
+    } finally {
+      setEliminandoMovimiento(false);
+      setEliminarMovimientoId(null);
     }
   };
 
@@ -263,12 +280,16 @@ export default function CajaFuerte() {
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch (error: any) {
-      alert(error?.response?.data?.detail || 'No se pudo generar el recibo');
+      setFeedback({ type: 'error', message: error?.response?.data?.detail || 'No se pudo generar el recibo.' });
     }
   };
 
   return (
     <div className="caja-fuerte-container">
+      {feedback && (
+        <ToastAlert type={feedback.type} message={feedback.message} onClose={() => setFeedback(null)} />
+      )}
+
       <PageHeader
         title="Caja Fuerte"
         subtitle="Control de fondos y movimientos"
@@ -510,6 +531,18 @@ export default function CajaFuerte() {
           </table>
         </div>
       </div>
+
+      <ConfirmDialog
+        isOpen={Boolean(eliminarMovimientoId)}
+        title="Eliminar movimiento"
+        message="¿Eliminar este movimiento de caja fuerte?"
+        confirmText="Sí, eliminar"
+        cancelText="Cancelar"
+        confirmVariant="danger"
+        isLoading={eliminandoMovimiento}
+        onCancel={() => setEliminarMovimientoId(null)}
+        onConfirm={() => void confirmarEliminar()}
+      />
     </div>
   );
 }

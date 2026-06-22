@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react';
 import { History, Search, X, FileText, ChevronDown, ChevronUp } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { cajaAPI } from '../services/api';
+import { ModalBase } from '../components/ui/ModalBase';
+import { ToastAlert } from '../components/ui/ToastAlert';
 import '../styles/HistorialCajas.css';
 
 interface CajaHistorial {
@@ -42,6 +44,7 @@ export const HistorialCajas = () => {
   const [showDetalleModal, setShowDetalleModal] = useState(false);
   const [expandirResumen, setExpandirResumen] = useState(false);
   const [paginaActual, setPaginaActual] = useState(1);
+  const [notificacion, setNotificacion] = useState<string | null>(null);
   const cajasPorPagina = 15;
 
   useEffect(() => {
@@ -82,7 +85,7 @@ export const HistorialCajas = () => {
 
   const handleFiltrar = () => {
     if (fechaInicio && fechaFin && new Date(fechaInicio) > new Date(fechaFin)) {
-      alert('La fecha de inicio no puede ser mayor a la fecha fin');
+      setNotificacion('La fecha de inicio no puede ser mayor a la fecha fin.');
       return;
     }
     setPaginaActual(1);
@@ -154,6 +157,14 @@ export const HistorialCajas = () => {
         subtitle="Consulta todas las cajas cerradas"
         icon={<History size={20} />}
       />
+
+      {notificacion && (
+        <ToastAlert
+          type="info"
+          message={notificacion}
+          onClose={() => setNotificacion(null)}
+        />
+      )}
 
       {/* Filtros */}
       <div className="filtros-section">
@@ -272,19 +283,13 @@ export const HistorialCajas = () => {
 
       {/* Modal de detalle */}
       {showDetalleModal && cajaSeleccionada && (
-      <div className="modal-overlay">
-          <div className="modal-content-historial" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header-historial">
-              <h2>Detalle de Caja #{cajaSeleccionada.id}</h2>
-              <button
-                onClick={() => setShowDetalleModal(false)}
-                className="btn-cerrar-modal"
-              >
-                <X size={24} />
-              </button>
-            </div>
-
-            <div className="modal-body-historial">
+        <ModalBase
+          isOpen={showDetalleModal}
+          title={`Detalle de Caja #${cajaSeleccionada.id}`}
+          onClose={() => setShowDetalleModal(false)}
+          size="lg"
+        >
+          <div className="modal-body-historial">
               {/* Información general */}
               <div className="seccion-detalle">
                 <h3>Información General</h3>
@@ -320,13 +325,19 @@ export const HistorialCajas = () => {
 
               {/* Resumen de transacciones */}
               <div className="seccion-detalle seccion-colapsable">
-                <h3 onClick={() => setExpandirResumen(!expandirResumen)} className="titulo-colapsable">
+                <button
+                  type="button"
+                  onClick={() => setExpandirResumen(!expandirResumen)}
+                  className="titulo-colapsable"
+                  aria-expanded={expandirResumen}
+                  aria-controls="historial-resumen-transacciones"
+                >
                   Resumen de Transacciones
                   {expandirResumen ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
-                </h3>
+                </button>
                 
                 {expandirResumen && (
-                  <div className="transacciones-grid">
+                  <div className="transacciones-grid" id="historial-resumen-transacciones">
                     <div className="metodo-grupo">
                       <h4>Efectivo</h4>
                       <div className="metodo-item">
@@ -461,9 +472,8 @@ export const HistorialCajas = () => {
                   Descargar PDF
                 </button>
               </div>
-            </div>
           </div>
-        </div>
+        </ModalBase>
       )}
     </div>
   );

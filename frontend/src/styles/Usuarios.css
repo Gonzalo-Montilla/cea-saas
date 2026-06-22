@@ -50,15 +50,31 @@
   margin-bottom: 8px;
 }
 
+.usuarios-meta {
+  margin-top: -4px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
 .search-box {
   position: relative;
   max-width: 420px;
   width: 100%;
 }
 
+.search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
 .search-input {
   width: 100%;
-  padding: 12px 12px 12px 16px;
+  padding: 12px 12px 12px 36px;
   border: 1px solid var(--border);
   border-radius: 12px;
   font-size: 15px;
@@ -74,6 +90,117 @@
 .btn-search {
   padding: 12px 20px;
   font-size: 14px;
+}
+
+.search-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.btn-search-clear {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 10px 12px;
+}
+
+.btn-search-clear:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.roles-guia-bloque {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.roles-guia-header {
+  width: 100%;
+  border: none;
+  background: var(--surface-2);
+  padding: 14px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.roles-guia-header:hover {
+  background: #eef2f7;
+}
+
+.roles-guia-header-text h3 {
+  margin: 0;
+  font-size: 18px;
+  color: var(--text-primary);
+}
+
+.roles-guia-header-text p {
+  margin: 4px 0 0 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.roles-guia-chevron {
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.roles-guia-chevron.collapsed {
+  transform: rotate(-90deg);
+}
+
+.roles-guia-content {
+  padding: 12px;
+}
+
+.roles-guia-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.roles-guia-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  padding: 12px;
+}
+
+.roles-guia-card h4 {
+  margin: 0 0 6px 0;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.roles-guia-card p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.roles-guia-nota {
+  margin-top: 10px;
+  border-left: 3px solid var(--primary);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  border-radius: 8px;
 }
 
 .usuarios-table table {
@@ -104,6 +231,12 @@
   margin-top: 6px;
 }
 
+.permisos-resumen {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
 .modulo-item {
   display: flex;
   align-items: center;
@@ -120,77 +253,12 @@
   transform: scale(1.05);
 }
 
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2000;
-  backdrop-filter: blur(3px);
-}
-
-.modal-box {
-  width: 90%;
-  max-width: 720px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-md);
-  overflow: hidden;
-}
-
-.modal-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 18px 20px;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
-}
-
-.modal-header h3 {
-  margin: 0;
-  font-size: 18px;
-  color: var(--text-primary);
-  font-weight: 700;
-}
-
-.modal-body {
-  padding: 18px 20px;
-  max-height: 70vh;
-  overflow: auto;
-}
-
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  padding: 16px 20px;
-  border-top: 1px solid var(--border);
-  background: var(--surface-2);
-}
-
-.modal-footer .btn-secondary,
-.modal-footer .btn-primary {
-  min-width: 120px;
-  padding: 10px 16px;
-  border-radius: 8px;
-  font-weight: 600;
-  font-size: 14px;
-}
-
-.modal-footer .btn-secondary {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--text-primary);
-}
-
-.modal-footer .btn-primary {
-  background: var(--primary);
-  color: #fff;
-  border: 1px solid var(--primary);
+.modal-footer .btn-secondary:disabled,
+.modal-footer .btn-primary:disabled,
+.btn-icon:disabled,
+.btn-search-clear:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 @media (max-width: 1024px) {
@@ -208,22 +276,13 @@
   }
 
   .btn-search {
+    flex: 1;
+  }
+
+  .search-actions {
     width: 100%;
   }
 }
 
 @media (max-width: 768px) {
-  .modal-box {
-    width: calc(100vw - 16px);
-    max-height: 88vh;
-  }
-
-  .modal-footer {
-    flex-wrap: wrap;
-  }
-
-  .modal-footer .btn-secondary,
-  .modal-footer .btn-primary {
-    width: 100%;
-  }
 }

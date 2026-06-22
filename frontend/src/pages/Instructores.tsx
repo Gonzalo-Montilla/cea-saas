@@ -78,7 +78,7 @@ export const Instructores = () => {
       setTotalInstructores(response.total || 0);
     } catch (err) {
       console.error('Error al cargar instructores:', err);
-      setError('Error al cargar la lista de instructores');
+      setError('No se pudo cargar la lista de instructores.');
       setInstructores([]);
     } finally {
       setIsLoading(false);

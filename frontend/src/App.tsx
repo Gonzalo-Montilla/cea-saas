@@ -67,7 +67,7 @@ const hasModuleAccess = (user: any, moduleId: string, roles: RolUsuario[]) => {
 const RoleRoute = ({ children, roles, moduleId }: { children: React.ReactNode; roles: RolUsuario[]; moduleId: string }) => {
   const { isAuthenticated, isLoading, user } = useAuth();
   if (isLoading) {
-    return <div>Cargando...</div>;
+    return <div className="loading-container">Cargando...</div>;
   }
   if (!isAuthenticated) {
     return <Navigate to="/login" />;
@@ -84,7 +84,7 @@ const RoleRoute = ({ children, roles, moduleId }: { children: React.ReactNode; r
 const PublicRoute = ({ children }: { children: React.ReactNode }) => {
   const { isAuthenticated, isLoading, user } = useAuth();
   if (isLoading) {
-    return <div>Cargando...</div>;
+    return <div className="loading-container">Cargando...</div>;
   }
   return !isAuthenticated ? <>{children}</> : <Navigate to={getHomeRoute(user || undefined)} />;
 };
@@ -92,7 +92,7 @@ const PublicRoute = ({ children }: { children: React.ReactNode }) => {
 const HomeRedirect = () => {
   const { isAuthenticated, isLoading, user } = useAuth();
   if (isLoading) {
-    return <div>Cargando...</div>;
+    return <div className="loading-container">Cargando...</div>;
   }
   if (!isAuthenticated) {
     return <Navigate to="/login" />;
@@ -102,7 +102,7 @@ const HomeRedirect = () => {
 
 const SaasAdminRoute = ({ children }: { children: React.ReactNode }) => {
   const { isAuthenticated, isLoading, user } = useAuth();
-  if (isLoading) return <div>Cargando...</div>;
+  if (isLoading) return <div className="loading-container">Cargando...</div>;
   if (!isAuthenticated) return <Navigate to="/login-saas" />;
   if (user?.must_change_password) return <Navigate to="/saas-cambiar-password" />;
   if (!isSaasAdminUser(user || undefined)) return <Navigate to={getHomeRoute(user || undefined)} />;
@@ -111,7 +111,7 @@ const SaasAdminRoute = ({ children }: { children: React.ReactNode }) => {
 
 const SaasForcePasswordRoute = ({ children }: { children: React.ReactNode }) => {
   const { isAuthenticated, isLoading, user, getAuthMode } = useAuth();
-  if (isLoading) return <div>Cargando...</div>;
+  if (isLoading) return <div className="loading-container">Cargando...</div>;
   if (!isAuthenticated) return <Navigate to="/login-saas" />;
   if (getAuthMode() !== 'global') return <Navigate to={getHomeRoute(user || undefined)} />;
   if (!user?.must_change_password) return <Navigate to={getHomeRoute(user || undefined)} />;
@@ -120,7 +120,7 @@ const SaasForcePasswordRoute = ({ children }: { children: React.ReactNode }) => 
 
 const TenantRoute = ({ children }: { children: React.ReactNode }) => {
   const { isAuthenticated, isLoading, user, getAuthMode } = useAuth();
-  if (isLoading) return <div>Cargando...</div>;
+  if (isLoading) return <div className="loading-container">Cargando...</div>;
   if (!isAuthenticated) return <Navigate to="/login" />;
   if (getAuthMode() === 'global') return <Navigate to={getHomeRoute(user || undefined)} />;
   return <>{children}</>;

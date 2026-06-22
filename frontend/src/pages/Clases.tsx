@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Search, Clock, User, Calendar, Download, CheckCircle2, XCircle, CalendarClock } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
+import { ModalBase } from '../components/ui/ModalBase';
 import { clasesAPI, estudiantesAPI, instructoresAPI, vehiculosAPI, type ClaseItem } from '../services/api';
 import '../styles/Clases.css';
 
@@ -800,13 +801,31 @@ export const Clases = () => {
                     <td>
                       {clase.estado === 'PROGRAMADA' ? (
                         <div className="agenda-actions">
-                          <button type="button" className="btn-icon-action info" onClick={() => openActionModal('REPROGRAMAR', clase)}>
+                          <button
+                            type="button"
+                            className="btn-icon-action info"
+                            onClick={() => openActionModal('REPROGRAMAR', clase)}
+                            title="Reprogramar clase"
+                            aria-label={`Reprogramar clase de ${clase.estudiante_nombre}`}
+                          >
                             <CalendarClock size={16} />
                           </button>
-                          <button type="button" className="btn-icon-action success" onClick={() => openActionModal('COMPLETAR', clase)}>
+                          <button
+                            type="button"
+                            className="btn-icon-action success"
+                            onClick={() => openActionModal('COMPLETAR', clase)}
+                            title="Completar clase"
+                            aria-label={`Marcar como completada la clase de ${clase.estudiante_nombre}`}
+                          >
                             <CheckCircle2 size={16} />
                           </button>
-                          <button type="button" className="btn-icon-action danger" onClick={() => openActionModal('CANCELAR', clase)}>
+                          <button
+                            type="button"
+                            className="btn-icon-action danger"
+                            onClick={() => openActionModal('CANCELAR', clase)}
+                            title="Cancelar clase"
+                            aria-label={`Cancelar clase de ${clase.estudiante_nombre}`}
+                          >
                             <XCircle size={16} />
                           </button>
                         </div>
@@ -823,18 +842,30 @@ export const Clases = () => {
       </div>
 
       {modalAction && claseSeleccionada && (
-        <div className="clases-modal-overlay" onClick={closeActionModal}>
-          <div className="clases-modal-box" onClick={(e) => e.stopPropagation()}>
-            <div className="clases-modal-header">
-              <h3>
-                {modalAction === 'REPROGRAMAR' && 'Reprogramar clase'}
-                {modalAction === 'COMPLETAR' && 'Completar clase'}
-                {modalAction === 'CANCELAR' && 'Cancelar clase'}
-              </h3>
-              <button type="button" className="btn-icon-action" onClick={closeActionModal}>×</button>
+        <ModalBase
+          isOpen={Boolean(modalAction && claseSeleccionada)}
+          title={
+            modalAction === 'REPROGRAMAR'
+              ? 'Reprogramar clase'
+              : modalAction === 'COMPLETAR'
+                ? 'Completar clase'
+                : 'Cancelar clase'
+          }
+          onClose={closeActionModal}
+          closeDisabled={submittingModal}
+          size="md"
+          footer={
+            <div className="clases-modal-actions">
+              <button type="button" className="btn-secondary" onClick={closeActionModal} disabled={submittingModal}>
+                Cancelar
+              </button>
+              <button type="button" className="btn-primary" onClick={() => void submitActionModal()} disabled={submittingModal}>
+                {submittingModal ? 'Procesando...' : 'Confirmar'}
+              </button>
             </div>
-
-            <div className="clases-modal-body">
+          }
+        >
+          <div className="clases-modal-body">
               <p className="clases-modal-meta">
                 <strong>{claseSeleccionada.estudiante_nombre}</strong> • {new Date(claseSeleccionada.fecha_programada).toLocaleString('es-CO')}
               </p>
@@ -919,18 +950,8 @@ export const Clases = () => {
                   }
                 />
               </div>
-            </div>
-
-            <div className="clases-modal-actions">
-              <button type="button" className="btn-secondary" onClick={closeActionModal} disabled={submittingModal}>
-                Cerrar
-              </button>
-              <button type="button" className="btn-primary" onClick={() => void submitActionModal()} disabled={submittingModal}>
-                {submittingModal ? 'Procesando...' : 'Confirmar'}
-              </button>
-            </div>
           </div>
-        </div>
+        </ModalBase>
       )}
     </div>
   );

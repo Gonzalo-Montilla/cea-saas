@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { FileText, Download, Eye } from 'lucide-react';
 import { cajaAPI } from '../../services/api';
+import { ModalBase } from '../ui/ModalBase';
+import { ToastAlert } from '../ui/ToastAlert';
 
 interface PagoConcepto {
   pago_id: number;
@@ -23,6 +25,7 @@ export const TablaConceptosPagos = ({ pagos }: TablaConceptosPagosProps) => {
   const [reciboUrl, setReciboUrl] = useState<string | null>(null);
   const [reciboNombre, setReciboNombre] = useState<string>('');
   const [cargandoRecibo, setCargandoRecibo] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
 
   const formatearMoneda = (valor: string | null) => {
     if (!valor) return 'N/A';
@@ -68,7 +71,7 @@ export const TablaConceptosPagos = ({ pagos }: TablaConceptosPagosProps) => {
       setReciboNombre(`recibo_pago_${pagoId}.pdf`);
     } catch (err) {
       console.error('Error al cargar recibo:', err);
-      alert('No se pudo cargar el recibo');
+      setFeedback('No se pudo cargar el recibo.');
     } finally {
       setCargandoRecibo(false);
     }
@@ -97,7 +100,7 @@ export const TablaConceptosPagos = ({ pagos }: TablaConceptosPagosProps) => {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Error al descargar recibo:', err);
-      alert('No se pudo descargar el recibo');
+      setFeedback('No se pudo descargar el recibo.');
     }
   };
 
@@ -111,6 +114,9 @@ export const TablaConceptosPagos = ({ pagos }: TablaConceptosPagosProps) => {
 
   return (
     <div className="tabla-estudiantes-card">
+      {feedback && (
+        <ToastAlert type="error" message={feedback} onClose={() => setFeedback(null)} />
+      )}
       <div className="tabla-header">
         <div className="tabla-titulo">
           <FileText size={20} />
@@ -120,7 +126,7 @@ export const TablaConceptosPagos = ({ pagos }: TablaConceptosPagosProps) => {
       </div>
 
       {pagos.length === 0 ? (
-        <div className="tabla-empty">
+        <div className="tabla-empty" role="status" aria-live="polite">
           <FileText size={48} />
           <p>No hay pagos registrados en este período</p>
         </div>
@@ -182,24 +188,26 @@ export const TablaConceptosPagos = ({ pagos }: TablaConceptosPagosProps) => {
       )}
 
       {reciboUrl && (
-        <div className="pdf-preview-modal">
-          <div className="pdf-preview-content" onClick={(e) => e.stopPropagation()}>
-            <div className="pdf-preview-header">
-              <h3>Recibo de Pago</h3>
-              <div className="pdf-preview-actions">
-                <button className="btn-descargar" onClick={descargarRecibo}>
-                  <Download size={18} /> Descargar
-                </button>
-                <button className="btn-cerrar" onClick={cerrarRecibo}>
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div className="pdf-preview-body">
-              <iframe src={reciboUrl} title="Recibo de pago" />
-            </div>
+        <ModalBase
+          isOpen={Boolean(reciboUrl)}
+          title="Recibo de Pago"
+          onClose={cerrarRecibo}
+          size="lg"
+          footer={
+            <>
+              <button type="button" className="btn-secondary" onClick={cerrarRecibo}>
+                Cerrar
+              </button>
+              <button type="button" className="btn-primary" onClick={descargarRecibo}>
+                <Download size={16} /> Descargar
+              </button>
+            </>
+          }
+        >
+          <div className="pdf-preview-body">
+            <iframe src={reciboUrl} title="Recibo de pago" />
           </div>
-        </div>
+        </ModalBase>
       )}
     </div>
   );

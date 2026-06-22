@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { FilePlus, Eye, Download } from 'lucide-react';
 import { cajaAPI } from '../../services/api';
+import { ModalBase } from '../ui/ModalBase';
+import { ToastAlert } from '../ui/ToastAlert';
 
 interface OtrosIngresoItem {
   movimiento_id: number;
@@ -23,6 +25,7 @@ export const TablaOtrosIngresos = ({ ingresos }: TablaOtrosIngresosProps) => {
   const [reciboUrl, setReciboUrl] = useState<string | null>(null);
   const [reciboId, setReciboId] = useState<number | null>(null);
   const [cargandoRecibo, setCargandoRecibo] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
 
   const formatearMoneda = (valor: number) => {
     return new Intl.NumberFormat('es-CO', {
@@ -51,7 +54,7 @@ export const TablaOtrosIngresos = ({ ingresos }: TablaOtrosIngresosProps) => {
       setReciboId(movimientoId);
     } catch (error) {
       console.error('Error al abrir recibo:', error);
-      alert('No se pudo cargar el recibo');
+      setFeedback('No se pudo cargar el recibo.');
     } finally {
       setCargandoRecibo(false);
     }
@@ -70,7 +73,7 @@ export const TablaOtrosIngresos = ({ ingresos }: TablaOtrosIngresosProps) => {
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (error) {
       console.error('Error al descargar recibo:', error);
-      alert('No se pudo descargar el recibo');
+      setFeedback('No se pudo descargar el recibo.');
     }
   };
 
@@ -84,6 +87,9 @@ export const TablaOtrosIngresos = ({ ingresos }: TablaOtrosIngresosProps) => {
 
   return (
     <div className="tabla-estudiantes-card">
+      {feedback && (
+        <ToastAlert type="error" message={feedback} onClose={() => setFeedback(null)} />
+      )}
       <div className="tabla-header">
         <div className="tabla-titulo">
           <FilePlus size={20} />
@@ -92,7 +98,7 @@ export const TablaOtrosIngresos = ({ ingresos }: TablaOtrosIngresosProps) => {
         <span className="tabla-count">{ingresos.length} ingreso{ingresos.length !== 1 ? 's' : ''}</span>
       </div>
       {ingresos.length === 0 ? (
-        <div className="tabla-empty">
+        <div className="tabla-empty" role="status" aria-live="polite">
           <FilePlus size={48} />
           <p>No hay ingresos registrados en este período</p>
         </div>
@@ -157,24 +163,26 @@ export const TablaOtrosIngresos = ({ ingresos }: TablaOtrosIngresosProps) => {
       )}
 
       {reciboUrl && (
-        <div className="pdf-preview-modal">
-          <div className="pdf-preview-content" onClick={(e) => e.stopPropagation()}>
-            <div className="pdf-preview-header">
-              <h3>Recibo de otro ingreso #{reciboId}</h3>
-              <div className="pdf-preview-actions">
-                <button className="btn-descargar" onClick={() => descargarRecibo(reciboId || 0)}>
-                  <Download size={18} /> Descargar
-                </button>
-                <button className="btn-cerrar" onClick={cerrarRecibo}>
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div className="pdf-preview-body">
-              <iframe src={reciboUrl} title="Recibo" />
-            </div>
+        <ModalBase
+          isOpen={Boolean(reciboUrl)}
+          title={`Recibo de otro ingreso #${reciboId || ''}`}
+          onClose={cerrarRecibo}
+          size="lg"
+          footer={
+            <>
+              <button type="button" className="btn-secondary" onClick={cerrarRecibo}>
+                Cerrar
+              </button>
+              <button type="button" className="btn-primary" onClick={() => void descargarRecibo(reciboId || 0)}>
+                <Download size={16} /> Descargar
+              </button>
+            </>
+          }
+        >
+          <div className="pdf-preview-body">
+            <iframe src={reciboUrl} title="Recibo" />
           </div>
-        </div>
+        </ModalBase>
       )}
     </div>
   );

@@ -17,6 +17,7 @@ interface RankingReferidosProps {
 
 export const RankingReferidos = ({ referidos }: RankingReferidosProps) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const panelId = 'ranking-referidos-panel';
   
   const formatearMoneda = (valor: string) => {
     return new Intl.NumberFormat('es-CO', {
@@ -45,6 +46,8 @@ export const RankingReferidos = ({ referidos }: RankingReferidosProps) => {
     return icons[index] || `${index + 1}°`;
   };
 
+  const toggleExpanded = () => setIsExpanded((prev) => !prev);
+
   if (!referidos || referidos.length === 0) {
     return (
       <div className="ranking-referidos-card">
@@ -54,7 +57,7 @@ export const RankingReferidos = ({ referidos }: RankingReferidosProps) => {
             <h3>Top 10 Referidos</h3>
           </div>
         </div>
-        <div className="ranking-empty">
+        <div className="ranking-empty" role="status" aria-live="polite">
           <Trophy size={48} />
           <p>No hay referidos registrados aún</p>
         </div>
@@ -68,9 +71,12 @@ export const RankingReferidos = ({ referidos }: RankingReferidosProps) => {
 
   return (
     <div className="ranking-referidos-card">
-      <div 
+      <button
+        type="button"
         className="ranking-header-clickable" 
-        onClick={() => setIsExpanded(!isExpanded)}
+        aria-expanded={isExpanded}
+        aria-controls={panelId}
+        onClick={toggleExpanded}
       >
         <div className="ranking-header-content">
           <div className="ranking-titulo">
@@ -84,13 +90,13 @@ export const RankingReferidos = ({ referidos }: RankingReferidosProps) => {
             Personas que más estudiantes han referido a la escuela
           </p>
         </div>
-        <button className="collapse-btn">
+        <span className="collapse-btn" aria-hidden="true">
           {isExpanded ? <ChevronUp size={24} /> : <ChevronDown size={24} />}
-        </button>
-      </div>
+        </span>
+      </button>
 
       {isExpanded && (
-        <>
+        <div id={panelId}>
           {/* Podio Top 3 */}
           {top3.length > 0 && (
         <div className="ranking-podio">
@@ -178,7 +184,7 @@ export const RankingReferidos = ({ referidos }: RankingReferidosProps) => {
           </table>
         </div>
       )}
-        </>
+        </div>
       )}
     </div>
   );

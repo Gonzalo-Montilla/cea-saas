@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth, estudiantes, caja, reportes, instructores, uploads, vehiculos, tarifas, usuarios, caja_fuerte, tenants, tenant_service_rules, clases, saas_admin, support_tenant
+from app.api.v1.endpoints import auth, estudiantes, caja, reportes, instructores, uploads, vehiculos, tarifas, usuarios, caja_fuerte, tenants, tenant_service_rules, clases, saas_admin, support_tenant, conceptos_ingreso
 
 api_router = APIRouter()
 
@@ -14,6 +14,7 @@ api_router.include_router(instructores.router, prefix="/instructores", tags=["In
 api_router.include_router(uploads.router, prefix="/uploads", tags=["Uploads"])
 api_router.include_router(vehiculos.router, prefix="/vehiculos", tags=["Vehículos"])
 api_router.include_router(tarifas.router, prefix="/tarifas", tags=["Tarifas"])
+api_router.include_router(conceptos_ingreso.router, prefix="/conceptos-ingreso", tags=["Conceptos Ingreso"])
 api_router.include_router(tenant_service_rules.router, prefix="/tenant-service-rules", tags=["Configuración Formativa"])
 api_router.include_router(clases.router, prefix="/clases", tags=["Clases"])
 api_router.include_router(usuarios.router, prefix="/usuarios", tags=["Usuarios"])

@@ -43,6 +43,67 @@
   transform: translateY(-1px);
 }
 
+.tarifas-bloque {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.tarifas-bloque-header {
+  width: 100%;
+  border: none;
+  background: var(--surface-2);
+  padding: 14px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.tarifas-bloque-header:hover {
+  background: #eef2f7;
+}
+
+.tarifas-bloque-header-text h3 {
+  margin: 0;
+  font-size: 18px;
+  color: var(--text-primary);
+}
+
+.tarifas-bloque-header-text p {
+  margin: 4px 0 0 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.tarifas-bloque-chevron {
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.tarifas-bloque-chevron.collapsed {
+  transform: rotate(-90deg);
+}
+
+.tarifas-bloque-content {
+  padding: 12px;
+}
+
+.tarifas-bloque-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.tarifas-meta {
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
 .tarifas-table table {
   width: 100%;
   border-collapse: collapse;
@@ -82,6 +143,14 @@
   border-color: #fecaca;
 }
 
+.btn-icon:disabled,
+.btn-nuevo:disabled,
+.modal-footer .btn-secondary:disabled,
+.modal-footer .btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .info-message {
   font-size: 13px;
   color: var(--text-secondary);
@@ -96,6 +165,10 @@
     padding: 16px;
   }
 
+  .tarifas-bloque-actions {
+    justify-content: stretch;
+  }
+
   .btn-nuevo {
     width: 100%;
     justify-content: center;
@@ -107,9 +180,5 @@
   .tarifas-table td {
     padding: 10px 8px;
     font-size: 13px;
-  }
-
-  .modal-box {
-    max-height: 88vh;
   }
 }

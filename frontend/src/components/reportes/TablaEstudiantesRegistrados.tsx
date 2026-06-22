@@ -60,7 +60,7 @@ export const TablaEstudiantesRegistrados = ({ estudiantes }: TablaEstudiantesReg
       </div>
 
       {estudiantes.length === 0 ? (
-        <div className="tabla-empty">
+        <div className="tabla-empty" role="status" aria-live="polite">
           <UserPlus size={48} />
           <p>No hay estudiantes registrados en este período</p>
         </div>

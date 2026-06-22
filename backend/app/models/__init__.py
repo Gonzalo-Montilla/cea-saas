@@ -25,6 +25,7 @@ from app.models.saas_lead import SaasLead
 from app.models.saas_billing_event import SaasBillingEvent
 from app.models.saas_payment_receipt import SaasPaymentReceipt
 from app.models.saas_support_ticket import SaasSupportTicket
+from app.models.concepto_ingreso_tenant import ConceptoIngresoTenant
 
 __all__ = [
     "Usuario", "RolUsuario",
@@ -41,6 +42,7 @@ __all__ = [
     "SaasBillingEvent",
     "SaasPaymentReceipt",
     "SaasSupportTicket",
+    "ConceptoIngresoTenant",
     "Caja", "MovimientoCaja", "EstadoCaja", "TipoMovimiento", "ConceptoMovimientoCaja",
     "Tenant", "TenantUser", "PlanTenant",
     "TenantBranch", "TenantUserBranch",

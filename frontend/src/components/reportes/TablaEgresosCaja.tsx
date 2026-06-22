@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { FileMinus, Download, Eye } from 'lucide-react';
 import { cajaAPI } from '../../services/api';
+import { ModalBase } from '../ui/ModalBase';
+import { ToastAlert } from '../ui/ToastAlert';
 
 interface EgresoItem {
   egreso_id: number;
@@ -20,6 +22,7 @@ export const TablaEgresosCaja = ({ egresos }: TablaEgresosCajaProps) => {
   const [reciboUrl, setReciboUrl] = useState<string | null>(null);
   const [reciboId, setReciboId] = useState<number | null>(null);
   const [cargandoRecibo, setCargandoRecibo] = useState(false);
+  const [feedback, setFeedback] = useState<string | null>(null);
 
   const formatearMoneda = (valor: string | null) => {
     if (!valor) return 'N/A';
@@ -49,7 +52,7 @@ export const TablaEgresosCaja = ({ egresos }: TablaEgresosCajaProps) => {
       setReciboId(egresoId);
     } catch (err) {
       console.error('Error al cargar recibo:', err);
-      alert('No se pudo cargar el recibo');
+      setFeedback('No se pudo cargar el recibo.');
     } finally {
       setCargandoRecibo(false);
     }
@@ -68,7 +71,7 @@ export const TablaEgresosCaja = ({ egresos }: TablaEgresosCajaProps) => {
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error('Error al descargar recibo:', err);
-      alert('No se pudo descargar el recibo');
+      setFeedback('No se pudo descargar el recibo.');
     }
   };
 
@@ -82,6 +85,9 @@ export const TablaEgresosCaja = ({ egresos }: TablaEgresosCajaProps) => {
 
   return (
     <div className="tabla-estudiantes-card">
+      {feedback && (
+        <ToastAlert type="error" message={feedback} onClose={() => setFeedback(null)} />
+      )}
       <div className="tabla-header">
         <div className="tabla-titulo">
           <FileMinus size={20} />
@@ -91,7 +97,7 @@ export const TablaEgresosCaja = ({ egresos }: TablaEgresosCajaProps) => {
       </div>
 
       {egresos.length === 0 ? (
-        <div className="tabla-empty">
+        <div className="tabla-empty" role="status" aria-live="polite">
           <FileMinus size={48} />
           <p>No hay egresos registrados en este período</p>
         </div>
@@ -151,24 +157,30 @@ export const TablaEgresosCaja = ({ egresos }: TablaEgresosCajaProps) => {
       )}
 
       {reciboUrl && (
-        <div className="pdf-preview-modal">
-          <div className="pdf-preview-content" onClick={(e) => e.stopPropagation()}>
-            <div className="pdf-preview-header">
-              <h3>Recibo de Egreso</h3>
-              <div className="pdf-preview-actions">
-                <button className="btn-descargar" onClick={() => reciboId && descargarReciboDirecto(reciboId)}>
-                  <Download size={18} /> Descargar
-                </button>
-                <button className="btn-cerrar" onClick={cerrarRecibo}>
-                  ✕
-                </button>
-              </div>
-            </div>
-            <div className="pdf-preview-body">
-              <iframe src={reciboUrl} title="Recibo de egreso" />
-            </div>
+        <ModalBase
+          isOpen={Boolean(reciboUrl)}
+          title="Recibo de Egreso"
+          onClose={cerrarRecibo}
+          size="lg"
+          footer={
+            <>
+              <button type="button" className="btn-secondary" onClick={cerrarRecibo}>
+                Cerrar
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => reciboId && void descargarReciboDirecto(reciboId)}
+              >
+                <Download size={16} /> Descargar
+              </button>
+            </>
+          }
+        >
+          <div className="pdf-preview-body">
+            <iframe src={reciboUrl} title="Recibo de egreso" />
           </div>
-        </div>
+        </ModalBase>
       )}
     </div>
   );

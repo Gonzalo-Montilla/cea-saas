@@ -4,6 +4,7 @@ import { estudiantesAPI } from '../services/api';
 import { Search, UserPlus, Eye, Settings, ChevronDown, Users } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { DefinirServicioModal } from '../components/DefinirServicioModal';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import '../styles/Estudiantes.css';
 
 interface Estudiante {
@@ -32,6 +33,8 @@ export const Estudiantes = () => {
   const [error, setError] = useState('');
   const [estudianteSeleccionado, setEstudianteSeleccionado] = useState<Estudiante | null>(null);
   const [mostrarModal, setMostrarModal] = useState(false);
+  const [estudianteReactivar, setEstudianteReactivar] = useState<Estudiante | null>(null);
+  const [reactivandoEstudiante, setReactivandoEstudiante] = useState(false);
   
   // Paginación
   const [paginaActual, setPaginaActual] = useState(1);
@@ -75,7 +78,7 @@ export const Estudiantes = () => {
       setTotalEstudiantes(response.total || 0);
     } catch (err) {
       console.error('Error al cargar estudiantes:', err);
-      setError('Error al cargar la lista de estudiantes');
+      setError('No se pudo cargar la lista de estudiantes.');
       setEstudiantes([]);
     } finally {
       setIsLoading(false);
@@ -150,19 +153,27 @@ export const Estudiantes = () => {
     setMostrarModal(true);
   };
 
-  const handleReactivar = async (estudiante: Estudiante) => {
+  const handleReactivar = (estudiante: Estudiante) => {
+    setEstudianteReactivar(estudiante);
+  };
+
+  const confirmarReactivar = async () => {
+    if (!estudianteReactivar || reactivandoEstudiante) return;
     try {
-      const confirmado = window.confirm('¿Deseas reactivar este estudiante para un nuevo servicio?');
-      if (!confirmado) return;
-      const actualizado = await estudiantesAPI.reactivar(estudiante.id);
+      setReactivandoEstudiante(true);
+      const actualizado = await estudiantesAPI.reactivar(estudianteReactivar.id);
       setEstudiantes((prev) =>
-        prev.map((item) => (item.id === estudiante.id ? actualizado : item))
+        prev.map((item) => (item.id === estudianteReactivar.id ? actualizado : item))
       );
+      setError('');
       setEstudianteSeleccionado(actualizado);
       setMostrarModal(true);
     } catch (err) {
       console.error('Error al reactivar estudiante:', err);
-      setError('No se pudo reactivar el estudiante');
+      setError('No se pudo reactivar el estudiante.');
+    } finally {
+      setReactivandoEstudiante(false);
+      setEstudianteReactivar(null);
     }
   };
 
@@ -215,7 +226,7 @@ export const Estudiantes = () => {
           <Search size={20} className="search-icon" />
           <input
             type="text"
-            placeholder="Buscar por tipo de documento, email o matrícula..."
+            placeholder="Buscar por tipo de documento, correo o matrícula..."
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
             className="search-input"
@@ -254,12 +265,17 @@ export const Estudiantes = () => {
             estudiantes.map((estudiante) => {
               const isExpanded = tarjetasExpandidas.has(estudiante.id);
               
+              const panelId = `estudiante-card-body-${estudiante.id}`;
+
               return (
               <div key={estudiante.id} className={`estudiante-card ${isExpanded ? 'expanded' : 'collapsed'}`}>
                 {/* Header clickeable */}
-                <div 
+                <button
+                  type="button"
                   className="card-header clickeable" 
                   onClick={() => toggleTarjeta(estudiante.id)}
+                  aria-expanded={isExpanded}
+                  aria-controls={panelId}
                 >
                   <div className="estudiante-foto">
                     {estudiante.foto_url ? (
@@ -283,11 +299,11 @@ export const Estudiantes = () => {
                     size={24} 
                     className={`chevron-toggle ${isExpanded ? '' : 'rotated'}`}
                   />
-                </div>
+                </button>
 
                 {/* Contenido colapsable */}
                 {isExpanded && (
-                <>
+                <div id={panelId}>
                 <div className="card-body">
                   <div className="info-row">
                     <span className="label">Email:</span>
@@ -347,7 +363,7 @@ export const Estudiantes = () => {
                     </button>
                   </div>
                 </div>
-                </>
+                </div>
                 )}
               </div>
               );
@@ -390,6 +406,17 @@ export const Estudiantes = () => {
           onSuccess={handleModalSuccess}
         />
       )}
+
+      <ConfirmDialog
+        isOpen={Boolean(estudianteReactivar)}
+        title="Reactivar estudiante"
+        message="¿Deseas reactivar este estudiante para asignarle un nuevo servicio?"
+        confirmText="Sí, reactivar"
+        cancelText="Cancelar"
+        isLoading={reactivandoEstudiante}
+        onCancel={() => setEstudianteReactivar(null)}
+        onConfirm={() => void confirmarReactivar()}
+      />
     </div>
   );
 };

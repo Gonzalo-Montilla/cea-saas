@@ -410,42 +410,6 @@
   gap: 6px;
 }
 
-.saas-modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-  overflow-y: auto;
-  z-index: 90;
-}
-
-.saas-modal {
-  width: min(760px, 92vw);
-  max-height: calc(100vh - 32px);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px;
-  display: grid;
-  gap: 12px;
-  overflow-y: auto;
-}
-
-.saas-modal.saas-modal-branches {
-  width: min(1160px, 96vw);
-}
-
-.saas-modal.saas-modal-profile {
-  width: min(1040px, 95vw);
-}
-
-.saas-modal.saas-modal-receipt-preview {
-  width: min(1120px, 96vw);
-}
-
 .saas-receipt-preview-frame-wrap {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -475,10 +439,6 @@
   height: 72vh;
   border: 0;
   background: #fff;
-}
-
-.saas-modal.saas-modal-branches .saas-modal-grid {
-  grid-template-columns: repeat(3, minmax(210px, 1fr));
 }
 
 .saas-modal-grid {
@@ -661,38 +621,9 @@
     grid-template-columns: 1fr;
   }
 
-  .saas-modal.saas-modal-branches {
-    width: min(980px, 96vw);
-  }
-
-  .saas-modal.saas-modal-profile {
-    width: min(940px, 96vw);
-  }
-
-  .saas-modal.saas-modal-receipt-preview {
-    width: min(980px, 96vw);
-  }
-
-  .saas-modal.saas-modal-branches .saas-modal-grid {
-    grid-template-columns: repeat(2, minmax(200px, 1fr));
-  }
 }
 
 @media (max-width: 720px) {
-  .saas-modal-backdrop {
-    align-items: flex-start;
-    padding: 10px;
-  }
-
-  .saas-modal {
-    width: 100%;
-    max-height: calc(100vh - 20px);
-  }
-
-  .saas-modal.saas-modal-branches .saas-modal-grid {
-    grid-template-columns: 1fr;
-  }
-
   .saas-receipt-preview-frame {
     height: 64vh;
   }

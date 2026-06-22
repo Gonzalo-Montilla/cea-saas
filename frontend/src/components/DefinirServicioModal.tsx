@@ -1,8 +1,10 @@
 import { useState, useEffect, FormEvent } from 'react';
-import { X, DollarSign, FileText, Save } from 'lucide-react';
+import { DollarSign, Save } from 'lucide-react';
 import { estudiantesAPI, tarifasAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { RolUsuario } from '../types';
+import { ModalBase } from './ui/ModalBase';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 import '../styles/DefinirServicioModal.css';
 
 interface DefinirServicioModalProps {
@@ -34,6 +36,8 @@ export const DefinirServicioModal = ({ estudiante, onClose, onSuccess }: Definir
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
   const [tarifas, setTarifas] = useState<any[]>([]);
+  const [showContratoDialog, setShowContratoDialog] = useState(false);
+  const [abriendoContrato, setAbriendoContrato] = useState(false);
   const puedeAplicarDescuento = user?.rol === RolUsuario.ADMIN || user?.rol === RolUsuario.GERENTE;
 
   const getTipoDocumentoLabel = (tipo?: string) => {
@@ -230,20 +234,37 @@ export const DefinirServicioModal = ({ estudiante, onClose, onSuccess }: Definir
         telefono_referidor: origenCliente === 'REFERIDO' ? telefonoReferidor : null,
         observaciones: observaciones || null
       });
-
-      alert('Servicio definido exitosamente');
-      if (window.confirm('¿Desea abrir el contrato en PDF?')) {
-        const pdfBlob = await estudiantesAPI.getContratoPdf(estudiante.id);
-        const fileUrl = URL.createObjectURL(pdfBlob);
-        window.open(fileUrl, '_blank', 'noopener,noreferrer');
-      }
-      onSuccess();
-      onClose();
+      setShowContratoDialog(true);
     } catch (err: any) {
       console.error('Error al definir servicio:', err);
-      setError(err.response?.data?.detail || 'Error al definir el servicio');
+      setError(err.response?.data?.detail || 'No se pudo definir el servicio.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const finalizarProceso = () => {
+    setShowContratoDialog(false);
+    onSuccess();
+    onClose();
+  };
+
+  const abrirContrato = async () => {
+    if (abriendoContrato) return;
+    try {
+      setAbriendoContrato(true);
+      const pdfBlob = await estudiantesAPI.getContratoPdf(estudiante.id);
+      const fileUrl = URL.createObjectURL(pdfBlob);
+      window.open(fileUrl, '_blank', 'noopener,noreferrer');
+      setTimeout(() => URL.revokeObjectURL(fileUrl), 10000);
+      finalizarProceso();
+    } catch (err) {
+      console.error('Error al abrir contrato PDF:', err);
+      setShowContratoDialog(false);
+      setError('Servicio guardado, pero no se pudo abrir el contrato PDF. Puedes abrirlo luego desde el detalle.');
+      onSuccess();
+    } finally {
+      setAbriendoContrato(false);
     }
   };
 
@@ -258,15 +279,14 @@ export const DefinirServicioModal = ({ estudiante, onClose, onSuccess }: Definir
   };
 
   return (
-      <div className="modal-overlay">
-      <div className="modal-container" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h2>Definir Servicio</h2>
-          <button className="btn-close" onClick={onClose}>
-            <X size={24} />
-          </button>
-        </div>
-
+    <>
+      <ModalBase
+        isOpen={true}
+        title="Definir Servicio"
+        onClose={onClose}
+        closeDisabled={isLoading || abriendoContrato}
+        size="lg"
+      >
         <div className="estudiante-info-header">
           {estudiante.foto_url && (
             <img src={estudiante.foto_url} alt={estudiante.nombre_completo} className="estudiante-avatar" />
@@ -471,16 +491,27 @@ export const DefinirServicioModal = ({ estudiante, onClose, onSuccess }: Definir
           </div>
 
           <div className="modal-actions">
-            <button type="button" className="btn-secondary" onClick={onClose}>
+            <button type="button" className="btn-secondary" onClick={onClose} disabled={isLoading}>
               Cancelar
             </button>
             <button type="submit" className="btn-primary" disabled={isLoading}>
               <Save size={20} />
-              {isLoading ? 'Guardando...' : 'Guardar y Generar Contrato'}
+              {isLoading ? 'Guardando...' : 'Guardar servicio'}
             </button>
           </div>
         </form>
-      </div>
-    </div>
+      </ModalBase>
+
+      <ConfirmDialog
+        isOpen={showContratoDialog}
+        title="Servicio guardado"
+        message="¿Deseas abrir ahora el contrato en PDF?"
+        confirmText="Abrir PDF"
+        cancelText="Ahora no"
+        isLoading={abriendoContrato}
+        onCancel={finalizarProceso}
+        onConfirm={() => void abrirContrato()}
+      />
+    </>
   );
 };

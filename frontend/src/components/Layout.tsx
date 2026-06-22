@@ -15,6 +15,7 @@ import {
   History,
   Shield,
   Bell,
+  LifeBuoy,
   ClipboardList,
   Menu,
   Wallet,
@@ -26,6 +27,7 @@ import { RolUsuario } from '../types';
 import { BRAND_LOGO_URL, BRAND_NAME } from '../config/branding';
 import { authAPI, saasAdminAPI, tenantsAPI } from '../services/api';
 import { isSaasAdminUser } from '../utils/saasAdmin';
+import { ConfirmDialog } from './ui/ConfirmDialog';
 import '../styles/Layout.css';
 
 interface LayoutProps {
@@ -42,6 +44,8 @@ export const Layout = ({ children }: LayoutProps) => {
   const [sessionNotice, setSessionNotice] = useState('');
   const [supportUnreadCount, setSupportUnreadCount] = useState(0);
   const [supportNotice, setSupportNotice] = useState('');
+  const [closingAllSessions, setClosingAllSessions] = useState(false);
+  const [showLogoutAllConfirm, setShowLogoutAllConfirm] = useState(false);
   const [themeMode, setThemeMode] = useState<'light' | 'dark'>(() => {
     const saved = (localStorage.getItem('theme_mode') || '').toLowerCase();
     return saved === 'dark' ? 'dark' : 'light';
@@ -94,20 +98,19 @@ export const Layout = ({ children }: LayoutProps) => {
   };
 
   const handleLogoutAllSessions = async () => {
-    const confirmCloseAll = window.confirm(
-      'Se cerrarán todas las sesiones activas de esta cuenta en otros dispositivos. ¿Deseas continuar?'
-    );
-    if (!confirmCloseAll) return;
+    if (closingAllSessions) return;
     try {
+      setClosingAllSessions(true);
       await authAPI.logoutAllSessions();
-      setSessionNotice('Todas las sesiones activas se cerraron correctamente.');
+      setSessionNotice('Todas las sesiones activas se cerraron con éxito.');
       setTimeout(() => {
         handleLogout();
       }, 900);
     } catch {
       setSessionNotice('No se pudieron cerrar todas las sesiones. Intenta nuevamente.');
     } finally {
-      // no-op
+      setClosingAllSessions(false);
+      setShowLogoutAllConfirm(false);
     }
   };
 
@@ -141,7 +144,7 @@ export const Layout = ({ children }: LayoutProps) => {
     { path: '/clases', icon: Calendar, label: 'Programar Clases', moduleId: 'clases', roles: [RolUsuario.INSTRUCTOR, RolUsuario.ADMIN, RolUsuario.GERENTE, RolUsuario.COORDINADOR] },
     { path: '/usuarios', icon: Shield, label: 'Usuarios', moduleId: 'usuarios', roles: [RolUsuario.ADMIN, RolUsuario.GERENTE] },
     { path: '/tarifas', icon: GraduationCap, label: 'Tarifas', moduleId: 'tarifas', roles: [RolUsuario.ADMIN, RolUsuario.GERENTE] },
-    { path: '/soporte', icon: Bell, label: 'Soporte', moduleId: 'soporte_tenant', roles: [RolUsuario.ADMIN, RolUsuario.GERENTE, RolUsuario.COORDINADOR, RolUsuario.CAJERO, RolUsuario.INSTRUCTOR, RolUsuario.ESTUDIANTE] },
+    { path: '/soporte', icon: LifeBuoy, label: 'Soporte', moduleId: 'soporte_tenant', roles: [RolUsuario.ADMIN, RolUsuario.GERENTE, RolUsuario.COORDINADOR, RolUsuario.CAJERO, RolUsuario.INSTRUCTOR, RolUsuario.ESTUDIANTE] },
     { path: '/saas-admin/resumen', icon: Building2, label: 'Backoffice SaaS', moduleId: 'saas_admin', roles: [RolUsuario.ADMIN] },
   ];
   const saasMenuItems = [
@@ -245,15 +248,17 @@ export const Layout = ({ children }: LayoutProps) => {
           <img src={tenantLogoUrl} alt={tenantDisplayName} className="sidebar-logo-img" />
         </div>
         
-        <nav className="nav-menu">
+        <nav className="nav-menu" aria-label="Navegación principal">
           {(isGlobalAuth ? allowedSaasItems : allowedItems).map((item) => {
             const Icon = item.icon;
+            const activeItem = isActive(item.path);
             return (
               <a
                 key={item.path}
                 href={item.path}
-                className={`nav-item ${isActive(item.path) ? 'active' : ''}`}
+                className={`nav-item ${activeItem ? 'active' : ''}`}
                 title={item.label}
+                aria-current={activeItem ? 'page' : undefined}
                 onClick={(e) => {
                   e.preventDefault();
                   navigate(item.path);
@@ -290,6 +295,8 @@ export const Layout = ({ children }: LayoutProps) => {
                 className="sidebar-toggle"
                 onClick={() => setSidebarExpanded((prev) => !prev)}
                 title={sidebarExpanded ? 'Contraer menú' : 'Expandir menú'}
+                aria-label={sidebarExpanded ? 'Contraer menú lateral' : 'Expandir menú lateral'}
+                aria-expanded={sidebarExpanded}
               >
                 <Menu size={18} />
               </button>
@@ -305,25 +312,48 @@ export const Layout = ({ children }: LayoutProps) => {
                 onClick={toggleThemeMode}
                 className="icon-button"
                 title={themeMode === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+                aria-label={themeMode === 'dark' ? 'Activar modo claro' : 'Activar modo oscuro'}
+                aria-pressed={themeMode === 'dark'}
               >
                 {themeMode === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
               </button>
-              <button onClick={() => void handleLogoutAllSessions()} className="icon-button" title="Cerrar todas las sesiones">
+              <button
+                onClick={() => setShowLogoutAllConfirm(true)}
+                className="icon-button"
+                title="Cerrar todas las sesiones"
+                aria-label="Cerrar sesiones en otros dispositivos"
+                disabled={closingAllSessions}
+              >
                 <Shield size={20} />
               </button>
-              <button onClick={handleLogout} className="icon-button" title="Cerrar sesión">
+              <button onClick={handleLogout} className="icon-button" title="Cerrar sesión" aria-label="Cerrar sesión actual">
                 <MoreVertical size={20} />
               </button>
             </div>
           </div>
         </header>
-        {sessionNotice && <div className="layout-session-notice">{sessionNotice}</div>}
-        {supportNotice && <div className="layout-session-notice">{supportNotice}</div>}
+        {(sessionNotice || supportNotice) && (
+          <div className="layout-notice-stack" aria-live="polite">
+            {sessionNotice && <div className="layout-session-notice" role="status">{sessionNotice}</div>}
+            {supportNotice && <div className="layout-session-notice" role="status">{supportNotice}</div>}
+          </div>
+        )}
 
         <main className="main-content">
           {children}
         </main>
       </div>
+
+      <ConfirmDialog
+        isOpen={showLogoutAllConfirm}
+        title="Cerrar sesiones en otros dispositivos"
+        message="Se cerrarán todas las sesiones activas de esta cuenta en otros dispositivos. ¿Deseas continuar?"
+        confirmText="Sí, cerrar sesiones"
+        cancelText="Cancelar"
+        isLoading={closingAllSessions}
+        onCancel={() => setShowLogoutAllConfirm(false)}
+        onConfirm={() => void handleLogoutAllSessions()}
+      />
     </div>
   );
 };

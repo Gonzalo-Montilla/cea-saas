@@ -64,7 +64,7 @@ export const LoginSaas = () => {
               onChange={(e) => setEmail(e.target.value)}
               required
               disabled={isLoading}
-              placeholder="owner@prometheus.tech"
+              placeholder="correo@prometheus.tech"
             />
           </div>
 

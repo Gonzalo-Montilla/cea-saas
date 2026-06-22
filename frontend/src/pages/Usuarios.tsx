@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Plus, Pencil, KeyRound, Shield } from 'lucide-react';
+import { Plus, Pencil, KeyRound, Shield, ChevronDown, Search, X } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
+import { ModalBase } from '../components/ui/ModalBase';
 import { usuariosAPI } from '../services/api';
 import { RolUsuario } from '../types';
 import '../styles/Usuarios.css';
@@ -27,20 +28,47 @@ const roles = [
 ];
 
 const MODULOS = [
-  { id: 'dashboard', label: 'Dashboard' },
-  { id: 'nuevo_estudiante', label: 'Nuevo Estudiante' },
-  { id: 'estudiantes', label: 'Estudiantes' },
-  { id: 'caja', label: 'Caja / Pagos' },
-  { id: 'caja_fuerte', label: 'Caja Fuerte' },
-  { id: 'historial_cajas', label: 'Historial de Cajas' },
+  { id: 'dashboard', label: 'Inicio (Dashboard)' },
+  { id: 'nuevo_estudiante', label: 'Crear estudiante' },
+  { id: 'estudiantes', label: 'Ver y gestionar estudiantes' },
+  { id: 'caja', label: 'Caja y pagos' },
+  { id: 'caja_fuerte', label: 'Caja fuerte' },
+  { id: 'historial_cajas', label: 'Historial de cajas' },
   { id: 'reportes', label: 'Reportes' },
-  { id: 'alertas', label: 'Alertas' },
-  { id: 'cierre_financiero', label: 'Cierre Financiero' },
+  { id: 'alertas', label: 'Alertas y pendientes' },
+  { id: 'cierre_financiero', label: 'Cierre financiero' },
   { id: 'instructores', label: 'Instructores' },
   { id: 'vehiculos', label: 'Vehículos' },
   { id: 'clases', label: 'Clases' },
-  { id: 'usuarios', label: 'Usuarios' },
-  { id: 'tarifas', label: 'Tarifas' }
+  { id: 'usuarios', label: 'Usuarios y permisos' },
+  { id: 'tarifas', label: 'Tarifas y configuración' }
+];
+
+const GUIA_ALCANCE_ROLES = [
+  {
+    rol: 'ADMIN',
+    alcance: 'Puede manejar todo en la escuela: usuarios, tarifas, caja, reportes y configuraciones importantes.'
+  },
+  {
+    rol: 'GERENTE',
+    alcance: 'Puede manejar casi todo el día a día del negocio, pero no debe escalar permisos de administrador.'
+  },
+  {
+    rol: 'COORDINADOR',
+    alcance: 'Se enfoca en la operación académica: clases, instructores, vehículos y seguimiento de procesos.'
+  },
+  {
+    rol: 'CAJERO',
+    alcance: 'Se encarga de caja y pagos: registrar ingresos, egresos y movimientos diarios.'
+  },
+  {
+    rol: 'INSTRUCTOR',
+    alcance: 'Trabaja en sus clases y solo consulta la información que necesita para su trabajo.'
+  },
+  {
+    rol: 'ESTUDIANTE',
+    alcance: 'Acceso al portal del estudiante (cuando aplique).'
+  }
 ];
 
 export const Usuarios = () => {
@@ -48,10 +76,13 @@ export const Usuarios = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [showPassModal, setShowPassModal] = useState(false);
   const [editando, setEditando] = useState<UsuarioItem | null>(null);
   const [passUsuario, setPassUsuario] = useState<UsuarioItem | null>(null);
+  const [guardandoUsuario, setGuardandoUsuario] = useState(false);
+  const [reseteandoPassword, setReseteandoPassword] = useState(false);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -62,12 +93,14 @@ export const Usuarios = () => {
   const [activo, setActivo] = useState(true);
   const [permisosModulos, setPermisosModulos] = useState<string[]>([]);
   const [newPassword, setNewPassword] = useState('');
+  const [mostrarGuiaRoles, setMostrarGuiaRoles] = useState(false);
 
-  const cargarUsuarios = async () => {
+  const cargarUsuarios = async (searchTerm?: string) => {
     try {
       setLoading(true);
-      const data = await usuariosAPI.getAll({ search: search || undefined });
+      const data = await usuariosAPI.getAll({ search: searchTerm || undefined });
       setUsuarios(data || []);
+      setError('');
     } catch (err) {
       console.error('Error al cargar usuarios:', err);
       setError('No se pudieron cargar usuarios');
@@ -77,10 +110,19 @@ export const Usuarios = () => {
   };
 
   useEffect(() => {
-    cargarUsuarios();
-  }, []);
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedSearch(search.trim());
+    }, 350);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [search]);
+
+  useEffect(() => {
+    void cargarUsuarios(debouncedSearch || undefined);
+  }, [debouncedSearch]);
 
   const abrirNuevo = () => {
+    setError('');
     setEditando(null);
     setEmail('');
     setPassword('');
@@ -94,6 +136,7 @@ export const Usuarios = () => {
   };
 
   const abrirEditar = (u: UsuarioItem) => {
+    setError('');
     setEditando(u);
     setEmail(u.email);
     setPassword('');
@@ -107,6 +150,7 @@ export const Usuarios = () => {
   };
 
   const abrirReset = (u: UsuarioItem) => {
+    setError('');
     setPassUsuario(u);
     setNewPassword('');
     setShowPassModal(true);
@@ -122,6 +166,7 @@ export const Usuarios = () => {
       return;
     }
     try {
+      setGuardandoUsuario(true);
       if (editando) {
         await usuariosAPI.update(editando.id, {
           email,
@@ -148,10 +193,13 @@ export const Usuarios = () => {
           permisos_modulos: permisosModulos
         });
       }
+      setError('');
       setShowModal(false);
       await cargarUsuarios();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Error al guardar usuario');
+      setError(err.response?.data?.detail || 'No se pudo guardar el usuario.');
+    } finally {
+      setGuardandoUsuario(false);
     }
   };
 
@@ -162,12 +210,18 @@ export const Usuarios = () => {
       return;
     }
     try {
+      setReseteandoPassword(true);
       await usuariosAPI.resetPassword(passUsuario.id, newPassword);
+      setError('');
       setShowPassModal(false);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Error al resetear contraseña');
+      setError(err.response?.data?.detail || 'No se pudo restablecer la contraseña.');
+    } finally {
+      setReseteandoPassword(false);
     }
   };
+
+  const resumenPermisos = `Módulos seleccionados: ${permisosModulos.length}/${MODULOS.length}`;
 
   return (
     <div className="usuarios-container">
@@ -182,16 +236,74 @@ export const Usuarios = () => {
         }
       />
 
+      <section className="roles-guia-bloque">
+        <button
+          type="button"
+          className="roles-guia-header"
+          onClick={() => setMostrarGuiaRoles((prev) => !prev)}
+          aria-expanded={mostrarGuiaRoles}
+          aria-controls="usuarios-guia-roles"
+        >
+          <div className="roles-guia-header-text">
+            <h3>Mini guía de alcance por rol</h3>
+            <p>Referencia rápida para asignar roles y permisos por módulo.</p>
+          </div>
+          <ChevronDown size={20} className={`roles-guia-chevron ${mostrarGuiaRoles ? '' : 'collapsed'}`} />
+        </button>
+        {mostrarGuiaRoles && (
+          <div className="roles-guia-content" id="usuarios-guia-roles">
+            <div className="roles-guia-grid">
+              {GUIA_ALCANCE_ROLES.map((item) => (
+                <article key={item.rol} className="roles-guia-card">
+                  <h4>{item.rol}</h4>
+                  <p>{item.alcance}</p>
+                </article>
+              ))}
+            </div>
+            <div className="roles-guia-nota">
+              Regla sencilla: primero define bien el rol, y luego marca solo los módulos que realmente necesita.
+              Un usuario nunca debería tener más acceso del que su rol permite.
+            </div>
+          </div>
+        )}
+      </section>
+
       <div className="search-section">
         <div className="search-box">
+          <Search size={16} className="search-icon" />
           <input
             className="search-input"
-            placeholder="Buscar por nombre, email o cédula"
+            placeholder="Buscar por nombre, correo o cédula"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                void cargarUsuarios(search.trim() || undefined);
+              }
+            }}
           />
         </div>
-        <button className="btn-nuevo btn-search" onClick={cargarUsuarios}>Buscar</button>
+        <div className="search-actions">
+          <button
+            type="button"
+            className="btn-nuevo btn-search"
+            onClick={() => void cargarUsuarios(search.trim() || undefined)}
+          >
+            Buscar
+          </button>
+          <button
+            type="button"
+            className="btn-search-clear"
+            onClick={() => setSearch('')}
+            disabled={!search}
+          >
+            <X size={14} />
+            Limpiar
+          </button>
+        </div>
+      </div>
+      <div className="usuarios-meta">
+        <span>{loading ? 'Actualizando lista...' : `${usuarios.length} usuario(s) encontrado(s)`}</span>
       </div>
 
       {error && <div className="error-message">{error}</div>}
@@ -222,10 +334,21 @@ export const Usuarios = () => {
                   <td>{u.is_active ? 'Activo' : 'Inactivo'}</td>
                   <td>{u.last_login ? new Date(u.last_login).toLocaleString('es-CO') : '-'}</td>
                   <td>
-                    <button className="btn-icon" onClick={() => abrirEditar(u)}>
+                    <button
+                      className="btn-icon"
+                      onClick={() => abrirEditar(u)}
+                      title="Editar usuario"
+                      aria-label={`Editar usuario ${u.nombre_completo}`}
+                    >
                       <Pencil size={14} />
                     </button>
-                    <button className="btn-icon" onClick={() => abrirReset(u)}>
+                    <button
+                      className="btn-icon"
+                      onClick={() => abrirReset(u)}
+                      title="Restablecer contraseña"
+                      aria-label={`Restablecer contraseña de ${u.nombre_completo}`}
+                      disabled={loading}
+                    >
                       <KeyRound size={14} />
                     </button>
                   </td>
@@ -233,7 +356,7 @@ export const Usuarios = () => {
               ))}
               {usuarios.length === 0 && (
                 <tr>
-                  <td colSpan={7}>No hay usuarios</td>
+                  <td colSpan={7} className="empty-state">No hay usuarios con ese criterio de búsqueda</td>
                 </tr>
               )}
             </tbody>
@@ -241,112 +364,118 @@ export const Usuarios = () => {
         </div>
       )}
 
-      {showModal && (
-      <div className="modal-overlay">
-          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>{editando ? 'Editar usuario' : 'Nuevo usuario'}</h3>
-              <button className="btn-icon" onClick={() => setShowModal(false)}>×</button>
-            </div>
-            <div className="modal-body">
-              <div className="form-group">
-                <label>Nombre completo</label>
-                <input value={nombre} onChange={(e) => setNombre(e.target.value)} />
-              </div>
-              <div className="form-group">
-                <label>Correo (usuario)</label>
+      <ModalBase
+        isOpen={showModal}
+        title={editando ? 'Editar usuario' : 'Nuevo usuario'}
+        onClose={() => setShowModal(false)}
+        closeDisabled={guardandoUsuario}
+        size="lg"
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setShowModal(false)} disabled={guardandoUsuario}>
+              Cancelar
+            </button>
+            <button className="btn-primary" onClick={guardar} disabled={guardandoUsuario}>
+              {guardandoUsuario ? 'Guardando...' : 'Guardar'}
+            </button>
+          </>
+        }
+      >
+        <div className="form-group">
+          <label>Nombre completo</label>
+          <input value={nombre} onChange={(e) => setNombre(e.target.value)} />
+        </div>
+        <div className="form-group">
+          <label>Correo (usuario)</label>
+          <input
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </div>
+        <div className="form-group">
+          <label>Cédula</label>
+          <input value={cedula} onChange={(e) => setCedula(e.target.value)} />
+        </div>
+        <div className="form-group">
+          <label>Teléfono</label>
+          <input
+            type="tel"
+            autoComplete="tel"
+            inputMode="numeric"
+            value={telefono}
+            onChange={(e) => setTelefono(e.target.value)}
+          />
+        </div>
+        {!editando && (
+          <div className="form-group">
+            <label>Contraseña</label>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </div>
+        )}
+        <div className="form-group">
+          <label>Rol</label>
+          <select value={rol} onChange={(e) => setRol(e.target.value as RolUsuario)}>
+            {roles.map((r) => (
+              <option key={r} value={r}>{r}</option>
+            ))}
+          </select>
+        </div>
+        <div className="form-group">
+          <label>Acceso al sistema</label>
+          <select value={activo ? 'SI' : 'NO'} onChange={(e) => setActivo(e.target.value === 'SI')}>
+            <option value="SI">Habilitado</option>
+            <option value="NO">Bloqueado</option>
+          </select>
+        </div>
+        <div className="form-group">
+          <label>Permisos por módulo</label>
+          <div className="permisos-resumen">{resumenPermisos}</div>
+          <div className="modulos-grid">
+            {MODULOS.map((m) => (
+              <label key={m.id} className="modulo-item">
                 <input
-                  type="email"
-                  autoComplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  type="checkbox"
+                  checked={permisosModulos.includes(m.id)}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setPermisosModulos((prev) => [...prev, m.id]);
+                    } else {
+                      setPermisosModulos((prev) => prev.filter((x) => x !== m.id));
+                    }
+                  }}
+                  disabled={guardandoUsuario}
                 />
-              </div>
-              <div className="form-group">
-                <label>Cédula</label>
-                <input value={cedula} onChange={(e) => setCedula(e.target.value)} />
-              </div>
-              <div className="form-group">
-                <label>Teléfono</label>
-                <input
-                  type="tel"
-                  autoComplete="tel"
-                  inputMode="numeric"
-                  value={telefono}
-                  onChange={(e) => setTelefono(e.target.value)}
-                />
-              </div>
-              {!editando && (
-                <div className="form-group">
-                  <label>Contraseña</label>
-                  <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-                </div>
-              )}
-              <div className="form-group">
-                <label>Rol</label>
-                <select value={rol} onChange={(e) => setRol(e.target.value as RolUsuario)}>
-                  {roles.map((r) => (
-                    <option key={r} value={r}>{r}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group">
-                <label>Acceso al sistema</label>
-                <select value={activo ? 'SI' : 'NO'} onChange={(e) => setActivo(e.target.value === 'SI')}>
-                  <option value="SI">Habilitado</option>
-                  <option value="NO">Bloqueado</option>
-                </select>
-              </div>
-              <div className="form-group">
-                <label>Permisos por módulo</label>
-                <div className="modulos-grid">
-                  {MODULOS.map((m) => (
-                    <label key={m.id} className="modulo-item">
-                      <input
-                        type="checkbox"
-                        checked={permisosModulos.includes(m.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setPermisosModulos((prev) => [...prev, m.id]);
-                          } else {
-                            setPermisosModulos((prev) => prev.filter((x) => x !== m.id));
-                          }
-                        }}
-                      />
-                      <span>{m.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowModal(false)}>Cancelar</button>
-              <button className="btn-primary" onClick={guardar}>Guardar</button>
-            </div>
+                <span>{m.label}</span>
+              </label>
+            ))}
           </div>
         </div>
-      )}
+      </ModalBase>
 
-      {showPassModal && passUsuario && (
-      <div className="modal-overlay">
-          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Resetear contraseña</h3>
-              <button className="btn-icon" onClick={() => setShowPassModal(false)}>×</button>
-            </div>
-            <div className="modal-body">
-              <div className="form-group">
-                <label>Nueva contraseña</label>
-                <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowPassModal(false)}>Cancelar</button>
-              <button className="btn-primary" onClick={resetPassword}>Guardar</button>
-            </div>
-          </div>
+      <ModalBase
+        isOpen={showPassModal && Boolean(passUsuario)}
+        title="Restablecer contraseña"
+        onClose={() => setShowPassModal(false)}
+        closeDisabled={reseteandoPassword}
+        size="sm"
+        footer={
+          <>
+            <button className="btn-secondary" onClick={() => setShowPassModal(false)} disabled={reseteandoPassword}>
+              Cancelar
+            </button>
+            <button className="btn-primary" onClick={resetPassword} disabled={reseteandoPassword || newPassword.length < 6}>
+              {reseteandoPassword ? 'Restableciendo...' : 'Restablecer'}
+            </button>
+          </>
+        }
+      >
+        <div className="form-group">
+          <label>Nueva contraseña</label>
+          <input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
         </div>
-      )}
+      </ModalBase>
     </div>
   );
 };

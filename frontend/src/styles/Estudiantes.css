@@ -125,9 +125,20 @@
   cursor: pointer;
   user-select: none;
   transition: background-color 0.2s;
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+  border-radius: 0;
 }
 
 .card-header.clickeable:hover {
+  background-color: var(--surface-2);
+}
+
+.card-header.clickeable:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
   background-color: var(--surface-2);
 }
 
@@ -230,6 +241,30 @@
   text-align: right;
 }
 
+/* Scoped rows to avoid global style collisions from other modules */
+.estudiantes-container .info-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+  border: 0;
+}
+
+.estudiantes-container .info-row .label {
+  font-size: 14px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.estudiantes-container .info-row .value {
+  font-size: 14px;
+  color: var(--text-primary);
+  font-weight: 600;
+  text-align: right;
+}
+
 .info-row .saldo {
   color: #f59e0b;
 }
@@ -306,6 +341,13 @@
 .btn-definir:hover {
   background-color: #059669;
   transform: translateY(-1px);
+}
+
+.btn-definir:disabled,
+.btn-ver:disabled {
+  opacity: 0.78;
+  cursor: not-allowed;
+  transform: none;
 }
 
 .btn-ver {
@@ -424,6 +466,80 @@
 .total-registros {
   font-size: 13px;
   color: #64748b;
+}
+
+:root[data-theme='dark'] .search-icon,
+:root[data-theme='dark'] .results-count,
+:root[data-theme='dark'] .loading-container,
+:root[data-theme='dark'] .empty-state,
+:root[data-theme='dark'] .total-registros {
+  color: var(--text-secondary);
+}
+
+:root[data-theme='dark'] .card-footer {
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+:root[data-theme='dark'] .estudiantes-container .info-row {
+  background: transparent;
+  border: 0;
+}
+
+:root[data-theme='dark'] .btn-definir {
+  background-color: #059669;
+  color: #f0fdf4;
+}
+
+:root[data-theme='dark'] .btn-definir:hover {
+  background-color: #047857;
+}
+
+:root[data-theme='dark'] .btn-ver {
+  background-color: var(--surface);
+  color: #bfdbfe;
+  border-color: rgba(96, 165, 250, 0.5);
+}
+
+:root[data-theme='dark'] .btn-ver:hover {
+  background-color: rgba(96, 165, 250, 0.2);
+  color: #dbeafe;
+}
+
+:root[data-theme='dark'] .btn-definir:disabled {
+  background-color: #334155;
+  color: #cbd5e1;
+}
+
+:root[data-theme='dark'] .btn-ver:disabled {
+  background-color: #1e293b;
+  color: #94a3b8;
+  border-color: #475569;
+}
+
+:root[data-theme='dark'] .error-message {
+  background-color: rgba(248, 113, 113, 0.18);
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.42);
+}
+
+:root[data-theme='dark'] .pagination-info span:first-child {
+  color: var(--text-primary);
+}
+
+:root[data-theme='dark'] .estudiantes-container .pagination .pagination-btn {
+  background-color: #1d4ed8 !important;
+  color: #eff6ff !important;
+}
+
+:root[data-theme='dark'] .pagination-btn:hover:not(:disabled) {
+  background-color: #1e40af;
+}
+
+:root[data-theme='dark'] .estudiantes-container .pagination .pagination-btn:disabled {
+  background-color: #334155 !important;
+  color: #94a3b8 !important;
+  border-color: #475569 !important;
 }
 
 /* Responsive */

@@ -159,118 +159,6 @@
   border-bottom: 2px solid #e2e8f0;
 }
 
-/* ========== MODAL VISTA PREVIA PDF ========== */
-.pdf-preview-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.85);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 10000;
-  padding: 2rem;
-  animation: fadeIn 0.2s ease-in-out;
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-.pdf-preview-content {
-  background: white;
-  border-radius: 16px;
-  width: 90%;
-  max-width: 1200px;
-  height: 90vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  animation: slideUp 0.3s ease-out;
-}
-
-@keyframes slideUp {
-  from {
-    transform: translateY(30px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-.pdf-preview-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 1.5rem 2rem;
-  border-bottom: 2px solid #e5e7eb;
-  background: #f8f9fa;
-}
-
-.pdf-preview-header h3 {
-  margin: 0;
-  font-size: 1.25rem;
-  font-weight: 700;
-  color: #1a1a1a;
-}
-
-.pdf-preview-actions {
-  display: flex;
-  gap: 0.75rem;
-  align-items: center;
-}
-
-.btn-descargar {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.625rem 1.25rem;
-  background: white;
-  color: #667eea;
-  border: 2px solid #667eea;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 600;
-  font-size: 0.875rem;
-  transition: all 0.2s;
-}
-
-.btn-descargar:hover {
-  background: #667eea;
-  color: white;
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-}
-
-.btn-cerrar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  background: #f3f4f6;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  color: #666;
-  transition: all 0.2s;
-}
-
-.btn-cerrar:hover {
-  background: #e5e7eb;
-  color: #dc2626;
-}
-
 .pdf-preview-body {
   flex: 1;
   overflow: hidden;
@@ -285,32 +173,6 @@
 }
 
 @media (max-width: 768px) {
-  .pdf-preview-modal {
-    padding: 0;
-  }
-
-  .pdf-preview-content {
-    width: 100%;
-    height: 100vh;
-    border-radius: 0;
-  }
-
-  .pdf-preview-header {
-    padding: 1rem;
-  }
-
-  .pdf-preview-header h3 {
-    font-size: 1rem;
-  }
-
-  .btn-descargar {
-    padding: 0.5rem 0.75rem;
-    font-size: 0.75rem;
-  }
-
-  .btn-descargar span {
-    display: none;
-  }
 }
 
 .info-rows {
@@ -338,6 +200,33 @@
 .info-row .value {
   font-size: 14px;
   color: #1e293b;
+  font-weight: 600;
+  text-align: right;
+}
+
+/* Scoped rows to prevent cross-module CSS collisions */
+.estudiante-detalle-container .info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+
+.estudiante-detalle-container .info-row .label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.estudiante-detalle-container .info-row .value {
+  font-size: 14px;
+  color: var(--text-primary);
   font-weight: 600;
   text-align: right;
 }
@@ -725,6 +614,185 @@
   font-size: 11px;
   color: #94a3b8;
   font-style: italic;
+}
+
+/* Dark mode contrast alignment */
+:root[data-theme='dark'] .badge {
+  border: 1px solid rgba(148, 163, 184, 0.35);
+}
+
+:root[data-theme='dark'] .badge-warning,
+:root[data-theme='dark'] .badge-referido {
+  background: rgba(251, 191, 36, 0.2);
+  border-color: rgba(251, 191, 36, 0.4);
+  color: #fde68a;
+}
+
+:root[data-theme='dark'] .badge-info,
+:root[data-theme='dark'] .badge-primary,
+:root[data-theme='dark'] .badge-directo,
+:root[data-theme='dark'] .badge-categoria,
+:root[data-theme='dark'] .badge-metodo {
+  background: rgba(96, 165, 250, 0.2);
+  border-color: rgba(96, 165, 250, 0.38);
+  color: #bfdbfe;
+}
+
+:root[data-theme='dark'] .badge-success {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: rgba(16, 185, 129, 0.35);
+  color: #86efac;
+}
+
+:root[data-theme='dark'] .badge-danger {
+  background: rgba(248, 113, 113, 0.2);
+  border-color: rgba(248, 113, 113, 0.42);
+  color: #fecaca;
+}
+
+:root[data-theme='dark'] .badge-secondary {
+  background: rgba(148, 163, 184, 0.18);
+  border-color: rgba(148, 163, 184, 0.35);
+  color: #e2e8f0;
+}
+
+:root[data-theme='dark'] .saldo-pendiente {
+  color: #fde68a !important;
+}
+
+:root[data-theme='dark'] .estudiante-detalle-container .btn-action {
+  color: #eff6ff;
+}
+
+:root[data-theme='dark'] .estudiante-detalle-container .btn-action.btn-action-success {
+  background: #047857;
+}
+
+:root[data-theme='dark'] .estudiante-detalle-container .btn-action.btn-action-success:hover {
+  background: #065f46;
+}
+
+:root[data-theme='dark'] .info-basica .cedula,
+:root[data-theme='dark'] .info-basica .matricula,
+:root[data-theme='dark'] .info-row .label,
+:root[data-theme='dark'] .pago-fecha,
+:root[data-theme='dark'] .mixto-label,
+:root[data-theme='dark'] .detalle-metodo,
+:root[data-theme='dark'] .detalle-ref {
+  color: var(--text-secondary);
+}
+
+:root[data-theme='dark'] .detalle-card {
+  background: var(--surface);
+  border-color: var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+:root[data-theme='dark'] .detalle-card h2,
+:root[data-theme='dark'] .info-row .value,
+:root[data-theme='dark'] .servicio-titulo,
+:root[data-theme='dark'] .metodo-item .monto {
+  color: var(--text-primary);
+}
+
+/* Force readable data blocks in dark mode (3 main cards) */
+:root[data-theme='dark'] .estudiante-detalle-container .detalle-card .info-row {
+  background: #0f172a !important;
+  border: 1px solid #334155 !important;
+  border-radius: 8px !important;
+  padding: 10px 12px !important;
+}
+
+:root[data-theme='dark'] .estudiante-detalle-container .detalle-card .info-row .label {
+  color: #cbd5e1 !important;
+}
+
+:root[data-theme='dark'] .estudiante-detalle-container .detalle-card .info-row .value {
+  color: #f8fafc !important;
+}
+
+:root[data-theme='dark'] .estudiante-detalle-container .detalle-card .info-row .value.saldo-pendiente {
+  color: #fde68a !important;
+}
+
+:root[data-theme='dark'] .detalle-card h2 {
+  border-bottom-color: var(--border);
+}
+
+:root[data-theme='dark'] .progreso-bar {
+  background: #1e293b;
+}
+
+:root[data-theme='dark'] .progreso-text {
+  color: #e2e8f0;
+  text-shadow: none;
+}
+
+:root[data-theme='dark'] .historial-pagos-section,
+:root[data-theme='dark'] .servicios-historial {
+  border-top-color: var(--border);
+}
+
+:root[data-theme='dark'] .historial-title {
+  color: var(--text-primary);
+}
+
+:root[data-theme='dark'] .servicio-item,
+:root[data-theme='dark'] .pago-item,
+:root[data-theme='dark'] .pago-mixto-desglose {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
+
+:root[data-theme='dark'] .servicio-item:hover,
+:root[data-theme='dark'] .pago-item:hover {
+  background: #1e293b;
+  border-color: #334155;
+}
+
+:root[data-theme='dark'] .servicio-estado {
+  color: #cbd5e1;
+  background: #334155;
+}
+
+:root[data-theme='dark'] .detalle-item {
+  border-bottom-color: #334155;
+}
+
+:root[data-theme='dark'] .detalle-monto,
+:root[data-theme='dark'] .pago-monto {
+  color: #86efac;
+}
+
+:root[data-theme='dark'] .estudiante-detalle-container .detalle-card select,
+:root[data-theme='dark'] .estudiante-detalle-container .form-input,
+:root[data-theme='dark'] .estudiante-detalle-container .form-select {
+  background: #0f172a;
+  border-color: #334155;
+  color: #f8fafc;
+}
+
+:root[data-theme='dark'] .estudiante-detalle-container .detalle-card select:disabled,
+:root[data-theme='dark'] .estudiante-detalle-container .form-input:disabled,
+:root[data-theme='dark'] .estudiante-detalle-container .form-select:disabled {
+  background: #0f172a;
+  color: #e2e8f0;
+  opacity: 1;
+}
+
+:root[data-theme='dark'] .estudiante-detalle-container .detalle-card select option {
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+:root[data-theme='dark'] .estudiante-detalle-container .btn-ampliar-secondary {
+  background: var(--surface);
+  color: var(--text-primary);
+  border-color: var(--border);
+}
+
+:root[data-theme='dark'] .estudiante-detalle-container .btn-ampliar-secondary:hover {
+  background: var(--surface-2);
 }
 
 /* Responsive */

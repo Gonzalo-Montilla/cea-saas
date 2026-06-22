@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { estudiantesAPI } from '../services/api';
 import { Camera, RotateCcw, Check, UserPlus } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import '../styles/NuevoEstudiante.css';
 
 export const NuevoEstudiante = () => {
@@ -22,6 +23,7 @@ export const NuevoEstudiante = () => {
   const [otpDeliveryStatus, setOtpDeliveryStatus] = useState<'sent' | 'fallback' | ''>('');
   const [otpCodeCopied, setOtpCodeCopied] = useState(false);
   const [otpCancelConfirmOpen, setOtpCancelConfirmOpen] = useState(false);
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [resultModal, setResultModal] = useState<null | {
     kind: 'success' | 'warning';
     title: string;
@@ -92,7 +94,7 @@ export const NuevoEstudiante = () => {
       setFotoCapturada(base64String);
     };
     reader.onerror = () => {
-      setError('Error al leer la imagen');
+      setError('No se pudo leer la imagen.');
     };
     reader.readAsDataURL(file);
   };
@@ -339,6 +341,32 @@ export const NuevoEstudiante = () => {
   };
 
   const closeResultModal = () => setResultModal(null);
+
+  const tieneCambiosSinGuardar = () =>
+    Boolean(
+      primerNombre ||
+      segundoNombre ||
+      primerApellido ||
+      segundoApellido ||
+      cedula ||
+      fechaNacimiento ||
+      email ||
+      telefono ||
+      direccion ||
+      ciudad ||
+      barrio ||
+      tipoSangre ||
+      eps ||
+      ocupacion ||
+      estadoCivil ||
+      nivelEducativo ||
+      estrato ||
+      nivelSisben ||
+      necesidadesEspeciales ||
+      contactoEmergenciaNombre ||
+      contactoEmergenciaTelefono ||
+      fotoCapturada
+    );
 
   const handleVerifyOtp = async () => {
     const otp = otpCode.trim();
@@ -787,31 +815,8 @@ export const NuevoEstudiante = () => {
             type="button"
             className="btn-secondary"
             onClick={() => {
-              const hayCambios = Boolean(
-                primerNombre ||
-                segundoNombre ||
-                primerApellido ||
-                segundoApellido ||
-                cedula ||
-                fechaNacimiento ||
-                email ||
-                telefono ||
-                direccion ||
-                ciudad ||
-                barrio ||
-                tipoSangre ||
-                eps ||
-                ocupacion ||
-                estadoCivil ||
-                nivelEducativo ||
-                estrato ||
-                nivelSisben ||
-                necesidadesEspeciales ||
-                contactoEmergenciaNombre ||
-                contactoEmergenciaTelefono ||
-                fotoCapturada
-              );
-              if (hayCambios && !confirm('Hay cambios sin guardar. ¿Deseas salir?')) {
+              if (tieneCambiosSinGuardar()) {
+                setShowExitConfirm(true);
                 return;
               }
               navigate('/dashboard');
@@ -829,6 +834,20 @@ export const NuevoEstudiante = () => {
           </button>
         </div>
       </form>
+
+      <ConfirmDialog
+        isOpen={showExitConfirm}
+        title="Salir sin guardar"
+        message="Hay cambios sin guardar. ¿Deseas salir de este formulario?"
+        confirmText="Sí, salir"
+        cancelText="Seguir editando"
+        confirmVariant="danger"
+        onCancel={() => setShowExitConfirm(false)}
+        onConfirm={() => {
+          setShowExitConfirm(false);
+          navigate('/dashboard');
+        }}
+      />
 
       {otpSessionToken && (
         <div className="otp-modal-backdrop" onClick={closeOtpModal}>

@@ -155,6 +155,8 @@
   transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
   flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .main-wrapper.expanded {
@@ -167,6 +169,9 @@
   padding: 14px 24px;
   box-shadow: var(--shadow-sm);
   border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 20;
 }
 
 .layout-session-notice {
@@ -178,6 +183,20 @@
   color: #047857;
   font-size: 13px;
   animation: notice-in 180ms ease-out;
+}
+
+.layout-notice-stack {
+  position: sticky;
+  top: 63px;
+  z-index: 18;
+}
+
+.layout-notice-stack .layout-session-notice {
+  margin-top: 8px;
+}
+
+.layout-notice-stack .layout-session-notice:first-child {
+  margin-top: 10px;
 }
 
 @keyframes notice-in {
@@ -258,6 +277,11 @@
   cursor: pointer;
 }
 
+.icon-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .icon-button:hover {
   background: #eef2ff;
   color: var(--primary);
@@ -286,6 +310,7 @@
   flex: 1;
   padding: 24px;
   overflow-y: auto;
+  min-height: 0;
 }
 
 .sidebar-backdrop {
@@ -399,6 +424,10 @@
 
   .layout-session-notice {
     margin: 8px 14px 0;
+  }
+
+  .layout-notice-stack {
+    top: 62px;
   }
 
   .main-content {

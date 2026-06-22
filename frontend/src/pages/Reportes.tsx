@@ -91,7 +91,7 @@ export const Reportes = () => {
       setAsistenciaDiaria(asistenciaData);
     } catch (err) {
       console.error('Error al cargar dashboard:', err);
-      setError('Error al cargar los reportes');
+      setError('No se pudieron cargar los reportes.');
     } finally {
       setLoading(false);
     }

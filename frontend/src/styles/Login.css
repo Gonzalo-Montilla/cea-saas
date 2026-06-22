@@ -98,6 +98,11 @@
   color: var(--primary);
 }
 
+.toggle-password:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .form-group input:focus {
   outline: none;
   border-color: var(--primary);
@@ -139,6 +144,11 @@
 .login-button:disabled {
   background-color: #94a3b8;
   cursor: not-allowed;
+}
+
+.tenant-preview {
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .login-footer {

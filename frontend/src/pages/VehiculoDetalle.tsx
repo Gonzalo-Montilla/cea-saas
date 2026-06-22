@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Plus, Wrench, Fuel, Paperclip } from 'lucide-react';
 import { uploadsAPI, vehiculosAPI } from '../services/api';
+import { ModalBase } from '../components/ui/ModalBase';
+import { ToastAlert } from '../components/ui/ToastAlert';
 import '../styles/VehiculoDetalle.css';
 
 interface Vehiculo {
@@ -149,6 +151,7 @@ export const VehiculoDetalle = () => {
   const [combConductor, setCombConductor] = useState('');
   const [combObs, setCombObs] = useState('');
   const [combAdjuntos, setCombAdjuntos] = useState<File[]>([]);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
   useEffect(() => {
     cargarDatos();
@@ -217,15 +220,16 @@ export const VehiculoDetalle = () => {
 
   const guardarUmbralConsumo = async () => {
     if (!vehiculo?.tipo) {
-      alert('El vehículo no tiene tipo definido');
+      setFeedback({ type: 'info', message: 'El vehículo no tiene tipo definido.' });
       return;
     }
     if (!umbralKmGalon) {
-      alert('Ingresa un umbral válido');
+      setFeedback({ type: 'info', message: 'Ingresa un umbral válido.' });
       return;
     }
     await vehiculosAPI.upsertConsumoUmbral(vehiculo.tipo, parseFloat(umbralKmGalon));
     await cargarResumenCombustible();
+    setFeedback({ type: 'success', message: 'Umbral de consumo guardado con éxito.' });
   };
 
   const exportarExcel = async () => {
@@ -349,7 +353,7 @@ export const VehiculoDetalle = () => {
 
   const guardarMantenimiento = async () => {
     if (!mantDesc && mantTipo === 'FALLA') {
-      alert('Describe la falla o el mantenimiento');
+      setFeedback({ type: 'info', message: 'Describe la falla o el mantenimiento.' });
       return;
     }
     const nuevo = await vehiculosAPI.createMantenimiento(Number(id), {
@@ -376,12 +380,13 @@ export const VehiculoDetalle = () => {
     setMantObs('');
     setMantAdjuntos([]);
     await cargarMantenimientos(mantPagina);
+    setFeedback({ type: 'success', message: 'Mantenimiento registrado con éxito.' });
   };
 
   const guardarRepuesto = async () => {
     if (!mantenimientoSeleccionado) return;
     if (!repNombre.trim()) {
-      alert('Nombre del repuesto obligatorio');
+      setFeedback({ type: 'info', message: 'Nombre del repuesto obligatorio.' });
       return;
     }
     await vehiculosAPI.addRepuesto(Number(id), mantenimientoSeleccionado.id, {
@@ -396,11 +401,12 @@ export const VehiculoDetalle = () => {
     setRepCosto('');
     setRepProveedor('');
     await cargarMantenimientos(mantPagina);
+    setFeedback({ type: 'success', message: 'Repuesto agregado con éxito.' });
   };
 
   const guardarCombustible = async () => {
     if (!combKmIni) {
-      alert('Kilometraje inicial es obligatorio');
+      setFeedback({ type: 'info', message: 'Kilometraje inicial es obligatorio.' });
       return;
     }
     let reciboUrl = combRecibo;
@@ -438,6 +444,7 @@ export const VehiculoDetalle = () => {
     setCombAdjuntos([]);
     await cargarCombustibles(combPagina);
     await cargarResumenCombustible();
+    setFeedback({ type: 'success', message: 'Registro de combustible guardado con éxito.' });
   };
 
   const calcularIndicadoresCombustible = () => {
@@ -471,8 +478,16 @@ export const VehiculoDetalle = () => {
 
   return (
     <div className="vehiculo-detalle-container">
+      {feedback && (
+        <ToastAlert type={feedback.type} message={feedback.message} onClose={() => setFeedback(null)} />
+      )}
       <div className="detalle-header">
-        <button className="btn-icon" onClick={() => navigate('/vehiculos')}>
+        <button
+          className="btn-icon"
+          onClick={() => navigate('/vehiculos')}
+          title="Volver al listado de vehículos"
+          aria-label="Volver al listado de vehículos"
+        >
           <ArrowLeft size={18} />
         </button>
         <h1>Hoja de Vida - {vehiculo.placa}</h1>
@@ -856,32 +871,37 @@ export const VehiculoDetalle = () => {
 
       {/* Modal adjunto */}
       {showAdjuntoModal && (
-      <div className="modal-overlay">
-          <div className="modal-box modal-adjunto" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>{adjuntoNombre || 'Adjunto'}</h3>
-              <button className="btn-icon" onClick={() => setShowAdjuntoModal(false)}>×</button>
-            </div>
-            <div className="modal-body">
-              {(adjuntoMime.startsWith('image') || adjuntoUrl.startsWith('data:image')) ? (
-                <img src={adjuntoUrl} alt={adjuntoNombre || 'Adjunto'} className="adjunto-preview" />
-              ) : (
-                <iframe title="Adjunto" src={adjuntoUrl} className="adjunto-iframe" />
-              )}
-            </div>
+        <ModalBase
+          isOpen={showAdjuntoModal}
+          title={adjuntoNombre || 'Adjunto'}
+          onClose={() => setShowAdjuntoModal(false)}
+          size="lg"
+        >
+          <div className="modal-body">
+            {(adjuntoMime.startsWith('image') || adjuntoUrl.startsWith('data:image')) ? (
+              <img src={adjuntoUrl} alt={adjuntoNombre || 'Adjunto'} className="adjunto-preview" />
+            ) : (
+              <iframe title="Adjunto" src={adjuntoUrl} className="adjunto-iframe" />
+            )}
           </div>
-        </div>
+        </ModalBase>
       )}
 
       {/* Modal mantenimiento */}
       {showMantModal && (
-      <div className="modal-overlay">
-          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Registrar mantenimiento/falla</h3>
-              <button className="btn-icon" onClick={() => setShowMantModal(false)}>×</button>
+        <ModalBase
+          isOpen={showMantModal}
+          title="Registrar mantenimiento/falla"
+          onClose={() => setShowMantModal(false)}
+          size="md"
+          footer={
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setShowMantModal(false)}>Cancelar</button>
+              <button className="btn-primary" onClick={guardarMantenimiento}>Guardar</button>
             </div>
-            <div className="modal-body">
+          }
+        >
+          <div className="modal-body">
               <div className="form-group">
                 <label>Tipo</label>
                 <select value={mantTipo} onChange={(e) => setMantTipo(e.target.value)}>
@@ -934,24 +954,25 @@ export const VehiculoDetalle = () => {
                   onChange={(e) => setMantAdjuntos(Array.from(e.target.files || []))}
                 />
               </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowMantModal(false)}>Cancelar</button>
-              <button className="btn-primary" onClick={guardarMantenimiento}>Guardar</button>
-            </div>
           </div>
-        </div>
+        </ModalBase>
       )}
 
       {/* Modal repuesto */}
       {showRepModal && mantenimientoSeleccionado && (
-      <div className="modal-overlay">
-          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Agregar repuesto</h3>
-              <button className="btn-icon" onClick={() => setShowRepModal(false)}>×</button>
+        <ModalBase
+          isOpen={showRepModal && Boolean(mantenimientoSeleccionado)}
+          title="Agregar repuesto"
+          onClose={() => setShowRepModal(false)}
+          size="md"
+          footer={
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setShowRepModal(false)}>Cancelar</button>
+              <button className="btn-primary" onClick={guardarRepuesto}>Guardar</button>
             </div>
-            <div className="modal-body">
+          }
+        >
+          <div className="modal-body">
               <div className="form-group">
                 <label>Nombre</label>
                 <input value={repNombre} onChange={(e) => setRepNombre(e.target.value)} />
@@ -968,24 +989,25 @@ export const VehiculoDetalle = () => {
                 <label>Proveedor</label>
                 <input value={repProveedor} onChange={(e) => setRepProveedor(e.target.value)} />
               </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowRepModal(false)}>Cancelar</button>
-              <button className="btn-primary" onClick={guardarRepuesto}>Guardar</button>
-            </div>
           </div>
-        </div>
+        </ModalBase>
       )}
 
       {/* Modal combustible */}
       {showCombModal && (
-      <div className="modal-overlay">
-          <div className="modal-box" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Registrar combustible</h3>
-              <button className="btn-icon" onClick={() => setShowCombModal(false)}>×</button>
+        <ModalBase
+          isOpen={showCombModal}
+          title="Registrar combustible"
+          onClose={() => setShowCombModal(false)}
+          size="md"
+          footer={
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={() => setShowCombModal(false)}>Cancelar</button>
+              <button className="btn-primary" onClick={guardarCombustible}>Guardar</button>
             </div>
-            <div className="modal-body">
+          }
+        >
+          <div className="modal-body">
               <div className="form-group">
                 <label>Fecha</label>
                 <input type="date" value={combFecha} onChange={(e) => setCombFecha(e.target.value)} />
@@ -1050,13 +1072,8 @@ export const VehiculoDetalle = () => {
                 <label>Observaciones</label>
                 <textarea value={combObs} onChange={(e) => setCombObs(e.target.value)} />
               </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn-secondary" onClick={() => setShowCombModal(false)}>Cancelar</button>
-              <button className="btn-primary" onClick={guardarCombustible}>Guardar</button>
-            </div>
           </div>
-        </div>
+        </ModalBase>
       )}
     </div>
   );

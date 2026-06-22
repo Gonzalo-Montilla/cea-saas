@@ -133,17 +133,6 @@
   color: #991b1b;
 }
 
-.modal-box {
-  background: var(--surface);
-  border-radius: var(--radius-lg);
-  padding: 16px;
-  max-width: 520px;
-  width: 90%;
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-md);
-}
-
-.modal-header,
 .modal-footer {
   display: flex;
   justify-content: space-between;
@@ -279,12 +268,6 @@
   .vehiculos-table td {
     padding: 10px 8px;
     font-size: 13px;
-  }
-
-  .modal-box {
-    width: calc(100vw - 16px);
-    max-height: 88vh;
-    overflow: auto;
   }
 
   .modal-footer {
