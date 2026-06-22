@@ -14,6 +14,7 @@ class UsuarioCreate(BaseModel):
     rol: RolUsuario
     is_active: Optional[bool] = True
     permisos_modulos: Optional[list[str]] = None
+    branch_ids: Optional[list[int]] = None
 
 
 class UsuarioUpdate(BaseModel):
@@ -25,6 +26,7 @@ class UsuarioUpdate(BaseModel):
     rol: Optional[RolUsuario] = None
     is_active: Optional[bool] = None
     permisos_modulos: Optional[list[str]] = None
+    branch_ids: Optional[list[int]] = None
 
 
 class UsuarioPasswordUpdate(BaseModel):
@@ -51,6 +53,7 @@ class UsuarioResponse(BaseModel):
     created_at: datetime
     last_login: Optional[datetime]
     permisos_modulos: Optional[list[str]] = None
+    branch_ids: Optional[list[int]] = None
 
     class Config:
         from_attributes = True

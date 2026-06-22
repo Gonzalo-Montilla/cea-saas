@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Plus, Pencil, KeyRound, Shield, ChevronDown, Search, X } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { ModalBase } from '../components/ui/ModalBase';
-import { usuariosAPI } from '../services/api';
+import { tenantsAPI, usuariosAPI } from '../services/api';
 import { RolUsuario } from '../types';
 import '../styles/Usuarios.css';
 
@@ -17,6 +17,15 @@ interface UsuarioItem {
   created_at: string;
   last_login?: string;
   permisos_modulos?: string[];
+  branch_ids?: number[];
+}
+
+interface BranchItem {
+  id: number;
+  nombre: string;
+  codigo: string;
+  is_active: boolean;
+  is_primary: boolean;
 }
 
 const roles = [
@@ -26,6 +35,8 @@ const roles = [
   RolUsuario.CAJERO,
   RolUsuario.INSTRUCTOR
 ];
+
+const roleSupportsMultipleBranches = (value: RolUsuario): boolean => value !== RolUsuario.CAJERO;
 
 const MODULOS = [
   { id: 'dashboard', label: 'Inicio (Dashboard)' },
@@ -94,6 +105,36 @@ export const Usuarios = () => {
   const [permisosModulos, setPermisosModulos] = useState<string[]>([]);
   const [newPassword, setNewPassword] = useState('');
   const [mostrarGuiaRoles, setMostrarGuiaRoles] = useState(false);
+  const [sucursales, setSucursales] = useState<BranchItem[]>([]);
+  const [sucursalesLoading, setSucursalesLoading] = useState(false);
+  const [selectedBranchIds, setSelectedBranchIds] = useState<number[]>([]);
+
+  const branchNameMap = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const branch of sucursales) map.set(branch.id, branch.nombre || branch.codigo);
+    return map;
+  }, [sucursales]);
+
+  const branchSummary = (u: UsuarioItem) => {
+    const ids = (u.branch_ids || []).filter((id) => branchNameMap.has(id));
+    if (!ids.length) return '-';
+    const names = ids.map((id) => branchNameMap.get(id)).filter(Boolean) as string[];
+    return names.join(', ');
+  };
+
+  const cargarSucursales = async () => {
+    try {
+      setSucursalesLoading(true);
+      const ctx = await tenantsAPI.getContext();
+      const items = Array.isArray(ctx?.branches) ? ctx.branches : [];
+      setSucursales(items.filter((b) => b.is_active));
+    } catch (err) {
+      console.error('Error al cargar sucursales:', err);
+      setError('No se pudieron cargar las sucursales activas.');
+    } finally {
+      setSucursalesLoading(false);
+    }
+  };
 
   const cargarUsuarios = async (searchTerm?: string) => {
     try {
@@ -121,6 +162,10 @@ export const Usuarios = () => {
     void cargarUsuarios(debouncedSearch || undefined);
   }, [debouncedSearch]);
 
+  useEffect(() => {
+    void cargarSucursales();
+  }, []);
+
   const abrirNuevo = () => {
     setError('');
     setEditando(null);
@@ -132,6 +177,8 @@ export const Usuarios = () => {
     setRol(RolUsuario.CAJERO);
     setActivo(true);
     setPermisosModulos([]);
+    const primary = sucursales.find((b) => b.is_primary) || sucursales[0];
+    setSelectedBranchIds(primary ? [primary.id] : []);
     setShowModal(true);
   };
 
@@ -146,7 +193,15 @@ export const Usuarios = () => {
     setRol(u.rol);
     setActivo(u.is_active);
     setPermisosModulos(u.permisos_modulos || []);
+    setSelectedBranchIds(u.branch_ids || []);
     setShowModal(true);
+  };
+
+  const handleRolChange = (nextRol: RolUsuario) => {
+    setRol(nextRol);
+    if (!roleSupportsMultipleBranches(nextRol) && selectedBranchIds.length > 1) {
+      setSelectedBranchIds((prev) => prev.slice(0, 1));
+    }
   };
 
   const abrirReset = (u: UsuarioItem) => {
@@ -165,6 +220,14 @@ export const Usuarios = () => {
       setError('Selecciona al menos un módulo para habilitar acceso');
       return;
     }
+    if (activo && selectedBranchIds.length === 0) {
+      setError('Selecciona al menos una sucursal para este usuario');
+      return;
+    }
+    if (activo && !roleSupportsMultipleBranches(rol) && selectedBranchIds.length !== 1) {
+      setError('El rol CAJERO solo puede tener una sucursal asignada');
+      return;
+    }
     try {
       setGuardandoUsuario(true);
       if (editando) {
@@ -175,7 +238,8 @@ export const Usuarios = () => {
           telefono: telefono || null,
           rol,
           is_active: activo,
-          permisos_modulos: permisosModulos
+          permisos_modulos: permisosModulos,
+          branch_ids: selectedBranchIds,
         });
       } else {
         if (!password) {
@@ -190,7 +254,8 @@ export const Usuarios = () => {
           telefono: telefono || null,
           rol,
           is_active: activo,
-          permisos_modulos: permisosModulos
+          permisos_modulos: permisosModulos,
+          branch_ids: selectedBranchIds,
         });
       }
       setError('');
@@ -319,6 +384,7 @@ export const Usuarios = () => {
                 <th>Correo</th>
                 <th>Teléfono</th>
                 <th>Rol</th>
+                <th>Sucursales</th>
                 <th>Estado</th>
                 <th>Último login</th>
                 <th>Acciones</th>
@@ -331,6 +397,7 @@ export const Usuarios = () => {
                   <td>{u.email}</td>
                   <td>{u.telefono || '-'}</td>
                   <td>{u.rol}</td>
+                  <td>{branchSummary(u)}</td>
                   <td>{u.is_active ? 'Activo' : 'Inactivo'}</td>
                   <td>{u.last_login ? new Date(u.last_login).toLocaleString('es-CO') : '-'}</td>
                   <td>
@@ -356,7 +423,7 @@ export const Usuarios = () => {
               ))}
               {usuarios.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="empty-state">No hay usuarios con ese criterio de búsqueda</td>
+                  <td colSpan={8} className="empty-state">No hay usuarios con ese criterio de búsqueda</td>
                 </tr>
               )}
             </tbody>
@@ -416,7 +483,7 @@ export const Usuarios = () => {
         )}
         <div className="form-group">
           <label>Rol</label>
-          <select value={rol} onChange={(e) => setRol(e.target.value as RolUsuario)}>
+          <select value={rol} onChange={(e) => handleRolChange(e.target.value as RolUsuario)}>
             {roles.map((r) => (
               <option key={r} value={r}>{r}</option>
             ))}
@@ -428,6 +495,43 @@ export const Usuarios = () => {
             <option value="SI">Habilitado</option>
             <option value="NO">Bloqueado</option>
           </select>
+        </div>
+        <div className="form-group">
+          <label>Sucursales asignadas</label>
+          {sucursalesLoading ? (
+            <div className="permisos-resumen">Cargando sucursales...</div>
+          ) : sucursales.length === 0 ? (
+            <div className="permisos-resumen">No hay sucursales activas configuradas para esta escuela.</div>
+          ) : (
+            <div className="modulos-grid">
+              {sucursales.map((branch) => (
+                <label key={branch.id} className="modulo-item">
+                  <input
+                    type="checkbox"
+                    checked={selectedBranchIds.includes(branch.id)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedBranchIds((prev) => {
+                          if (!roleSupportsMultipleBranches(rol)) {
+                            return [branch.id];
+                          }
+                          return Array.from(new Set([...prev, branch.id]));
+                        });
+                      } else {
+                        setSelectedBranchIds((prev) => prev.filter((id) => id !== branch.id));
+                      }
+                    }}
+                    disabled={guardandoUsuario}
+                  />
+                  <span>{branch.nombre}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          <div className="permisos-resumen">Seleccionadas: {selectedBranchIds.length}</div>
+          {!roleSupportsMultipleBranches(rol) && (
+            <div className="permisos-resumen">Nota: el rol CAJERO solo puede operar en una sede.</div>
+          )}
         </div>
         <div className="form-group">
           <label>Permisos por módulo</label>
