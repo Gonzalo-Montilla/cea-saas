@@ -10,6 +10,7 @@ interface ModalBaseProps {
   onClose?: () => void;
   closeDisabled?: boolean;
   size?: ModalSize;
+  zIndex?: number;
   children: ReactNode;
   footer?: ReactNode;
   labelledBy?: string;
@@ -23,6 +24,7 @@ export const ModalBase = ({
   onClose,
   closeDisabled = false,
   size = 'md',
+  zIndex = 3000,
   children,
   footer,
   labelledBy,
@@ -110,7 +112,11 @@ export const ModalBase = ({
   if (!isOpen) return null;
 
   return (
-    <div className="ui-modal-overlay" onMouseDown={() => (!closeDisabled ? onClose?.() : undefined)}>
+    <div
+      className="ui-modal-overlay"
+      style={{ zIndex }}
+      onMouseDown={() => (!closeDisabled ? onClose?.() : undefined)}
+    >
       <div
         ref={modalRef}
         className={`ui-modal ui-modal-${size}`}

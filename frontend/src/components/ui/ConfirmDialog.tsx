@@ -40,6 +40,7 @@ export const ConfirmDialog = ({
       role="alertdialog"
       describedBy={messageId}
       size="sm"
+      zIndex={3200}
       footer={
         <>
           <button type="button" className="btn-secondary" onClick={onCancel} disabled={isLoading}>
