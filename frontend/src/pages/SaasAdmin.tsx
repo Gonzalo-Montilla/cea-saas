@@ -20,6 +20,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { authAPI } from '../services/api';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { ModalBase } from '../components/ui/ModalBase';
+import { parseApiError } from '../utils/errors';
+import { formatCurrencyCOP } from '../utils/formatters';
 import {
   saasAdminAPI,
   type SaasAuditLogItem,
@@ -41,8 +43,9 @@ const PLAN_LABELS: Record<string, string> = {
   ENTERPRISE: 'EMPRESA (12 meses)',
 };
 const SUBSCRIPTION_STATUSES = ['TRIAL', 'ACTIVE', 'PAST_DUE', 'CANCELED'];
-const BILLING_CYCLES = ['QUARTERLY', 'SEMIANNUAL', 'YEARLY'];
+const BILLING_CYCLES = ['MONTHLY', 'QUARTERLY', 'SEMIANNUAL', 'YEARLY'];
 const BILLING_CYCLE_LABELS: Record<string, string> = {
+  MONTHLY: 'Mensual (1 mes)',
   QUARTERLY: 'Trimestral (3 meses)',
   SEMIANNUAL: 'Semestral (6 meses)',
   YEARLY: 'Anual (12 meses)',
@@ -107,15 +110,13 @@ const RESUMEN_PERIODS = [
   { value: 'all', label: 'Histórico' },
 ] as const;
 
-const money = (value: number) =>
-  new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(value || 0);
+const money = (value: number) => formatCurrencyCOP(value || 0);
 
 const planLabel = (plan?: string | null) => PLAN_LABELS[String(plan || '').toUpperCase()] || String(plan || '-');
 type BillingCycle = NonNullable<SaasTenantItem['billing_cycle']>;
 const BILLING_CYCLE_VALUES: BillingCycle[] = ['MONTHLY', 'QUARTERLY', 'SEMIANNUAL', 'YEARLY'];
 const normalizeBillingCycle = (value?: string | null): BillingCycle => {
   const normalized = String(value || '').toUpperCase();
-  if (normalized === 'MONTHLY') return 'QUARTERLY';
   return BILLING_CYCLE_VALUES.includes(normalized as BillingCycle)
     ? (normalized as BillingCycle)
     : 'QUARTERLY';
@@ -174,6 +175,59 @@ const toRangeStartIso = (value?: string) => (value ? `${value}T00:00:00` : undef
 const toRangeEndIso = (value?: string) => (value ? `${value}T23:59:59` : undefined);
 const csvSafe = (value: unknown) => `"${String(value ?? '').replace(/"/g, '""')}"`;
 const statusClass = (value?: string | null) => `bo-status bo-status-${String(value || 'info').toLowerCase()}`;
+const SUPPORT_STATUS_LABELS: Record<string, string> = {
+  OPEN: 'Abierto',
+  IN_PROGRESS: 'En progreso',
+  WAITING_CUSTOMER: 'Esperando cliente',
+  RESOLVED: 'Resuelto',
+  CLOSED: 'Cerrado',
+};
+const SUPPORT_PRIORITY_LABELS: Record<string, string> = {
+  LOW: 'Baja',
+  MEDIUM: 'Media',
+  HIGH: 'Alta',
+  CRITICAL: 'Crítica',
+};
+const LEAD_STAGE_LABELS: Record<string, string> = {
+  NUEVO: 'Nuevo',
+  CONTACTADO: 'Contactado',
+  DEMO_AGENDADA: 'Demo agendada',
+  PROPUESTA_ENVIADA: 'Propuesta enviada',
+  CERRADO_GANADO: 'Cerrado ganado',
+  CERRADO_PERDIDO: 'Cerrado perdido',
+};
+const SUBSCRIPTION_STATUS_LABELS: Record<string, string> = {
+  TRIAL: 'Prueba',
+  ACTIVE: 'Activa',
+  PAST_DUE: 'Vencida',
+  CANCELED: 'Cancelada',
+};
+const SLA_STATE_LABELS: Record<string, string> = {
+  ON_TRACK: 'En tiempo',
+  DUE_SOON: 'Próximo a vencer',
+  OVERDUE: 'Vencido',
+  NO_DUE_DATE: 'Sin fecha',
+};
+const BILLING_EVENT_TYPE_LABELS: Record<string, string> = {
+  PAYMENT_RECORDED: 'Pago registrado',
+  INVOICE_ISSUED: 'Cargo emitido',
+};
+const BILLING_EVENT_STATUS_LABELS: Record<string, string> = {
+  PENDING: 'Pendiente',
+  PAID: 'Pagado',
+  OVERDUE: 'Vencido',
+  ACTIVE: 'Activo',
+  CANCELED: 'Cancelado',
+};
+const supportStatusLabel = (value?: string | null) => SUPPORT_STATUS_LABELS[String(value || '').toUpperCase()] || String(value || '-');
+const supportPriorityLabel = (value?: string | null) => SUPPORT_PRIORITY_LABELS[String(value || '').toUpperCase()] || String(value || '-');
+const leadStageLabel = (value?: string | null) => LEAD_STAGE_LABELS[String(value || '').toUpperCase()] || String(value || '-');
+const subscriptionStatusLabel = (value?: string | null) =>
+  SUBSCRIPTION_STATUS_LABELS[String(value || '').toUpperCase()] || String(value || '-');
+const slaStateLabel = (value?: string | null) => SLA_STATE_LABELS[String(value || '').toUpperCase()] || String(value || 'Sin fecha');
+const billingEventTypeLabel = (value?: string | null) => BILLING_EVENT_TYPE_LABELS[String(value || '').toUpperCase()] || String(value || '-');
+const billingEventStatusLabel = (value?: string | null) =>
+  BILLING_EVENT_STATUS_LABELS[String(value || '').toUpperCase()] || String(value || '-');
 
 const normalizeScopes = (scopes?: string[]) =>
   (scopes || []).map((x) => String(x).trim().toLowerCase()).filter(Boolean).sort();
@@ -220,7 +274,7 @@ export const SaasAdmin = () => {
   const availableViewLabels = useMemo(() => {
     const labels: Record<string, string> = {
       resumen: 'Resumen',
-      tenants: 'Tenants',
+      tenants: 'Escuelas',
       billing: 'Facturación',
       pipeline: 'Pipeline',
       support: 'Soporte',
@@ -353,6 +407,7 @@ export const SaasAdmin = () => {
     contacto_email: '',
     contacto_telefono: '',
   });
+  const [editingBranchId, setEditingBranchId] = useState<number | null>(null);
   const [paymentModalTenant, setPaymentModalTenant] = useState<SaasTenantItem | null>(null);
   const [supportDescriptionModal, setSupportDescriptionModal] = useState<null | {
     ticketId: number;
@@ -367,6 +422,7 @@ export const SaasAdmin = () => {
     temporaryPassword: string;
   }>(null);
   const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
+  const [showCreateTenantAdminPassword, setShowCreateTenantAdminPassword] = useState(false);
   const [credentialsCopied, setCredentialsCopied] = useState(false);
   const [creatingTenant, setCreatingTenant] = useState(false);
   const [createTenantSuccessModal, setCreateTenantSuccessModal] = useState<null | {
@@ -374,6 +430,8 @@ export const SaasAdmin = () => {
     adminEmail: string;
     temporaryPassword: string;
     welcomeEmailSent: boolean;
+    requestedBranches: number;
+    createdBranches: number;
   }>(null);
   const [createTenantLogoFileName, setCreateTenantLogoFileName] = useState('');
   const [processingCreateTenantLogo, setProcessingCreateTenantLogo] = useState(false);
@@ -449,6 +507,7 @@ export const SaasAdmin = () => {
     admin_nombre_completo: '',
     admin_cedula: '',
     admin_telefono: '',
+    sucursales_adicionales: '0',
     send_welcome_email: true,
     activate_tenant: true,
   });
@@ -509,7 +568,7 @@ export const SaasAdmin = () => {
         billing_cycle: normalizeBillingCycle(tenant.billing_cycle),
       })));
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo cargar el backoffice SaaS');
+      setError(parseApiError(err, 'No se pudo cargar el backoffice SaaS'));
     } finally {
       setLoading(false);
     }
@@ -530,7 +589,7 @@ export const SaasAdmin = () => {
       setPipelineSummary(pipelineData);
       setLeads(leadsData.items || []);
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo cargar pipeline comercial');
+      setError(parseApiError(err, 'No se pudo cargar pipeline comercial'));
     } finally {
       setLeadsLoading(false);
     }
@@ -543,7 +602,7 @@ export const SaasAdmin = () => {
       const usersData = await saasAdminAPI.getUsers({ limit: 200, search: userSearch.trim() || undefined });
       setUsers(usersData.items || []);
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo cargar usuarios SaaS');
+      setError(parseApiError(err, 'No se pudo cargar usuarios SaaS'));
     } finally {
       setUsersLoading(false);
     }
@@ -564,7 +623,7 @@ export const SaasAdmin = () => {
       setAuditLimit(Number(auditData.limit || pageLimit));
       setAuditTotal(Number(auditData.total || 0));
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo cargar auditoría SaaS');
+      setError(parseApiError(err, 'No se pudo cargar auditoría SaaS'));
     } finally {
       setAuditLoading(false);
     }
@@ -588,7 +647,7 @@ export const SaasAdmin = () => {
       setBillingTotal(Number(data.total || 0));
       setAgingSummary(aging);
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo cargar historial de cobros');
+      setError(parseApiError(err, 'No se pudo cargar historial de cobros'));
     } finally {
       setBillingLoading(false);
     }
@@ -612,7 +671,7 @@ export const SaasAdmin = () => {
       setSupportLimit(Number(ticketsData.limit || pageLimit));
       setSupportTotal(Number(ticketsData.total || 0));
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo cargar soporte SaaS');
+      setError(parseApiError(err, 'No se pudo cargar soporte SaaS'));
     } finally {
       setSupportLoading(false);
     }
@@ -701,7 +760,7 @@ export const SaasAdmin = () => {
         payments: payload?.payments || [],
       });
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo cargar ingresos del resumen');
+      setError(parseApiError(err, 'No se pudo cargar ingresos del resumen'));
     } finally {
       setResumenIncomeLoading(false);
     }
@@ -720,7 +779,7 @@ export const SaasAdmin = () => {
         await loadResumenIncomeBreakdown();
       }
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo ejecutar la autocorrección');
+      setError(parseApiError(err, 'No se pudo ejecutar la autocorrección'));
     } finally {
       setResumenDataQualityFixingKey(null);
       setConfirmDataQualityFixKey(null);
@@ -788,6 +847,12 @@ export const SaasAdmin = () => {
   }, [canTenants, canBilling, canUsers, canPipeline, canSupport, canAudit, saasView]);
 
   useEffect(() => {
+    // Evita que mensajes de un modulo contaminen otro al cambiar de vista.
+    setError('');
+    setInfoMessage('');
+  }, [saasView]);
+
+  useEffect(() => {
     if (saasView === 'resumen' && (canTenants || canBilling)) {
       void loadData();
     }
@@ -824,7 +889,7 @@ export const SaasAdmin = () => {
       const key = String(tenant.subscription_status || 'TRIAL').toUpperCase();
       counts.set(key, Number(counts.get(key) || 0) + 1);
     });
-    return Array.from(counts.entries()).map(([name, value]) => ({ name, value }));
+    return Array.from(counts.entries()).map(([name, value]) => ({ name: subscriptionStatusLabel(name), value }));
   }, [tenants]);
 
   const resumenCutoffDate = useMemo(() => {
@@ -869,7 +934,7 @@ export const SaasAdmin = () => {
   const supportPriorityRows = useMemo(
     () =>
       SUPPORT_PRIORITIES.map((name) => ({
-        name,
+        name: supportPriorityLabel(name),
         value: filteredResumenSupportTickets.filter((ticket) => ticket.priority === name).length,
       })),
     [filteredResumenSupportTickets]
@@ -878,7 +943,7 @@ export const SaasAdmin = () => {
   const supportStatusRows = useMemo(
     () =>
       SUPPORT_STATUSES.map((name) => ({
-        name,
+        name: supportStatusLabel(name),
         value: filteredResumenSupportTickets.filter((ticket) => ticket.status === name).length,
       })),
     [filteredResumenSupportTickets]
@@ -896,7 +961,7 @@ export const SaasAdmin = () => {
   const pipelineRows = useMemo(
     () =>
       LEAD_STAGES.map((name) => ({
-        name,
+        name: leadStageLabel(name),
         value: filteredResumenLeads.filter((lead) => lead.estado === name).length,
       })),
     [filteredResumenLeads]
@@ -1106,7 +1171,7 @@ export const SaasAdmin = () => {
       if (err?.response?.status === 401) {
         setError('Tu sesión expiró. Inicia sesión nuevamente para guardar cambios.');
       } else {
-        setError(err?.response?.data?.detail || 'No se pudo actualizar el tenant');
+        setError(parseApiError(err, 'No se pudo actualizar la escuela'));
       }
     } finally {
       setSavingTenantId(null);
@@ -1141,9 +1206,10 @@ export const SaasAdmin = () => {
         contacto_email: '',
         contacto_telefono: '',
       });
+      setEditingBranchId(null);
       await loadTenantBranchData(tenant.id);
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo cargar la configuración de sucursales');
+      setError(parseApiError(err, 'No se pudo cargar la configuración de sucursales'));
     } finally {
       setBranchModalLoading(false);
     }
@@ -1155,6 +1221,7 @@ export const SaasAdmin = () => {
     setBranchModalTenant(null);
     setTenantBranches([]);
     setTenantBranchUsers([]);
+    setEditingBranchId(null);
   };
 
   const createBranchFromModal = async () => {
@@ -1166,14 +1233,25 @@ export const SaasAdmin = () => {
     try {
       setBranchModalSaving(true);
       setError('');
-      await saasAdminAPI.createTenantBranch(branchModalTenant.id, {
-        nombre: newBranchForm.nombre.trim(),
-        codigo: newBranchForm.codigo.trim() || null,
-        ciudad: newBranchForm.ciudad.trim() || null,
-        direccion: newBranchForm.direccion.trim() || null,
-        contacto_email: newBranchForm.contacto_email.trim() || null,
-        contacto_telefono: newBranchForm.contacto_telefono.trim() || null,
-      });
+      if (editingBranchId) {
+        await saasAdminAPI.updateTenantBranch(branchModalTenant.id, editingBranchId, {
+          nombre: newBranchForm.nombre.trim(),
+          codigo: newBranchForm.codigo.trim() || null,
+          ciudad: newBranchForm.ciudad.trim() || null,
+          direccion: newBranchForm.direccion.trim() || null,
+          contacto_email: newBranchForm.contacto_email.trim() || null,
+          contacto_telefono: newBranchForm.contacto_telefono.trim() || null,
+        });
+      } else {
+        await saasAdminAPI.createTenantBranch(branchModalTenant.id, {
+          nombre: newBranchForm.nombre.trim(),
+          codigo: newBranchForm.codigo.trim() || null,
+          ciudad: newBranchForm.ciudad.trim() || null,
+          direccion: newBranchForm.direccion.trim() || null,
+          contacto_email: newBranchForm.contacto_email.trim() || null,
+          contacto_telefono: newBranchForm.contacto_telefono.trim() || null,
+        });
+      }
       await loadTenantBranchData(branchModalTenant.id);
       await refreshTenantAggregates();
       setNewBranchForm({
@@ -1184,13 +1262,39 @@ export const SaasAdmin = () => {
         contacto_email: '',
         contacto_telefono: '',
       });
+      setEditingBranchId(null);
       if (canAudit) await loadAuditLogs();
-      setInfoMessage('Sucursal creada correctamente.');
+      setInfoMessage(editingBranchId ? 'Sucursal actualizada correctamente.' : 'Sucursal creada correctamente.');
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo crear la sucursal');
+      setError(parseApiError(err, editingBranchId ? 'No se pudo actualizar la sucursal' : 'No se pudo crear la sucursal'));
     } finally {
       setBranchModalSaving(false);
     }
+  };
+
+  const startEditBranchFromModal = (branch: SaasBranchItem) => {
+    setEditingBranchId(branch.id);
+    setNewBranchForm({
+      nombre: branch.nombre || '',
+      codigo: branch.codigo || '',
+      ciudad: branch.ciudad || '',
+      direccion: branch.direccion || '',
+      contacto_email: branch.contacto_email || '',
+      contacto_telefono: branch.contacto_telefono || '',
+    });
+    setError('');
+  };
+
+  const cancelEditBranchFromModal = () => {
+    setEditingBranchId(null);
+    setNewBranchForm({
+      nombre: '',
+      codigo: '',
+      ciudad: '',
+      direccion: '',
+      contacto_email: '',
+      contacto_telefono: '',
+    });
   };
 
   const setPrimaryBranchFromModal = async (branchId: number) => {
@@ -1204,7 +1308,7 @@ export const SaasAdmin = () => {
       if (canAudit) await loadAuditLogs();
       setInfoMessage('Sucursal principal actualizada.');
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo actualizar la sucursal principal');
+      setError(parseApiError(err, 'No se pudo actualizar la sucursal principal'));
     } finally {
       setBranchModalSaving(false);
     }
@@ -1223,7 +1327,7 @@ export const SaasAdmin = () => {
       if (canAudit) await loadAuditLogs();
       setInfoMessage('Estado de sucursal actualizado.');
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo actualizar el estado de la sucursal');
+      setError(parseApiError(err, 'No se pudo actualizar el estado de la sucursal'));
     } finally {
       setBranchModalSaving(false);
     }
@@ -1252,7 +1356,7 @@ export const SaasAdmin = () => {
       );
       if (canAudit) await loadAuditLogs();
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo actualizar el acceso por sucursal');
+      setError(parseApiError(err, 'No se pudo actualizar el acceso por sucursal'));
     } finally {
       setSavingBranchUserId(null);
     }
@@ -1260,12 +1364,14 @@ export const SaasAdmin = () => {
 
   const openCreateTenantModal = () => {
     setCreateTenantLogoFileName('');
+    setShowCreateTenantAdminPassword(false);
     setError('');
     setCreateTenantModalOpen(true);
   };
 
   const closeCreateTenantModal = () => {
     if (creatingTenant) return;
+    setShowCreateTenantAdminPassword(false);
     setCreateTenantModalOpen(false);
   };
 
@@ -1277,6 +1383,7 @@ export const SaasAdmin = () => {
     try {
       setCreatingTenant(true);
       setError('');
+      const sucursalesAdicionales = Math.max(0, Math.min(20, Number(createTenantForm.sucursales_adicionales || 0)));
       const result = await saasAdminAPI.createTenant({
         nombre_escuela: createTenantForm.nombre_escuela.trim(),
         slug: createTenantForm.slug.trim() || null,
@@ -1292,18 +1399,25 @@ export const SaasAdmin = () => {
         admin_nombre_completo: createTenantForm.admin_nombre_completo.trim(),
         admin_cedula: createTenantForm.admin_cedula.trim(),
         admin_telefono: createTenantForm.admin_telefono.trim() || null,
+        sucursales_adicionales: sucursalesAdicionales,
         send_welcome_email: createTenantForm.send_welcome_email,
         activate_tenant: createTenantForm.activate_tenant,
       });
+      const createdBranches = Number(result.sucursales_adicionales_creadas ?? sucursalesAdicionales);
       setCreateTenantSuccessModal({
         tenantSlug: result.tenant_slug,
         adminEmail: result.admin_email,
         temporaryPassword: result.temporary_password,
         welcomeEmailSent: Boolean(result.welcome_email_sent),
+        requestedBranches: sucursalesAdicionales,
+        createdBranches,
       });
       setInfoMessage(
         `Escuela creada: ${result.tenant_slug}. ` +
-        (result.welcome_email_sent ? 'Se envió correo de acceso.' : 'No se pudo enviar correo de acceso.')
+        (result.welcome_email_sent ? 'Se envió correo de acceso. ' : 'No se pudo enviar correo de acceso. ') +
+        (sucursalesAdicionales
+          ? `Sucursales adicionales creadas: ${createdBranches}/${sucursalesAdicionales}.`
+          : 'Sucursal principal creada automáticamente.')
       );
       setCreateTenantForm({
         nombre_escuela: '',
@@ -1320,6 +1434,7 @@ export const SaasAdmin = () => {
         admin_nombre_completo: '',
         admin_cedula: '',
         admin_telefono: '',
+        sucursales_adicionales: '0',
         send_welcome_email: true,
         activate_tenant: true,
       });
@@ -1328,7 +1443,7 @@ export const SaasAdmin = () => {
       if (canTenants || canBilling) await loadData();
       if (canAudit) await loadAuditLogs();
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo crear la escuela');
+      setError(parseApiError(err, 'No se pudo crear la escuela'));
     } finally {
       setCreatingTenant(false);
     }
@@ -1390,7 +1505,7 @@ export const SaasAdmin = () => {
         setInfoMessage('Pago registrado correctamente. Recibo PDF generado (envío de correo pendiente).');
       }
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo registrar el pago');
+      setError(parseApiError(err, 'No se pudo registrar el pago'));
     } finally {
       setRecordingPayment(false);
     }
@@ -1415,7 +1530,7 @@ export const SaasAdmin = () => {
       setReceiptPreviewZoom(100);
       setInfoMessage(`Vista previa lista: ${receiptNumber}.pdf`);
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo abrir el recibo');
+      setError(parseApiError(err, 'No se pudo abrir el recibo'));
     } finally {
       setReceiptActionEventId(null);
     }
@@ -1458,7 +1573,7 @@ export const SaasAdmin = () => {
           : `No se pudo enviar el recibo a ${result.to_email}.`
       );
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo reenviar el recibo');
+      setError(parseApiError(err, 'No se pudo reenviar el recibo'));
     } finally {
       setReceiptActionEventId(null);
     }
@@ -1475,7 +1590,7 @@ export const SaasAdmin = () => {
       if (canAudit) await loadAuditLogs();
       setInfoMessage(`Control de vencimientos ejecutado. Tenants actualizados: ${Number(result.updated_tenants || 0)}.`);
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo ejecutar control de vencimientos');
+      setError(parseApiError(err, 'No se pudo ejecutar control de vencimientos'));
     } finally {
       setProcessingOverdueCheck(false);
     }
@@ -1492,7 +1607,7 @@ export const SaasAdmin = () => {
       if (canAudit) await loadAuditLogs();
       setInfoMessage(`Cargos por ciclo generados: ${Number(result.created_events || 0)}.`);
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudieron generar cargos por ciclo');
+      setError(parseApiError(err, 'No se pudieron generar cargos por ciclo'));
     } finally {
       setProcessingCycleCharges(false);
     }
@@ -1516,7 +1631,7 @@ export const SaasAdmin = () => {
         `Recordatorios ejecutados. Evaluados: ${Number(result.evaluated || 0)} | Enviados: ${Number(result.sent || 0)}${stageSummary ? ` | Etapas: ${stageSummary}` : ''}.`
       );
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudieron enviar recordatorios de cartera');
+      setError(parseApiError(err, 'No se pudieron enviar recordatorios de cartera'));
     } finally {
       setSendingOverdueReminders(false);
     }
@@ -1555,7 +1670,7 @@ export const SaasAdmin = () => {
       if (canUsers) await loadUsers();
       if (canAudit) await loadAuditLogs();
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo crear el usuario SaaS');
+      setError(parseApiError(err, 'No se pudo crear el usuario SaaS'));
     } finally {
       setCreatingUser(false);
     }
@@ -1575,7 +1690,7 @@ export const SaasAdmin = () => {
       if (canUsers) await loadUsers();
       if (canAudit) await loadAuditLogs();
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo actualizar el usuario SaaS');
+      setError(parseApiError(err, 'No se pudo actualizar el usuario SaaS'));
     } finally {
       setSavingUserId(null);
     }
@@ -1591,7 +1706,7 @@ export const SaasAdmin = () => {
       if (canUsers) await loadUsers();
       if (canAudit) await loadAuditLogs();
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo resetear la contraseña');
+      setError(parseApiError(err, 'No se pudo resetear la contraseña'));
     } finally {
       setResettingUserId(null);
     }
@@ -1634,7 +1749,7 @@ export const SaasAdmin = () => {
       if (canPipeline) await loadPipeline();
       if (canAudit) await loadAuditLogs();
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo crear el lead');
+      setError(parseApiError(err, 'No se pudo crear el lead'));
     } finally {
       setCreatingLead(false);
     }
@@ -1660,7 +1775,7 @@ export const SaasAdmin = () => {
       if (canPipeline) await loadPipeline();
       if (canAudit) await loadAuditLogs();
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo actualizar el lead');
+      setError(parseApiError(err, 'No se pudo actualizar el lead'));
     } finally {
       setSavingLeadId(null);
     }
@@ -1686,7 +1801,7 @@ export const SaasAdmin = () => {
       if (canSupport) await loadSupportTickets();
       if (canAudit) await loadAuditLogs();
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo actualizar ticket de soporte');
+      setError(parseApiError(err, 'No se pudo actualizar ticket de soporte'));
     } finally {
       setSavingSupportTicketId(null);
     }
@@ -1704,7 +1819,7 @@ export const SaasAdmin = () => {
         `Alertas SLA soporte ejecutadas. Evaluados: ${Number(result.evaluated || 0)} | Enviados: ${Number(result.sent || 0)}.`
       );
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudieron ejecutar alertas SLA de soporte');
+      setError(parseApiError(err, 'No se pudieron ejecutar alertas SLA de soporte'));
     } finally {
       setProcessingSupportAlerts(false);
     }
@@ -1735,7 +1850,7 @@ export const SaasAdmin = () => {
         setError('No se pudo enviar el correo (SMTP no configurado o envío fallido).');
       }
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo reenviar el enlace de acceso');
+      setError(parseApiError(err, 'No se pudo reenviar el enlace de acceso'));
     } finally {
       setResendingAccessLinkTenantId(null);
     }
@@ -1803,7 +1918,7 @@ export const SaasAdmin = () => {
       if (canPipeline) await loadPipeline();
       if (canAudit) await loadAuditLogs();
     } catch (err: any) {
-      setConversionError(err?.response?.data?.detail || 'No se pudo convertir el lead a tenant');
+      setConversionError(parseApiError(err, 'No se pudo convertir el lead a tenant'));
     } finally {
       setSubmittingConversion(false);
     }
@@ -1834,7 +1949,7 @@ export const SaasAdmin = () => {
       setMfaCodesAcknowledge(false);
       setMfaEnableCode('');
     } catch (err: any) {
-      setMfaMessage(err?.response?.data?.detail || 'No se pudo generar configuración MFA');
+      setMfaMessage(parseApiError(err, 'No se pudo generar configuración MFA'));
     } finally {
       setMfaLoading(false);
     }
@@ -1855,10 +1970,10 @@ export const SaasAdmin = () => {
       setMfaCodesCopied(false);
       setMfaCodesAcknowledge(false);
       setMfaEnableCode('');
-      setMfaMessage('MFA activado correctamente. Guarda tus backup codes.');
+      setMfaMessage('MFA activado correctamente. Guarda tus códigos de respaldo.');
       if (canAudit) await loadAuditLogs();
     } catch (err: any) {
-      setMfaMessage(err?.response?.data?.detail || 'No se pudo activar MFA');
+      setMfaMessage(parseApiError(err, 'No se pudo activar MFA'));
     } finally {
       setMfaLoading(false);
     }
@@ -1887,7 +2002,7 @@ export const SaasAdmin = () => {
       setMfaMessage('MFA desactivado.');
       if (canAudit) await loadAuditLogs();
     } catch (err: any) {
-      setMfaMessage(err?.response?.data?.detail || 'No se pudo desactivar MFA');
+      setMfaMessage(parseApiError(err, 'No se pudo desactivar MFA'));
     } finally {
       setMfaLoading(false);
     }
@@ -1895,7 +2010,7 @@ export const SaasAdmin = () => {
 
   const regenerateBackupCodes = async () => {
     if (!mfaRegenPassword.trim() || !mfaRegenCode.trim()) {
-      setMfaMessage('Ingresa contraseña y código MFA para regenerar backup codes.');
+      setMfaMessage('Ingresa contraseña y código MFA para regenerar códigos de respaldo.');
       return;
     }
     try {
@@ -1912,9 +2027,9 @@ export const SaasAdmin = () => {
       setMfaRegenCode('');
       await refreshUser();
       if (canAudit) await loadAuditLogs();
-      setMfaMessage('Backup codes regenerados. Guarda los nuevos códigos.');
+      setMfaMessage('Códigos de respaldo regenerados. Guarda los nuevos códigos.');
     } catch (err: any) {
-      setMfaMessage(err?.response?.data?.detail || 'No se pudieron regenerar los backup codes');
+      setMfaMessage(parseApiError(err, 'No se pudieron regenerar los códigos de respaldo'));
     } finally {
       setMfaLoading(false);
     }
@@ -1926,7 +2041,7 @@ export const SaasAdmin = () => {
     try {
       await navigator.clipboard.writeText(text);
       setMfaCodesCopied(true);
-      setMfaMessage('Backup codes copiados al portapapeles.');
+      setMfaMessage('Códigos de respaldo copiados al portapapeles.');
     } catch {
       setMfaMessage('No se pudieron copiar automáticamente. Copia manualmente.');
     }
@@ -1934,13 +2049,13 @@ export const SaasAdmin = () => {
 
   const confirmBackupCodesSaved = () => {
     if (!mfaCodesAcknowledge) {
-      setMfaMessage('Confirma que guardaste los backup codes antes de ocultarlos.');
+      setMfaMessage('Confirma que guardaste los códigos de respaldo antes de ocultarlos.');
       return;
     }
     setMfaBackupCodes([]);
     setMfaCodesCopied(false);
     setMfaCodesAcknowledge(false);
-    setMfaMessage('Backup codes ocultados.');
+    setMfaMessage('Códigos de respaldo ocultados.');
   };
 
   const closeAllMySessions = async () => {
@@ -1952,7 +2067,7 @@ export const SaasAdmin = () => {
         window.location.href = '/login-saas';
       }, 900);
     } catch (err: any) {
-      setMfaMessage(err?.response?.data?.detail || 'No se pudieron cerrar todas las sesiones');
+      setMfaMessage(parseApiError(err, 'No se pudieron cerrar todas las sesiones'));
     } finally {
       setClosingAllSessions(false);
       setShowCloseSessionsConfirm(false);
@@ -1975,7 +2090,7 @@ export const SaasAdmin = () => {
       link.remove();
       URL.revokeObjectURL(url);
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo exportar la auditoría');
+      setError(parseApiError(err, 'No se pudo exportar la auditoría'));
     } finally {
       setAuditExporting(false);
     }
@@ -1994,14 +2109,14 @@ export const SaasAdmin = () => {
       link.remove();
       URL.revokeObjectURL(url);
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo exportar resumen de cobranza');
+      setError(parseApiError(err, 'No se pudo exportar resumen de cobranza'));
     } finally {
       setDunningExporting(false);
     }
   };
 
   return (
-    <div className="saas-admin-container">
+    <div className="saas-admin-container" role="main">
       {!hasCurrentViewAccess && (
         <div className="saas-card bo-card">
           <h3>Sin permiso para este módulo</h3>
@@ -2013,8 +2128,16 @@ export const SaasAdmin = () => {
       )}
       {hasCurrentViewAccess && (
       <>
-      {error && <div className="error-message">{error}</div>}
-      {infoMessage && <div className="saas-info-message">{infoMessage}</div>}
+      {error && (
+        <div className="saas-alert saas-alert-error" role="alert" aria-live="assertive">
+          {error}
+        </div>
+      )}
+      {infoMessage && (
+        <div className="saas-alert saas-alert-info" role="status" aria-live="polite">
+          {infoMessage}
+        </div>
+      )}
 
       {saasView === 'security' && (
       <div className="saas-card bo-card">
@@ -2024,6 +2147,9 @@ export const SaasAdmin = () => {
         <p>
           Estado actual: <strong>{user?.mfa_enabled ? 'MFA ACTIVO' : 'MFA INACTIVO'}</strong>
         </p>
+        <p className="saas-security-help">
+          Recomendación: mantén MFA activo en cuentas con alcance administrativo.
+        </p>
         {!user?.mfa_enabled ? (
           <div className="saas-user-form">
             <button type="button" className="btn-primary" onClick={() => void generateMfaSetup()} disabled={mfaLoading}>
@@ -2032,14 +2158,17 @@ export const SaasAdmin = () => {
             {mfaSetup && (
               <>
                 <div>
-                  <img src={mfaSetup.qr_url} alt="QR MFA" style={{ width: 180, height: 180, borderRadius: 8 }} />
+                  <img src={mfaSetup.qr_url} alt="Código QR para activar MFA" style={{ width: 180, height: 180, borderRadius: 8 }} />
                 </div>
                 <input type="text" readOnly value={mfaSetup.secret} />
                 <input
                   type="text"
                   placeholder="Código MFA (6 dígitos)"
                   value={mfaEnableCode}
-                  onChange={(e) => setMfaEnableCode(e.target.value)}
+                  onChange={(e) => setMfaEnableCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  inputMode="numeric"
+                  maxLength={6}
+                  autoComplete="one-time-code"
                 />
                 <button type="button" className="btn-primary" onClick={() => void enableMfa()} disabled={mfaLoading}>
                   {mfaLoading ? 'Activando...' : 'Activar MFA'}
@@ -2059,7 +2188,10 @@ export const SaasAdmin = () => {
               type="text"
               placeholder="Código MFA"
               value={mfaDisableCode}
-              onChange={(e) => setMfaDisableCode(e.target.value)}
+              onChange={(e) => setMfaDisableCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              inputMode="numeric"
+              maxLength={6}
+              autoComplete="one-time-code"
             />
             <button type="button" className="btn-danger" onClick={() => void disableMfa()} disabled={mfaLoading}>
               {mfaLoading ? 'Procesando...' : 'Desactivar MFA'}
@@ -2074,10 +2206,13 @@ export const SaasAdmin = () => {
               type="text"
               placeholder="Código MFA (regenerar)"
               value={mfaRegenCode}
-              onChange={(e) => setMfaRegenCode(e.target.value)}
+              onChange={(e) => setMfaRegenCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              inputMode="numeric"
+              maxLength={6}
+              autoComplete="one-time-code"
             />
             <button type="button" className="btn-secondary" onClick={() => void regenerateBackupCodes()} disabled={mfaLoading}>
-              {mfaLoading ? 'Procesando...' : 'Regenerar backup codes'}
+              {mfaLoading ? 'Procesando...' : 'Regenerar códigos de respaldo'}
             </button>
           </div>
         )}
@@ -2087,13 +2222,21 @@ export const SaasAdmin = () => {
           </p>
         )}
         {mfaMessage && (
-          <div className={mfaMessage.toLowerCase().includes('no se pudo') ? 'error-message' : 'saas-info-message'}>
+          <div
+            className={
+              mfaMessage.toLowerCase().includes('no se pudo')
+                ? 'saas-alert saas-alert-error'
+                : 'saas-alert saas-alert-info'
+            }
+            role={mfaMessage.toLowerCase().includes('no se pudo') ? 'alert' : 'status'}
+            aria-live={mfaMessage.toLowerCase().includes('no se pudo') ? 'assertive' : 'polite'}
+          >
             {mfaMessage}
           </div>
         )}
         {mfaBackupCodes.length > 0 && (
           <div className="saas-mfa-codes">
-            <p><strong>Backup codes (guárdalos ahora):</strong></p>
+            <p><strong>Códigos de respaldo (guárdalos ahora):</strong></p>
             <div className="saas-plan-grid">
               {mfaBackupCodes.map((code) => (
                 <div key={code} className="saas-plan-item">
@@ -2103,7 +2246,7 @@ export const SaasAdmin = () => {
             </div>
             <div className="saas-user-actions">
               <button type="button" className="btn-secondary" onClick={() => void copyAllMfaBackupCodes()}>
-                {mfaCodesCopied ? 'Backup codes copiados' : 'Copiar todos los backup codes'}
+                {mfaCodesCopied ? 'Códigos copiados' : 'Copiar todos los códigos de respaldo'}
               </button>
               <label className="saas-mfa-ack">
                 <input
@@ -2120,7 +2263,7 @@ export const SaasAdmin = () => {
           </div>
         )}
         {!!user?.mfa_enabled && (
-          <p>Backup codes disponibles: <strong>{Number(user?.mfa_backup_codes_remaining || 0)}</strong></p>
+          <p>Códigos de respaldo disponibles: <strong>{Number(user?.mfa_backup_codes_remaining || 0)}</strong></p>
         )}
         <div className="saas-user-actions">
           <button
@@ -2183,7 +2326,7 @@ export const SaasAdmin = () => {
           <h4>MRR proyectado</h4>
           <strong>{money(Number(summary?.mrr_estimado || 0))}</strong>
           <span>
-            Tenants facturables: {Number(summary?.active_billable_tenants || 0)} | ARPU: {money(Number(summary?.arpu_estimado || 0))}
+            Escuelas facturables: {Number(summary?.active_billable_tenants || 0)} | ARPU: {money(Number(summary?.arpu_estimado || 0))}
           </span>
         </div>
         <div className="saas-kpi-card">
@@ -2323,31 +2466,31 @@ export const SaasAdmin = () => {
                   </td>
                   <td>
                     <span className={`saas-sla-badge ${String(ticket.sla_state || 'NO_DUE_DATE').toLowerCase()}`}>
-                      {ticket.sla_state || 'NO_DUE_DATE'}
+                      {slaStateLabel(ticket.sla_state || 'NO_DUE_DATE')}
                     </span>
                   </td>
                   <td>
                     <div className="saas-inline-status-editor">
-                      <span className={statusClass(ticket.status)}>{ticket.status}</span>
+                      <span className={statusClass(ticket.status)}>{supportStatusLabel(ticket.status)}</span>
                       <select
                         value={ticket.status}
                         onChange={(e) => setSupportTickets((prev) => prev.map((x, i) => (i === idx ? { ...x, status: e.target.value as any } : x)))}
                       >
                         {SUPPORT_STATUSES.map((s) => (
-                          <option key={s} value={s}>{s}</option>
+                          <option key={s} value={s}>{supportStatusLabel(s)}</option>
                         ))}
                       </select>
                     </div>
                   </td>
                   <td>
                     <div className="saas-inline-status-editor">
-                      <span className={statusClass(ticket.priority)}>{ticket.priority}</span>
+                      <span className={statusClass(ticket.priority)}>{supportPriorityLabel(ticket.priority)}</span>
                       <select
                         value={ticket.priority}
                         onChange={(e) => setSupportTickets((prev) => prev.map((x, i) => (i === idx ? { ...x, priority: e.target.value as any } : x)))}
                       >
                         {SUPPORT_PRIORITIES.map((p) => (
-                          <option key={p} value={p}>{p}</option>
+                          <option key={p} value={p}>{supportPriorityLabel(p)}</option>
                         ))}
                       </select>
                     </div>
@@ -2814,7 +2957,7 @@ export const SaasAdmin = () => {
               <option value="">Todos los estados</option>
               {LEAD_STAGES.map((stage) => (
                 <option key={stage} value={stage}>
-                  {stage}
+                  {leadStageLabel(stage)}
                 </option>
               ))}
             </select>
@@ -2833,7 +2976,7 @@ export const SaasAdmin = () => {
         <div className="saas-plan-grid">
           {LEAD_STAGES.map((stage) => (
             <div key={stage} className="saas-plan-item">
-              <span>{stage}</span>
+              <span>{leadStageLabel(stage)}</span>
               <strong>{Number(pipelineSummary?.stage_counts?.[stage] || 0)}</strong>
             </div>
           ))}
@@ -2935,14 +3078,14 @@ export const SaasAdmin = () => {
                   </td>
                   <td>
                     <div className="saas-inline-status-editor">
-                      <span className={statusClass(lead.estado)}>{lead.estado}</span>
+                      <span className={statusClass(lead.estado)}>{leadStageLabel(lead.estado)}</span>
                       <select
                         value={lead.estado}
                         onChange={(e) => setLeads((prev) => prev.map((x, i) => (i === idx ? { ...x, estado: e.target.value } : x)))}
                       >
                         {LEAD_STAGES.map((stage) => (
                           <option key={stage} value={stage}>
-                            {stage}
+                            {leadStageLabel(stage)}
                           </option>
                         ))}
                       </select>
@@ -3052,7 +3195,11 @@ export const SaasAdmin = () => {
                   </td>
                   <td>{t.slug}</td>
                   <td><span className={statusClass(t.plan)}>{t.plan}</span></td>
-                  <td><span className={statusClass(t.subscription_status || 'TRIAL')}>{t.subscription_status || 'TRIAL'}</span></td>
+                  <td>
+                    <span className={statusClass(t.subscription_status || 'TRIAL')}>
+                      {subscriptionStatusLabel(t.subscription_status || 'TRIAL')}
+                    </span>
+                  </td>
                   <td><span className={statusClass(t.is_demo ? 'TRIAL' : 'ACTIVE')}>{t.is_demo ? 'Sí' : 'No'}</span></td>
                   <td><span className={statusClass(t.is_active ? 'ACTIVE' : 'CANCELED')}>{t.is_active ? 'Sí' : 'No'}</span></td>
                   <td>{t.contacto_email || '-'}</td>
@@ -3132,8 +3279,8 @@ export const SaasAdmin = () => {
                 <tr key={row.id}>
                   <td>{new Date(row.created_at).toLocaleString('es-CO')}</td>
                   <td>{row.tenant_nombre || row.tenant_slug || `#${row.tenant_id}`}</td>
-                  <td><span className={statusClass(row.event_type)}>{row.event_type}</span></td>
-                  <td><span className={statusClass(row.status)}>{row.status}</span></td>
+                  <td><span className={statusClass(row.event_type)}>{billingEventTypeLabel(row.event_type)}</span></td>
+                  <td><span className={statusClass(row.status)}>{billingEventStatusLabel(row.status)}</span></td>
                   <td>{money(Number(row.amount || 0))}</td>
                   <td>{row.receipt?.receipt_number || '-'}</td>
                   <td>{row.reference || '-'}</td>
@@ -3662,12 +3809,34 @@ export const SaasAdmin = () => {
                 />
               </label>
               <label>
-                Contraseña temporal admin (opcional)
+                Cantidad de sucursales adicionales (opcional)
                 <input
-                  type="text"
-                  value={createTenantForm.admin_password}
-                  onChange={(e) => setCreateTenantForm((prev) => ({ ...prev, admin_password: e.target.value }))}
+                  type="number"
+                  min={0}
+                  max={20}
+                  value={createTenantForm.sucursales_adicionales}
+                  onChange={(e) => setCreateTenantForm((prev) => ({ ...prev, sucursales_adicionales: e.target.value }))}
                 />
+                <small>La sede principal se crea automáticamente. El sistema creará las adicionales como Sede 2, Sede 3, etc.</small>
+              </label>
+              <label>
+                Contraseña temporal admin (opcional)
+                <div className="saas-password-field">
+                  <input
+                    type={showCreateTenantAdminPassword ? 'text' : 'password'}
+                    value={createTenantForm.admin_password}
+                    onChange={(e) => setCreateTenantForm((prev) => ({ ...prev, admin_password: e.target.value }))}
+                  />
+                  <button
+                    type="button"
+                    className="saas-password-toggle"
+                    onClick={() => setShowCreateTenantAdminPassword((prev) => !prev)}
+                    aria-label={showCreateTenantAdminPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                    title={showCreateTenantAdminPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                  >
+                    {showCreateTenantAdminPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </label>
             </div>
             <label className="saas-mfa-ack">
@@ -3711,6 +3880,12 @@ export const SaasAdmin = () => {
               <p>
                 <strong>Correo de acceso:</strong>{' '}
                 {createTenantSuccessModal.welcomeEmailSent ? 'Enviado' : 'No enviado'}
+              </p>
+              <p>
+                <strong>Sucursales adicionales:</strong>{' '}
+                {createTenantSuccessModal.requestedBranches > 0
+                  ? `${createTenantSuccessModal.createdBranches} de ${createTenantSuccessModal.requestedBranches} creadas`
+                  : 'Solo sede principal (automática)'}
               </p>
             </div>
             <div className="saas-user-actions">
@@ -3838,7 +4013,7 @@ export const SaasAdmin = () => {
                 >
                   {SUBSCRIPTION_STATUSES.map((item) => (
                     <option key={item} value={item}>
-                      {item}
+                      {subscriptionStatusLabel(item)}
                     </option>
                   ))}
                 </select>
@@ -3924,7 +4099,7 @@ export const SaasAdmin = () => {
                     }))
                   }
                 />
-                Tenant en modo demo
+                Escuela en modo demo
               </label>
               <label className="saas-mfa-ack">
                 <input
@@ -3932,14 +4107,14 @@ export const SaasAdmin = () => {
                   checked={!!tenantProfile.is_active}
                   onChange={(e) => updateTenantDraft(tenantProfile.id, (current) => ({ ...current, is_active: e.target.checked }))}
                 />
-                Tenant activo
+                Escuela activa
               </label>
             </div>
 
             <div className="saas-tenant-profile-kpis">
               <span>Último pago: <strong>{dateCell(tenantProfile.last_payment_at)}</strong></span>
               <span>Tarifa: <strong>{money(Number(tenantProfile.monthly_fee || 0))}</strong></span>
-              <span>Estado: <strong>{tenantProfile.subscription_status || 'TRIAL'}</strong></span>
+              <span>Estado: <strong>{subscriptionStatusLabel(tenantProfile.subscription_status || 'TRIAL')}</strong></span>
             </div>
 
             <div className="saas-user-actions">
@@ -4053,13 +4228,23 @@ export const SaasAdmin = () => {
                   </label>
                 </div>
                 <div className="saas-user-actions">
+                  {editingBranchId && (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={cancelEditBranchFromModal}
+                      disabled={branchModalSaving}
+                    >
+                      Cancelar edición
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="btn-primary"
                     onClick={() => void createBranchFromModal()}
                     disabled={branchModalSaving}
                   >
-                    {branchModalSaving ? 'Guardando...' : 'Crear sucursal'}
+                    {branchModalSaving ? 'Guardando...' : editingBranchId ? 'Guardar cambios' : 'Crear sucursal'}
                   </button>
                 </div>
                 <div className="saas-table-wrap bo-table-wrap">
@@ -4092,6 +4277,14 @@ export const SaasAdmin = () => {
                                   Hacer principal
                                 </button>
                               )}
+                              <button
+                                type="button"
+                                className="btn-secondary"
+                                onClick={() => startEditBranchFromModal(branch)}
+                                disabled={branchModalSaving}
+                              >
+                                Editar
+                              </button>
                               {!branch.is_primary && (
                                 <button
                                   type="button"
@@ -4164,7 +4357,7 @@ export const SaasAdmin = () => {
               return (
                 <>
             <p>
-              Tenant: <strong>{paymentModalTenant.display_name || paymentModalTenant.nombre}</strong> ({paymentModalTenant.slug})
+              Escuela: <strong>{paymentModalTenant.display_name || paymentModalTenant.nombre}</strong> ({paymentModalTenant.slug})
             </p>
             <div className="saas-modal-grid">
               <label>
@@ -4360,7 +4553,7 @@ export const SaasAdmin = () => {
             {conversionError && <div className="error-message">{conversionError}</div>}
             {conversionResult && (
               <div className="saas-conversion-result">
-                <p><strong>Tenant:</strong> {conversionResult.tenantSlug}</p>
+                <p><strong>Escuela:</strong> {conversionResult.tenantSlug}</p>
                 <p><strong>Admin:</strong> {conversionResult.adminEmail}</p>
                 <p>
                   <strong>Password temporal:</strong>{' '}

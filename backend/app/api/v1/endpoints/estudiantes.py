@@ -9,10 +9,13 @@ from decimal import Decimal
 from io import BytesIO
 import secrets
 import os
+import json
 import base64
 import hashlib
 import logging
 import urllib.request
+import urllib.parse
+import urllib.error
 from pathlib import Path
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
@@ -86,6 +89,44 @@ def _mask_email(email: str) -> str:
     return f"{hidden}@{domain}"
 
 
+def _split_nombre_completo(nombre: str) -> dict:
+    partes = [p.strip().upper() for p in str(nombre or "").split() if p and p.strip()]
+    if not partes:
+        return {
+            "primer_nombre": "",
+            "segundo_nombre": "",
+            "primer_apellido": "",
+            "segundo_apellido": "",
+        }
+    if len(partes) == 1:
+        return {
+            "primer_nombre": partes[0],
+            "segundo_nombre": "",
+            "primer_apellido": "",
+            "segundo_apellido": "",
+        }
+    if len(partes) == 2:
+        return {
+            "primer_nombre": partes[0],
+            "segundo_nombre": "",
+            "primer_apellido": partes[1],
+            "segundo_apellido": "",
+        }
+    if len(partes) == 3:
+        return {
+            "primer_nombre": partes[0],
+            "segundo_nombre": partes[1],
+            "primer_apellido": partes[2],
+            "segundo_apellido": "",
+        }
+    return {
+        "primer_nombre": partes[0],
+        "segundo_nombre": partes[1],
+        "primer_apellido": partes[2],
+        "segundo_apellido": " ".join(partes[3:]),
+    }
+
+
 def _generate_otp_code() -> str:
     return f"{secrets.randbelow(1_000_000):06d}"
 
@@ -119,7 +160,13 @@ def _send_estudiante_otp_email(email: str, otp_code: str, tenant: Optional[Tenan
         "Si no solicitaste este codigo, ignora este correo.\n\n"
         f"{brand_name}\n"
     )
-    sent = send_email(email, subject, body)
+    sent = send_email(
+        email,
+        subject,
+        body,
+        brand_name=brand_name,
+        logo_url=(tenant.logo_url if tenant else None),
+    )
     if not sent:
         logger.warning("No se pudo enviar OTP de estudiante a %s", email)
     return sent
@@ -535,6 +582,79 @@ def list_estudiantes(
         skip=skip,
         limit=limit
     )
+
+
+@router.get("/lookup/cedula")
+def lookup_datos_por_cedula(
+    documento: str = Query(..., min_length=5, max_length=20, pattern=r"^\d+$"),
+    _current_user: Usuario = Depends(get_admin_or_coordinador_or_cajero),
+    _current_tenant: Tenant = Depends(get_required_tenant),
+):
+    """
+    Consulta opcional de datos por cédula para autollenado asistido.
+    Esta consulta NO crea ni modifica estudiantes.
+    """
+    api_key = str(settings.CORESOFT_API_KEY or "").strip()
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="La consulta externa por cédula no está configurada.",
+        )
+
+    base_url = str(settings.CORESOFT_API_BASE_URL or "https://coresoft.solutions/api").rstrip("/")
+    timeout_seconds = max(5, int(settings.CORESOFT_TIMEOUT_SECONDS or 12))
+    url = f"{base_url}/cedula?{urllib.parse.urlencode({'documento': documento})}"
+    req = urllib.request.Request(
+        url,
+        headers={
+            "X-API-Key": api_key,
+            "User-Agent": "SIAEC-CEDULA/1.0",
+            "Accept": "application/json",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No se encontraron datos para esta cédula.")
+        if exc.code == 401:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Error de autenticación con proveedor externo.")
+        if exc.code == 429:
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Límite de consultas externas excedido.")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="No se pudo consultar el proveedor externo.")
+    except Exception:
+        logger.exception("Error consultando datos por cédula en proveedor externo")
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="No se pudo consultar el proveedor externo.")
+
+    nombre_completo = str(payload.get("nombre") or "").strip().upper()
+    nombres = {
+        "primer_nombre": str(payload.get("primer_nombre") or "").strip().upper(),
+        "segundo_nombre": str(payload.get("segundo_nombre") or "").strip().upper(),
+        "primer_apellido": str(payload.get("primer_apellido") or "").strip().upper(),
+        "segundo_apellido": str(payload.get("segundo_apellido") or "").strip().upper(),
+    }
+    if not any(nombres.values()) and nombre_completo:
+        nombres = _split_nombre_completo(nombre_completo)
+
+    telefono = str(payload.get("celular") or payload.get("telefono") or "").strip()
+    telefono = "".join(ch for ch in telefono if ch.isdigit())[:15]
+
+    return {
+        "success": bool(payload.get("success", True)),
+        "documento": str(payload.get("documento") or documento),
+        "fuente": str(payload.get("fuente") or ""),
+        "sugerido": {
+            **nombres,
+            "nombre_completo": nombre_completo,
+            "fecha_nacimiento": str(payload.get("fecha_nacimiento") or "").strip(),
+            "direccion": str(payload.get("direccion") or "").strip().upper(),
+            "ciudad": str(payload.get("ciudad") or "").strip().upper(),
+            "telefono": telefono,
+            "email": str(payload.get("email") or "").strip().lower(),
+        },
+    }
 
 
 @router.get("/{estudiante_id}", response_model=EstudianteResponse)
@@ -2061,6 +2181,8 @@ def _enviar_habeas_data(
         subject,
         body,
         attachment=(filename, pdf_bytes, "application/pdf"),
+        brand_name=brand_name,
+        logo_url=(tenant.logo_url if tenant else None),
     )
     if not enviado:
         logger.warning("No se pudo enviar correo de habeas data a %s", email)
@@ -2110,7 +2232,9 @@ def _enviar_contrato_definir_servicio(estudiante: Estudiante, tenant: Optional[T
         estudiante.usuario.email,
         subject,
         body,
-        attachment=(filename, pdf_bytes, "application/pdf")
+        attachment=(filename, pdf_bytes, "application/pdf"),
+        brand_name=brand_name,
+        logo_url=(tenant.logo_url if tenant else None),
     )
     if not enviado:
         logger.warning("No se pudo enviar contrato a %s", estudiante.usuario.email)
@@ -2154,7 +2278,13 @@ def _enviar_acreditacion_horas(
         f"{razon_social}\n"
         f"NIT {nit}\n"
     )
-    enviado = send_email(estudiante.usuario.email, subject, body)
+    enviado = send_email(
+        estudiante.usuario.email,
+        subject,
+        body,
+        brand_name=brand_name,
+        logo_url=(tenant.logo_url if tenant else None),
+    )
     if not enviado:
         logger.warning("No se pudo enviar notificacion de horas a %s", estudiante.usuario.email)
 

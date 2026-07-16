@@ -15,16 +15,17 @@
 
 .resumen-card {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border: 1px solid color-mix(in oklab, var(--border) 92%, #c9d3e4 8%);
+  border-radius: 14px;
   padding: 1.25rem 1.5rem;
-  box-shadow: var(--shadow-sm);
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
 }
 
 .resumen-card:hover {
-  transform: translateY(-4px);
-  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.08);
+  border-color: color-mix(in oklab, var(--primary) 24%, var(--border) 76%);
 }
 
 .resumen-header {
@@ -41,41 +42,45 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #eef2ff;
+  background: color-mix(in oklab, var(--primary) 14%, var(--surface) 86%);
   color: var(--primary);
 }
 
 .resumen-icon.success {
-  background: #dcfce7;
+  background: color-mix(in oklab, var(--success) 16%, var(--surface) 84%);
   color: var(--success);
 }
 
 .resumen-icon.primary {
-  background: #dbeafe;
+  background: color-mix(in oklab, var(--primary) 18%, var(--surface) 82%);
   color: var(--primary);
 }
 
 .resumen-icon.warning {
-  background: #fef3c7;
+  background: color-mix(in oklab, var(--warning) 20%, var(--surface) 80%);
   color: var(--warning);
 }
 
 .resumen-card h3 {
   margin: 0 0 8px 0;
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
   color: var(--text-secondary);
 }
 
 .resumen-valor {
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 700;
   color: var(--text-primary);
+  letter-spacing: -0.01em;
 }
 
 .resumen-subdetalle {
   margin-top: 10px;
   padding-top: 8px;
-  border-top: 1px dashed #e2e8f0;
+  border-top: 1px dashed var(--border);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -86,34 +91,60 @@
   align-items: center;
   justify-content: space-between;
   font-size: 13px;
-  color: #475569;
+  color: var(--text-secondary);
 }
 
 .detalle-row strong {
-  color: #0f172a;
+  color: var(--text-primary);
   font-weight: 600;
 }
 
 .caja-fuerte-grid {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 16px;
+  grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr);
+  gap: 18px;
   margin-bottom: 20px;
+  align-items: start;
 }
 
 .caja-fuerte-section {
   background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 1.25rem 1.5rem;
-  box-shadow: var(--shadow-sm);
+  border: 1px solid color-mix(in oklab, var(--border) 72%, var(--primary) 28%);
+  border-radius: 14px;
+  padding: 1.4rem 1.55rem;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.1);
   margin-bottom: 16px;
 }
 
 .caja-fuerte-section h2 {
-  margin: 0 0 12px 0;
-  font-size: 16px;
+  margin: 0 0 14px 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   color: var(--text-primary);
+  padding-bottom: 10px;
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 72%, var(--primary) 28%);
+}
+
+.caja-fuerte-main {
+  margin-bottom: 0;
+}
+
+.caja-fuerte-side {
+  margin-bottom: 0;
+  position: sticky;
+  top: 76px;
+}
+
+.caja-fuerte-note {
+  margin: 2px 0 14px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  background: color-mix(in oklab, var(--surface-2) 58%, var(--primary) 42%);
+  border: 1px solid color-mix(in oklab, var(--border) 56%, var(--primary) 44%);
+  border-radius: 10px;
+  padding: 10px 12px;
 }
 
 .form-grid {
@@ -122,26 +153,89 @@
   gap: 12px;
 }
 
+.mov-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 13px;
+}
+
+.mov-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mov-field > span {
+  font-size: 12px;
+  font-weight: 600;
+  color: color-mix(in oklab, var(--text-secondary) 92%, #24334b 8%);
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.mov-field-wide {
+  grid-column: span 2;
+}
+
+.mov-preview {
+  margin-top: 12px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in oklab, var(--border) 62%, var(--primary) 38%);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, var(--surface-2) 60%, var(--primary) 40%);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
 .form-grid input,
 .form-grid select,
+.mov-form-grid input,
+.mov-form-grid select,
 .filtros input,
 .filtros select {
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
+  padding: 11px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in oklab, var(--border) 72%, var(--primary) 28%);
   background: var(--surface);
+  color: var(--text-primary);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
+  min-height: 44px;
+}
+
+.form-grid input:focus,
+.form-grid select:focus,
+.mov-form-grid input:focus,
+.mov-form-grid select:focus,
+.filtros input:focus,
+.filtros select:focus {
+  outline: none;
+  border-color: color-mix(in oklab, var(--primary) 72%, #789be8 28%);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
 .section-actions {
   display: flex;
   gap: 10px;
-  margin-top: 12px;
+  margin-top: 14px;
+}
+
+.section-actions .btn-primary {
+  width: 100%;
+  border-radius: 10px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.32);
+  min-height: 44px;
 }
 
 .inventario-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 10px;
+  gap: 11px;
 }
 
 .inventario-item {
@@ -149,10 +243,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 4px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 8px;
-  background: var(--surface-2);
+  border: 1px solid color-mix(in oklab, var(--border) 74%, var(--primary) 26%);
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: color-mix(in oklab, var(--surface-2) 88%, var(--surface) 12%);
 }
 
 .denom-control {
@@ -169,10 +263,13 @@
   font-size: 14px;
   font-weight: 600;
   text-align: center;
+  border-radius: 8px;
+  border: 1px solid color-mix(in oklab, var(--border) 88%, #c9d4e6 12%);
+  background: var(--surface);
 }
 
 .inventario-item.readonly {
-  background: var(--surface-2);
+  background: color-mix(in oklab, var(--surface-2) 86%, var(--surface) 14%);
   justify-content: space-between;
 }
 
@@ -190,31 +287,104 @@
 .inventario-total {
   margin-top: 12px;
   font-weight: 700;
+  color: var(--text-primary);
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--surface-2) 60%, var(--primary) 40%);
+  border: 1px solid color-mix(in oklab, var(--border) 58%, var(--primary) 42%);
 }
 
 .mov-denoms {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  margin-top: 14px;
+  padding-top: 13px;
+  border-top: 1px solid color-mix(in oklab, var(--border) 70%, var(--primary) 30%);
 }
 
 .mov-denoms h3 {
-  margin: 0 0 10px 0;
+  margin: 0 0 11px 0;
   font-size: 14px;
   color: var(--text-primary);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.inventario-side-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--surface-2) 56%, var(--primary) 44%);
+  border: 1px solid color-mix(in oklab, var(--border) 56%, var(--primary) 44%);
+}
+
+.inventario-side-header h2 {
+  margin: 0;
+}
+
+.inventario-side-total {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--primary);
+  background: color-mix(in oklab, var(--primary) 12%, var(--surface) 88%);
+  border: 1px solid color-mix(in oklab, var(--primary) 28%, var(--border) 72%);
+  border-radius: 999px;
+  padding: 5px 10px;
+}
+
+.inventario-side-group {
+  margin-top: 14px;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in oklab, var(--border) 82%, var(--primary) 18%);
+  background: color-mix(in oklab, var(--surface-2) 90%, var(--surface) 10%);
+}
+
+.inventario-side-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 9px;
+}
+
+.inventario-side-group-header h3 {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.inventario-side-group-header strong {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.inventario-grid-side {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .filtros {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 10px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid color-mix(in oklab, var(--border) 74%, var(--primary) 26%);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--surface-2) 66%, var(--primary) 34%);
 }
 
 .tabla-movimientos table {
   width: 100%;
   border-collapse: collapse;
   min-width: 900px;
+  border: 1px solid color-mix(in oklab, var(--border) 72%, var(--primary) 28%);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
 }
 
 .tabla-movimientos {
@@ -224,19 +394,26 @@
 .tabla-movimientos th,
 .tabla-movimientos td {
   border-bottom: 1px solid var(--border);
-  padding: 10px;
+  padding: 11px 10px;
   text-align: left;
   font-size: 14px;
 }
 
 .tabla-movimientos thead th {
-  background: var(--surface-2);
-  color: var(--text-secondary);
+  background: color-mix(in oklab, var(--surface-2) 58%, var(--primary) 42%);
+  color: color-mix(in oklab, var(--text-secondary) 92%, #22324c 8%);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 .tabla-movimientos .acciones {
   display: flex;
   gap: 8px;
+}
+
+.tabla-movimientos tbody tr:hover {
+  background: color-mix(in oklab, var(--surface-2) 86%, var(--primary) 14%);
 }
 
 .no-data {
@@ -250,12 +427,25 @@
     padding: 16px;
   }
 
+  .caja-fuerte-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .caja-fuerte-side {
+    position: static;
+  }
+
   .section-actions {
     flex-wrap: wrap;
   }
 
   .section-actions button {
     width: 100%;
+  }
+
+  .inventario-side-header {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 
@@ -265,8 +455,14 @@
   }
 
   .form-grid,
-  .filtros {
+  .mov-form-grid,
+  .filtros,
+  .inventario-grid-side {
     grid-template-columns: 1fr;
+  }
+
+  .mov-field-wide {
+    grid-column: span 1;
   }
 
   .resumen-valor {

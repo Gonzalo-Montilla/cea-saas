@@ -15,16 +15,23 @@ from reportlab.lib.utils import ImageReader
 from reportlab.lib import colors
 from app.core.database import get_db
 from app.core.config import settings
-from app.api.deps import get_admin_or_gerente, get_required_tenant
+from app.api.deps import get_admin_or_gerente, get_required_tenant, get_current_branch
 from app.models.usuario import Usuario
 from app.models.tenant import Tenant
-from app.models.caja_fuerte import CajaFuerte, MovimientoCajaFuerte, InventarioEfectivo
+from app.models.tenant_branch import TenantBranch
+from app.models.caja_fuerte import (
+    CajaFuerte,
+    MovimientoCajaFuerte,
+    InventarioEfectivo,
+    EstadoMovimientoCajaFuerte,
+)
 from app.models.caja import TipoMovimiento
 from app.models.pago import MetodoPago
 from app.schemas.caja_fuerte import (
     CajaFuerteResumen,
     MovimientoCajaFuerteCreate,
     MovimientoCajaFuerteUpdate,
+    MovimientoCajaFuerteAnular,
     MovimientoCajaFuerteResponse,
     InventarioUpdate,
     InventarioResponse,
@@ -40,10 +47,13 @@ DENOMINACIONES_COL = [
 ]
 
 
-def _get_or_create_caja_fuerte(db: Session, tenant_id: int) -> CajaFuerte:
-    caja_fuerte = db.query(CajaFuerte).filter(CajaFuerte.tenant_id == tenant_id).first()
+def _get_or_create_caja_fuerte(db: Session, tenant_id: int, branch_id: Optional[int] = None) -> CajaFuerte:
+    caja_fuerte = db.query(CajaFuerte).filter(
+        CajaFuerte.tenant_id == tenant_id,
+        CajaFuerte.branch_id == branch_id
+    ).first()
     if not caja_fuerte:
-        caja_fuerte = CajaFuerte(tenant_id=tenant_id)
+        caja_fuerte = CajaFuerte(tenant_id=tenant_id, branch_id=branch_id)
         db.add(caja_fuerte)
         db.commit()
         db.refresh(caja_fuerte)
@@ -195,6 +205,10 @@ def _build_movimiento_response(mov: MovimientoCajaFuerte) -> MovimientoCajaFuert
         fecha=mov.fecha,
         observaciones=mov.observaciones,
         inventario_detalle=inventario_detalle if inventario_detalle else None,
+        estado=mov.estado,
+        motivo_anulacion=mov.motivo_anulacion,
+        anulado_at=mov.anulado_at,
+        anulado_por_nombre=mov.anulado_por.nombre_completo if mov.anulado_por else None,
         usuario_nombre=mov.usuario.nombre_completo if mov.usuario else "N/A",
         created_at=mov.created_at,
     )
@@ -205,8 +219,9 @@ def get_resumen(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_admin_or_gerente),
     current_tenant: Tenant = Depends(get_required_tenant),
+    current_branch: Optional[TenantBranch] = Depends(get_current_branch),
 ):
-    caja_fuerte = _get_or_create_caja_fuerte(db, current_tenant.id)
+    caja_fuerte = _get_or_create_caja_fuerte(db, current_tenant.id, current_branch.id if current_branch else None)
     return CajaFuerteResumen(
         id=caja_fuerte.id,
         saldo_efectivo=caja_fuerte.saldo_efectivo,
@@ -232,8 +247,9 @@ def list_movimientos(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_admin_or_gerente),
     current_tenant: Tenant = Depends(get_required_tenant),
+    current_branch: Optional[TenantBranch] = Depends(get_current_branch),
 ):
-    caja_fuerte = _get_or_create_caja_fuerte(db, current_tenant.id)
+    caja_fuerte = _get_or_create_caja_fuerte(db, current_tenant.id, current_branch.id if current_branch else None)
     query = db.query(MovimientoCajaFuerte).filter(
         MovimientoCajaFuerte.caja_fuerte_id == caja_fuerte.id
     )
@@ -259,8 +275,9 @@ def crear_movimiento(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_admin_or_gerente),
     current_tenant: Tenant = Depends(get_required_tenant),
+    current_branch: Optional[TenantBranch] = Depends(get_current_branch),
 ):
-    caja_fuerte = _get_or_create_caja_fuerte(db, current_tenant.id)
+    caja_fuerte = _get_or_create_caja_fuerte(db, current_tenant.id, current_branch.id if current_branch else None)
 
     inventario_detalle = None
     if movimiento.metodo_pago == MetodoPago.EFECTIVO:
@@ -285,6 +302,7 @@ def crear_movimiento(
         caja_fuerte_id=caja_fuerte.id,
         tipo=movimiento.tipo,
         metodo_pago=movimiento.metodo_pago,
+        branch_id=current_branch.id if current_branch else None,
         concepto=movimiento.concepto,
         categoria=movimiento.categoria,
         monto=movimiento.monto,
@@ -306,26 +324,42 @@ def actualizar_movimiento(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_admin_or_gerente),
     current_tenant: Tenant = Depends(get_required_tenant),
+    current_branch: Optional[TenantBranch] = Depends(get_current_branch),
 ):
-    mov = db.query(MovimientoCajaFuerte).filter(
+    mov_query = db.query(MovimientoCajaFuerte).filter(
         MovimientoCajaFuerte.id == movimiento_id,
         MovimientoCajaFuerte.caja_fuerte.has(CajaFuerte.tenant_id == current_tenant.id),
-    ).first()
+    )
+    if current_branch:
+        mov_query = mov_query.filter(
+            MovimientoCajaFuerte.caja_fuerte.has(CajaFuerte.branch_id == current_branch.id)
+        )
+    mov = mov_query.first()
     if not mov:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Movimiento no encontrado")
+    if mov.estado == EstadoMovimientoCajaFuerte.ANULADO:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No puedes editar un movimiento anulado"
+        )
 
     caja_fuerte = db.query(CajaFuerte).filter(
         CajaFuerte.id == mov.caja_fuerte_id,
         CajaFuerte.tenant_id == current_tenant.id,
     ).first()
+    if current_branch and caja_fuerte and caja_fuerte.branch_id != current_branch.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Caja fuerte no encontrada")
     if not caja_fuerte:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Caja fuerte no encontrada")
 
+    old_tipo = mov.tipo
     old_metodo = mov.metodo_pago
     old_monto = Decimal(str(mov.monto))
     old_detalle = _parse_inventario_detalle(mov.inventario_detalle)
 
     # Actualizar campos
+    if data.tipo is not None:
+        mov.tipo = data.tipo
     if data.metodo_pago is not None:
         mov.metodo_pago = data.metodo_pago
     if data.concepto is not None:
@@ -347,10 +381,10 @@ def actualizar_movimiento(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="El movimiento anterior no tiene detalle de denominaciones"
             )
-        _reverse_inventario_movimiento(caja_fuerte, old_detalle, mov.tipo, db)
+        _reverse_inventario_movimiento(caja_fuerte, old_detalle, old_tipo, db)
         mov.inventario_detalle = None
     else:
-        _reverse_movimiento(caja_fuerte, mov.tipo, old_metodo, old_monto)
+        _reverse_movimiento(caja_fuerte, old_tipo, old_metodo, old_monto)
 
     if mov.metodo_pago == MetodoPago.EFECTIVO:
         if not data.inventario_items:
@@ -375,6 +409,66 @@ def actualizar_movimiento(
     return _build_movimiento_response(mov)
 
 
+@router.post("/movimientos/{movimiento_id}/anular", status_code=status.HTTP_200_OK)
+def anular_movimiento(
+    movimiento_id: int,
+    data: MovimientoCajaFuerteAnular,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_admin_or_gerente),
+    current_tenant: Tenant = Depends(get_required_tenant),
+    current_branch: Optional[TenantBranch] = Depends(get_current_branch),
+):
+    mov_query = db.query(MovimientoCajaFuerte).filter(
+        MovimientoCajaFuerte.id == movimiento_id,
+        MovimientoCajaFuerte.caja_fuerte.has(CajaFuerte.tenant_id == current_tenant.id),
+    )
+    if current_branch:
+        mov_query = mov_query.filter(
+            MovimientoCajaFuerte.caja_fuerte.has(CajaFuerte.branch_id == current_branch.id)
+        )
+    mov = mov_query.first()
+    if not mov:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Movimiento no encontrado")
+    if mov.estado == EstadoMovimientoCajaFuerte.ANULADO:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El movimiento ya está anulado")
+
+    caja_fuerte = db.query(CajaFuerte).filter(
+        CajaFuerte.id == mov.caja_fuerte_id,
+        CajaFuerte.tenant_id == current_tenant.id,
+    ).first()
+    if current_branch and caja_fuerte and caja_fuerte.branch_id != current_branch.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Caja fuerte no encontrada")
+    if not caja_fuerte:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Caja fuerte no encontrada")
+
+    if mov.metodo_pago == MetodoPago.EFECTIVO:
+        detalle = _parse_inventario_detalle(mov.inventario_detalle)
+        if data.inventario_items:
+            _validate_inventario_items(data.inventario_items)
+            total_mov = _compute_inventory_total(data.inventario_items)
+            if total_mov != Decimal(str(mov.monto)):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Las denominaciones no cuadran con el monto del movimiento"
+                )
+            detalle = data.inventario_items
+        if not detalle:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No se encontraron denominaciones para revertir este movimiento en efectivo"
+            )
+        _reverse_inventario_movimiento(caja_fuerte, detalle, mov.tipo, db)
+    else:
+        _reverse_movimiento(caja_fuerte, mov.tipo, mov.metodo_pago, Decimal(str(mov.monto)))
+
+    mov.estado = EstadoMovimientoCajaFuerte.ANULADO
+    mov.motivo_anulacion = data.motivo_anulacion.strip()
+    mov.anulado_at = datetime.utcnow()
+    mov.anulado_por_id = current_user.id
+    db.commit()
+    return {"detail": "Movimiento anulado"}
+
+
 @router.delete("/movimientos/{movimiento_id}", status_code=status.HTTP_200_OK)
 def eliminar_movimiento(
     movimiento_id: int,
@@ -382,75 +476,10 @@ def eliminar_movimiento(
     current_user: Usuario = Depends(get_admin_or_gerente),
     current_tenant: Tenant = Depends(get_required_tenant),
 ):
-    mov = db.query(MovimientoCajaFuerte).filter(
-        MovimientoCajaFuerte.id == movimiento_id,
-        MovimientoCajaFuerte.caja_fuerte.has(CajaFuerte.tenant_id == current_tenant.id),
-    ).first()
-    if not mov:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Movimiento no encontrado")
-
-    caja_fuerte = db.query(CajaFuerte).filter(
-        CajaFuerte.id == mov.caja_fuerte_id,
-        CajaFuerte.tenant_id == current_tenant.id,
-    ).first()
-    if not caja_fuerte:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Caja fuerte no encontrada")
-
-    if mov.metodo_pago == MetodoPago.EFECTIVO:
-        detalle = _parse_inventario_detalle(mov.inventario_detalle)
-        if not detalle:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Para eliminar un movimiento en efectivo usa /movimientos/{id}/eliminar con inventario"
-            )
-        _reverse_inventario_movimiento(caja_fuerte, detalle, mov.tipo, db)
-    else:
-        _reverse_movimiento(caja_fuerte, mov.tipo, mov.metodo_pago, Decimal(str(mov.monto)))
-
-    db.delete(mov)
-    db.commit()
-    return {"detail": "Movimiento eliminado"}
-
-
-@router.post("/movimientos/{movimiento_id}/eliminar", status_code=status.HTTP_200_OK)
-def eliminar_movimiento_con_inventario(
-    movimiento_id: int,
-    inventario: InventarioUpdate,
-    db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin_or_gerente),
-    current_tenant: Tenant = Depends(get_required_tenant),
-):
-    mov = db.query(MovimientoCajaFuerte).filter(
-        MovimientoCajaFuerte.id == movimiento_id,
-        MovimientoCajaFuerte.caja_fuerte.has(CajaFuerte.tenant_id == current_tenant.id),
-    ).first()
-    if not mov:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Movimiento no encontrado")
-    if mov.metodo_pago != MetodoPago.EFECTIVO:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Este endpoint solo aplica para movimientos en efectivo"
-        )
-
-    caja_fuerte = db.query(CajaFuerte).filter(
-        CajaFuerte.id == mov.caja_fuerte_id,
-        CajaFuerte.tenant_id == current_tenant.id,
-    ).first()
-    if not caja_fuerte:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Caja fuerte no encontrada")
-
-    _validate_inventario_items(inventario.items)
-    total_mov = _compute_inventory_total(inventario.items)
-    if total_mov != Decimal(str(mov.monto)):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Las denominaciones no cuadran con el monto del movimiento"
-        )
-    _reverse_inventario_movimiento(caja_fuerte, inventario.items, mov.tipo, db)
-
-    db.delete(mov)
-    db.commit()
-    return {"detail": "Movimiento eliminado"}
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Eliminar movimientos ya no está permitido. Usa anulación con motivo."
+    )
 
 
 @router.get("/movimientos/{movimiento_id}/recibo-pdf")
@@ -459,11 +488,17 @@ def get_recibo_movimiento_pdf(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_admin_or_gerente),
     current_tenant: Tenant = Depends(get_required_tenant),
+    current_branch: Optional[TenantBranch] = Depends(get_current_branch),
 ):
-    mov = db.query(MovimientoCajaFuerte).filter(
+    mov_query = db.query(MovimientoCajaFuerte).filter(
         MovimientoCajaFuerte.id == movimiento_id,
         MovimientoCajaFuerte.caja_fuerte.has(CajaFuerte.tenant_id == current_tenant.id),
-    ).first()
+    )
+    if current_branch:
+        mov_query = mov_query.filter(
+            MovimientoCajaFuerte.caja_fuerte.has(CajaFuerte.branch_id == current_branch.id)
+        )
+    mov = mov_query.first()
     if not mov:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Movimiento no encontrado")
     if mov.tipo != TipoMovimiento.EGRESO:
@@ -506,8 +541,9 @@ def get_inventario(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_admin_or_gerente),
     current_tenant: Tenant = Depends(get_required_tenant),
+    current_branch: Optional[TenantBranch] = Depends(get_current_branch),
 ):
-    caja_fuerte = _get_or_create_caja_fuerte(db, current_tenant.id)
+    caja_fuerte = _get_or_create_caja_fuerte(db, current_tenant.id, current_branch.id if current_branch else None)
     items = db.query(InventarioEfectivo).filter(
         InventarioEfectivo.caja_fuerte_id == caja_fuerte.id
     ).all()
@@ -531,8 +567,9 @@ def update_inventario(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_admin_or_gerente),
     current_tenant: Tenant = Depends(get_required_tenant),
+    current_branch: Optional[TenantBranch] = Depends(get_current_branch),
 ):
-    caja_fuerte = _get_or_create_caja_fuerte(db, current_tenant.id)
+    caja_fuerte = _get_or_create_caja_fuerte(db, current_tenant.id, current_branch.id if current_branch else None)
 
     total_efectivo = Decimal("0")
     for item in data.items:

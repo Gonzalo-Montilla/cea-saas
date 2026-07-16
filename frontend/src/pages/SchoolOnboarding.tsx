@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { BRAND_LOGO_URL, BRAND_NAME } from '../config/branding';
 import { onboardingAPI } from '../services/api';
+import { parseApiError } from '../utils/errors';
 import '../styles/SchoolOnboarding.css';
 
 type FormState = {
@@ -17,6 +18,7 @@ type FormState = {
   admin_nombre_completo: string;
   admin_cedula: string;
   admin_telefono: string;
+  sucursales_adicionales: string;
 };
 
 const initialForm: FormState = {
@@ -32,6 +34,7 @@ const initialForm: FormState = {
   admin_nombre_completo: '',
   admin_cedula: '',
   admin_telefono: '',
+  sucursales_adicionales: '0',
 };
 
 export const SchoolOnboarding = () => {
@@ -119,6 +122,7 @@ export const SchoolOnboarding = () => {
           admin_nombre_completo: form.admin_nombre_completo.trim(),
           admin_cedula: form.admin_cedula.trim(),
           admin_telefono: form.admin_telefono.trim() || undefined,
+          sucursales_adicionales: Math.max(0, Math.min(20, Number(form.sucursales_adicionales || 0))),
           send_welcome_email: true,
           activate_tenant: true,
         }
@@ -127,7 +131,7 @@ export const SchoolOnboarding = () => {
       localStorage.setItem('tenant_slug', result.tenant_slug);
       setSuccess({ tenantSlug: result.tenant_slug, adminEmail: result.admin_email });
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'No se pudo registrar la escuela. Intenta nuevamente.');
+      setError(parseApiError(err, 'No se pudo registrar la escuela. Intenta nuevamente.'));
     } finally {
       setIsProcessingLogo(false);
       setIsLoading(false);
@@ -265,6 +269,19 @@ export const SchoolOnboarding = () => {
                   value={form.admin_telefono}
                   onChange={(e) => updateField('admin_telefono', e.target.value)}
                 />
+              </label>
+              <label>
+                Cantidad de sucursales adicionales (opcional)
+                <input
+                  type="number"
+                  min={0}
+                  max={20}
+                  value={form.sucursales_adicionales}
+                  onChange={(e) => updateField('sucursales_adicionales', e.target.value)}
+                />
+                <small className="onboarding-help">
+                  La sede principal se crea automáticamente. El sistema creará las adicionales como Sucursal 2, Sucursal 3, etc.
+                </small>
               </label>
             </div>
 

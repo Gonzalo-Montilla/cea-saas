@@ -50,6 +50,18 @@ class Usuario(Base):
     
     # Relaciones
     estudiante = relationship("Estudiante", back_populates="usuario", uselist=False)
+    movimientos_caja_fuerte = relationship(
+        "MovimientoCajaFuerte",
+        foreign_keys="[MovimientoCajaFuerte.usuario_id]",
+        primaryjoin="Usuario.id == MovimientoCajaFuerte.usuario_id",
+        back_populates="usuario",
+    )
+    movimientos_caja_fuerte_anulados = relationship(
+        "MovimientoCajaFuerte",
+        foreign_keys="[MovimientoCajaFuerte.anulado_por_id]",
+        primaryjoin="Usuario.id == MovimientoCajaFuerte.anulado_por_id",
+        back_populates="anulado_por",
+    )
     
     def __repr__(self):
         return f"<Usuario {self.email} - {self.rol}>"

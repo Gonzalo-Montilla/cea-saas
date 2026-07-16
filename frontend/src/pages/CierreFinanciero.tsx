@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { ClipboardList } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { reportesAPI } from '../services/api';
+import { parseApiError } from '../utils/errors';
+import { formatCurrencyCOP, formatDateTimeCO } from '../utils/formatters';
 import '../styles/CierreFinanciero.css';
 
 type CajaItem = {
@@ -53,7 +55,7 @@ const CierreFinanciero = () => {
       });
       setData(res);
     } catch (e: any) {
-      setError(e?.response?.data?.detail || 'No se pudo cargar el cierre financiero');
+      setError(parseApiError(e, 'No se pudo cargar el cierre financiero'));
     } finally {
       setLoading(false);
     }
@@ -125,27 +127,27 @@ const CierreFinanciero = () => {
           <div className="cierre-grid">
             <div className="cierre-card">
               <div className="cierre-label">Total ingresos</div>
-              <div className="cierre-value">${Number(data.total_ingresos).toLocaleString('es-CO')}</div>
+              <div className="cierre-value">{formatCurrencyCOP(data.total_ingresos)}</div>
             </div>
             <div className="cierre-card">
               <div className="cierre-label">Total egresos</div>
-              <div className="cierre-value">${Number(data.total_egresos).toLocaleString('es-CO')}</div>
+              <div className="cierre-value">{formatCurrencyCOP(data.total_egresos)}</div>
             </div>
             <div className="cierre-card">
               <div className="cierre-label">Saldo efectivo teórico</div>
-              <div className="cierre-value">${Number(data.saldo_efectivo_teorico).toLocaleString('es-CO')}</div>
+              <div className="cierre-value">{formatCurrencyCOP(data.saldo_efectivo_teorico)}</div>
             </div>
             <div className="cierre-card">
               <div className="cierre-label">Efectivo</div>
-              <div className="cierre-value">${Number(data.total_efectivo).toLocaleString('es-CO')}</div>
+              <div className="cierre-value">{formatCurrencyCOP(data.total_efectivo)}</div>
             </div>
             <div className="cierre-card">
               <div className="cierre-label">Transferencias</div>
-              <div className="cierre-value">${Number(data.total_transferencias).toLocaleString('es-CO')}</div>
+              <div className="cierre-value">{formatCurrencyCOP(data.total_transferencias)}</div>
             </div>
             <div className="cierre-card">
               <div className="cierre-label">Tarjetas</div>
-              <div className="cierre-value">${Number(data.total_tarjetas).toLocaleString('es-CO')}</div>
+              <div className="cierre-value">{formatCurrencyCOP(data.total_tarjetas)}</div>
             </div>
           </div>
 
@@ -170,12 +172,12 @@ const CierreFinanciero = () => {
                   {data.cajas.map((c) => (
                     <tr key={c.id}>
                       <td>{c.id}</td>
-                      <td>{new Date(c.fecha_apertura).toLocaleString('es-CO')}</td>
-                      <td>{c.fecha_cierre ? new Date(c.fecha_cierre).toLocaleString('es-CO') : '-'}</td>
+                      <td>{formatDateTimeCO(c.fecha_apertura)}</td>
+                      <td>{c.fecha_cierre ? formatDateTimeCO(c.fecha_cierre) : '-'}</td>
                       <td>{c.estado}</td>
-                      <td>${Number(c.total_ingresos).toLocaleString('es-CO')}</td>
-                      <td>${Number(c.total_egresos).toLocaleString('es-CO')}</td>
-                      <td>{c.diferencia != null ? `$${Number(c.diferencia).toLocaleString('es-CO')}` : '-'}</td>
+                      <td>{formatCurrencyCOP(c.total_ingresos)}</td>
+                      <td>{formatCurrencyCOP(c.total_egresos)}</td>
+                      <td>{c.diferencia != null ? formatCurrencyCOP(c.diferencia) : '-'}</td>
                     </tr>
                   ))}
                 </tbody>

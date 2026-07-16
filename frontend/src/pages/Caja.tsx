@@ -6,6 +6,8 @@ import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { ModalBase } from '../components/ui/ModalBase';
 import { ToastAlert } from '../components/ui/ToastAlert';
 import { cajaAPI, conceptosIngresoAPI, type ConceptoIngresoTenant } from '../services/api';
+import { parseApiError } from '../utils/errors';
+import { formatCurrencyCOP } from '../utils/formatters';
 import '../styles/Caja.css';
 
 interface CajaActual {
@@ -208,7 +210,7 @@ export const Caja = () => {
     setNotificacion(null);
   };
 
-  const getErrorMessage = (error: any, fallback: string) => error?.response?.data?.detail || fallback;
+  const getErrorMessage = (error: any, fallback: string) => parseApiError(error, fallback);
   useEffect(() => {
     if (!notificacion) return;
     const timer = window.setTimeout(() => {
@@ -655,11 +657,7 @@ export const Caja = () => {
   
   const formatCurrency = (value?: number) => {
     if (value === undefined || value === null) return '$0';
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0
-    }).format(value);
+    return formatCurrencyCOP(value);
   };
   
   const getEstadoFinancieroColor = (estado: string) => {
@@ -1536,7 +1534,7 @@ export const Caja = () => {
                   </option>
                   {conceptosIngreso.map((concepto) => (
                     <option key={concepto.id} value={concepto.id}>
-                      {concepto.nombre} - {new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(Number(concepto.valor_default || 0))}
+                      {concepto.nombre} - {formatCurrencyCOP(Number(concepto.valor_default || 0))}
                     </option>
                   ))}
                 </select>
@@ -1874,6 +1872,10 @@ export const Caja = () => {
               {/* Conteo Físico */}
               <div className="arqueo-conteo">
                 <h4>👆 Conteo Físico de Efectivo</h4>
+                <p className="arqueo-nota">
+                  Al cerrar caja, el efectivo se entrega al administrador y se registra manualmente en Caja Fuerte.
+                  Los saldos digitales se consolidan automáticamente.
+                </p>
                 <div className="form-group">
                   <label>Efectivo Físico Contado *</label>
                   <input

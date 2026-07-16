@@ -44,9 +44,13 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
           await refreshUser();
         } catch (error) {
           console.error('Error al cargar usuario:', error);
+          const authMode = getAuthMode();
           localStorage.removeItem('access_token');
           localStorage.removeItem('refresh_token');
           localStorage.removeItem('auth_mode');
+          if (authMode === 'global') {
+            localStorage.removeItem('tenant_slug');
+          }
           setToken(null);
           setUser(null);
         }
@@ -86,9 +90,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   };
 
   const logout = () => {
+    const authMode = getAuthMode();
     authAPI.logout();
     localStorage.removeItem('auth_mode');
-    localStorage.removeItem('tenant_slug');
+    if (authMode === 'global') {
+      localStorage.removeItem('tenant_slug');
+    }
     setUser(null);
     setToken(null);
   };

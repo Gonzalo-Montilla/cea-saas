@@ -112,10 +112,12 @@
 .saas-search {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .saas-search input {
   width: 280px;
+  max-width: 100%;
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -124,6 +126,7 @@
 
 .saas-search select {
   min-width: 190px;
+  max-width: 100%;
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -259,6 +262,20 @@
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+
+.saas-security-help {
+  margin-top: -4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.saas-admin-container input:focus-visible,
+.saas-admin-container select:focus-visible,
+.saas-admin-container textarea:focus-visible,
+.saas-admin-container button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .saas-user-actions {
@@ -460,6 +477,36 @@
   border-radius: 8px;
 }
 
+.saas-password-field {
+  position: relative;
+}
+
+.saas-password-field input {
+  padding-right: 40px;
+}
+
+.saas-password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.saas-password-toggle:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
 .saas-conversion-result {
   border: 1px dashed var(--border);
   border-radius: 10px;
@@ -575,7 +622,7 @@
   margin: 0;
 }
 
-.saas-info-message {
+.saas-alert {
   background: rgba(16, 185, 129, 0.1);
   border: 1px solid rgba(16, 185, 129, 0.25);
   color: #047857;
@@ -585,8 +632,16 @@
   animation: notice-in 180ms ease-out;
 }
 
-.error-message {
-  animation: notice-in 180ms ease-out;
+.saas-alert-error {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.25);
+  color: #b91c1c;
+}
+
+.saas-alert-info {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.25);
+  color: #047857;
 }
 
 @keyframes notice-in {
@@ -629,6 +684,17 @@
   }
 
   .saas-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .saas-search input,
+  .saas-search select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .saas-user-form,
+  .saas-lead-form {
     grid-template-columns: 1fr;
   }
 }
@@ -700,8 +766,14 @@
   color: #bbf7d0;
 }
 
-:root[data-theme='dark'] .saas-info-message {
+:root[data-theme='dark'] .saas-alert-info {
   background: rgba(16, 185, 129, 0.2);
   border-color: rgba(16, 185, 129, 0.35);
   color: #bbf7d0;
+}
+
+:root[data-theme='dark'] .saas-alert-error {
+  background: rgba(220, 38, 38, 0.2);
+  border-color: rgba(248, 113, 113, 0.4);
+  color: #fecaca;
 }

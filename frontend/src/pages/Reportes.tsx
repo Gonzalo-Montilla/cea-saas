@@ -16,6 +16,7 @@ import { TablaEstudiantesPagos } from '../components/reportes/TablaEstudiantesPa
 import { TablaConceptosPagos } from '../components/reportes/TablaConceptosPagos';
 import { TablaEgresosCaja } from '../components/reportes/TablaEgresosCaja';
 import { TablaOtrosIngresos } from '../components/reportes/TablaOtrosIngresos';
+import { formatCurrencyCOP, formatPercent } from '../utils/formatters';
 import '../styles/Reportes.css';
 
 interface DashboardData {
@@ -98,16 +99,10 @@ export const Reportes = () => {
     }
   };
 
-  const formatearMoneda = (valor: number) => {
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0
-    }).format(valor);
-  };
-
-  const formatearPorcentaje = (valor: number) => {
-    return `${valor.toFixed(1)}%`;
+  const toNumber = (value: unknown): number => {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
   };
 
   if (error) {
@@ -227,14 +222,14 @@ export const Reportes = () => {
       ['Generado', new Date().toLocaleString('es-CO')],
       [],
       ['KPI', 'Valor'],
-      ['Ingresos Totales', kpis.ingresos_totales.valor_actual],
-      ['Egresos Totales', kpis.egresos_totales.valor_actual],
-      ['Saldo Pendiente', kpis.saldo_pendiente],
-      ['Margen Operativo', kpis.margen_operativo],
-      ['Ticket Promedio', kpis.ticket_promedio],
-      ['Tasa de Cobranza', kpis.tasa_cobranza],
-      ['Estudiantes Activos', kpis.estudiantes_activos],
-      ['Nuevas Matrículas', kpis.nuevas_matriculas],
+      ['Ingresos Totales', toNumber(kpis.ingresos_totales?.valor_actual)],
+      ['Egresos Totales', toNumber(kpis.egresos_totales?.valor_actual)],
+      ['Saldo Pendiente', toNumber(kpis.saldo_pendiente)],
+      ['Margen Operativo', toNumber(kpis.margen_operativo)],
+      ['Ticket Promedio', toNumber(kpis.ticket_promedio)],
+      ['Tasa de Cobranza', toNumber(kpis.tasa_cobranza)],
+      ['Estudiantes Activos', toNumber(kpis.total_estudiantes_activos)],
+      ['Nuevas Matrículas', toNumber(kpis.nuevas_matriculas_mes)],
       [],
       ['Ingresos por periodo'],
       ['Periodo', 'Ingresos']
@@ -281,7 +276,7 @@ export const Reportes = () => {
       <div className="kpis-grid">
         <KPICard
           titulo="Ingresos Totales"
-          valor={formatearMoneda(parseFloat(kpis.ingresos_totales.valor_actual))}
+          valor={formatCurrencyCOP(toNumber(kpis.ingresos_totales?.valor_actual))}
           icono={<DollarSign size={24} />}
           cambio={kpis.ingresos_totales.cambio_porcentual}
           tendencia={kpis.ingresos_totales.tendencia}
@@ -289,7 +284,7 @@ export const Reportes = () => {
         />
         <KPICard
           titulo="Egresos Totales"
-          valor={formatearMoneda(parseFloat(kpis.egresos_totales.valor_actual))}
+          valor={formatCurrencyCOP(toNumber(kpis.egresos_totales?.valor_actual))}
           icono={<TrendingUp size={24} />}
           cambio={kpis.egresos_totales.cambio_porcentual}
           tendencia={kpis.egresos_totales.tendencia}
@@ -297,37 +292,37 @@ export const Reportes = () => {
         />
         <KPICard
           titulo="Saldo Pendiente"
-          valor={formatearMoneda(parseFloat(kpis.saldo_pendiente))}
+          valor={formatCurrencyCOP(toNumber(kpis.saldo_pendiente))}
           icono={<CreditCard size={24} />}
           colorIcono="#f59e0b"
         />
         <KPICard
           titulo="Margen Operativo"
-          valor={formatearPorcentaje(kpis.margen_operativo)}
+          valor={formatPercent(toNumber(kpis.margen_operativo))}
           icono={<PieChart size={24} />}
           colorIcono="#8b5cf6"
         />
         <KPICard
           titulo="Estudiantes Activos"
-          valor={kpis.total_estudiantes_activos}
+          valor={toNumber(kpis.total_estudiantes_activos)}
           icono={<Users size={24} />}
           colorIcono="#2563eb"
         />
         <KPICard
           titulo="Nuevas Matrículas"
-          valor={kpis.nuevas_matriculas_mes}
+          valor={toNumber(kpis.nuevas_matriculas_mes)}
           icono={<Calendar size={24} />}
           colorIcono="#06b6d4"
         />
         <KPICard
           titulo="Ticket Promedio"
-          valor={formatearMoneda(parseFloat(kpis.ticket_promedio))}
+          valor={formatCurrencyCOP(toNumber(kpis.ticket_promedio))}
           icono={<DollarSign size={24} />}
           colorIcono="#10b981"
         />
         <KPICard
           titulo="Tasa de Cobranza"
-          valor={formatearPorcentaje(kpis.tasa_cobranza)}
+          valor={formatPercent(toNumber(kpis.tasa_cobranza))}
           icono={<TrendingUp size={24} />}
           colorIcono="#22c55e"
         />
@@ -356,7 +351,7 @@ export const Reportes = () => {
             />
             <KPICard
               titulo="Cumplimiento Clases"
-              valor={formatearPorcentaje(clasesKpis.tasa_cumplimiento || 0)}
+              valor={formatPercent(clasesKpis.tasa_cumplimiento || 0)}
               icono={<BarChart3 size={24} />}
               colorIcono="#7c3aed"
             />
@@ -386,7 +381,7 @@ export const Reportes = () => {
                         <td>{row.clases_programadas}</td>
                         <td>{row.clases_completadas}</td>
                         <td>{row.clases_canceladas}</td>
-                        <td>{formatearPorcentaje(row.porcentaje_cumplimiento || 0)}</td>
+                        <td>{formatPercent(row.porcentaje_cumplimiento || 0)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -429,8 +424,8 @@ export const Reportes = () => {
           <div className="grafico-header">
             <h3>Evolución de Ingresos</h3>
             <div className="grafico-stats">
-              <span>Total: {formatearMoneda(parseFloat(grafico_ingresos.total_periodo))}</span>
-              <span>Promedio: {formatearMoneda(parseFloat(grafico_ingresos.promedio_mensual))}</span>
+              <span>Total: {formatCurrencyCOP(toNumber(grafico_ingresos.total_periodo))}</span>
+              <span>Promedio: {formatCurrencyCOP(toNumber(grafico_ingresos.promedio_mensual))}</span>
             </div>
           </div>
           <ResponsiveContainer width="100%" height={300}>
@@ -440,7 +435,7 @@ export const Reportes = () => {
               <YAxis stroke={AXIS_COLOR} style={{ fontSize: '12px' }} />
               <Tooltip
                 contentStyle={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px' }}
-                formatter={(value: any) => formatearMoneda(value)}
+                formatter={(value: any) => formatCurrencyCOP(value)}
               />
               <Legend />
               <Line
@@ -469,7 +464,7 @@ export const Reportes = () => {
               <YAxis stroke={AXIS_COLOR} style={{ fontSize: '12px' }} />
               <Tooltip
                 contentStyle={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px' }}
-                formatter={(value: any) => formatearMoneda(value)}
+                formatter={(value: any) => formatCurrencyCOP(value)}
               />
               <Bar dataKey="valor" name="Monto">
                 {datosMetodosPago.map((_entry: any, index: number) => (
@@ -516,7 +511,7 @@ export const Reportes = () => {
           <div className="grafico-header">
             <h3>Top 5 Categorías de Egresos</h3>
             <div className="grafico-stats">
-              <span>Total: {formatearMoneda(parseFloat(grafico_egresos.total))}</span>
+              <span>Total: {formatCurrencyCOP(toNumber(grafico_egresos.total))}</span>
               <span>Mayor: {grafico_egresos.categoria_mayor}</span>
             </div>
           </div>
@@ -527,7 +522,7 @@ export const Reportes = () => {
               <YAxis dataKey="categoria" type="category" stroke={AXIS_COLOR} style={{ fontSize: '12px' }} width={150} />
               <Tooltip
                 contentStyle={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '8px' }}
-                formatter={(value: any) => formatearMoneda(value)}
+                formatter={(value: any) => formatCurrencyCOP(value)}
               />
               <Bar dataKey="monto" fill="var(--chart-4)" name="Monto" />
             </BarChart>

@@ -18,6 +18,7 @@ import {
 import { PageHeader } from '../components/PageHeader';
 import { reportesAPI } from '../services/api';
 import { BRAND_NAME } from '../config/branding';
+import { formatCurrencyCOP } from '../utils/formatters';
 import '../styles/Dashboard.css';
 
 export const Dashboard = () => {
@@ -59,11 +60,7 @@ export const Dashboard = () => {
   }, []);
 
   const formatearMoneda = (valor: number) => {
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0
-    }).format(valor);
+    return formatCurrencyCOP(valor);
   };
 
   return (

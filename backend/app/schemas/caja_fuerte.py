@@ -4,6 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from app.models.caja import TipoMovimiento
 from app.models.pago import MetodoPago
+from app.models.caja_fuerte import EstadoMovimientoCajaFuerte
 
 
 class CajaFuerteResumen(BaseModel):
@@ -48,6 +49,7 @@ class MovimientoCajaFuerteCreate(BaseModel):
 
 
 class MovimientoCajaFuerteUpdate(BaseModel):
+    tipo: Optional[TipoMovimiento] = None
     metodo_pago: Optional[MetodoPago] = None
     concepto: Optional[str] = None
     categoria: Optional[str] = None
@@ -109,8 +111,27 @@ class MovimientoCajaFuerteResponse(BaseModel):
     fecha: datetime
     observaciones: Optional[str]
     inventario_detalle: Optional[List[InventarioItem]] = None
+    estado: EstadoMovimientoCajaFuerte
+    motivo_anulacion: Optional[str] = None
+    anulado_at: Optional[datetime] = None
+    anulado_por_nombre: Optional[str] = None
     usuario_nombre: str
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class MovimientoCajaFuerteAnular(BaseModel):
+    motivo_anulacion: str
+    inventario_items: Optional[List['InventarioItem']] = None
+
+    @field_validator("motivo_anulacion")
+    @classmethod
+    def validate_motivo_anulacion(cls, v):
+        if not v or len(v.strip()) < 5:
+            raise ValueError("El motivo de anulación debe tener al menos 5 caracteres")
+        return v.strip()
+
+
+MovimientoCajaFuerteAnular.model_rebuild()

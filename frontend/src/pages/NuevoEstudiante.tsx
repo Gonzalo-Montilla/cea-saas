@@ -1,10 +1,29 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { estudiantesAPI } from '../services/api';
-import { Camera, RotateCcw, Check, UserPlus } from 'lucide-react';
+import { Camera, RotateCcw, Check, UserPlus, Search } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { parseApiError } from '../utils/errors';
 import '../styles/NuevoEstudiante.css';
+
+type CedulaLookupPayload = {
+  success: boolean;
+  documento: string;
+  fuente: string;
+  sugerido: {
+    primer_nombre?: string;
+    segundo_nombre?: string;
+    primer_apellido?: string;
+    segundo_apellido?: string;
+    nombre_completo?: string;
+    fecha_nacimiento?: string;
+    direccion?: string;
+    ciudad?: string;
+    telefono?: string;
+    email?: string;
+  };
+};
 
 export const NuevoEstudiante = () => {
   const navigate = useNavigate();
@@ -24,6 +43,11 @@ export const NuevoEstudiante = () => {
   const [otpCodeCopied, setOtpCodeCopied] = useState(false);
   const [otpCancelConfirmOpen, setOtpCancelConfirmOpen] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [consultandoCedula, setConsultandoCedula] = useState(false);
+  const [cedulaLookupMessage, setCedulaLookupMessage] = useState('');
+  const [cedulaLookupSource, setCedulaLookupSource] = useState('');
+  const [cedulaLookupPending, setCedulaLookupPending] = useState<CedulaLookupPayload | null>(null);
+  const [showCedulaMergeModal, setShowCedulaMergeModal] = useState(false);
   const [resultModal, setResultModal] = useState<null | {
     kind: 'success' | 'warning';
     title: string;
@@ -55,6 +79,14 @@ export const NuevoEstudiante = () => {
   const [estrato, setEstrato] = useState('');
   const [nivelSisben, setNivelSisben] = useState('');
   const [necesidadesEspeciales, setNecesidadesEspeciales] = useState('');
+  const ocupacionesDisponibles = [
+    { value: 'EMPLEADO', label: 'Empleado' },
+    { value: 'INDEPENDIENTE', label: 'Independiente' },
+    { value: 'PENSIONADO', label: 'Pensionado' },
+    { value: 'ESTUDIANTE', label: 'Estudiante' },
+    { value: 'HOGAR', label: 'Hogar' },
+    { value: 'OTRO', label: 'Otro' },
+  ];
   
   // Contacto de emergencia
   const [contactoEmergenciaNombre, setContactoEmergenciaNombre] = useState('');
@@ -167,6 +199,94 @@ export const NuevoEstudiante = () => {
       return value.toUpperCase().replace(/[^A-Z0-9\-]/g, '').slice(0, 20);
     }
     return soloDigitos(value);
+  };
+
+  const sanitizeUpper = (value?: string | null) => String(value || '').trim().toUpperCase();
+  const sanitizeLower = (value?: string | null) => String(value || '').trim().toLowerCase();
+
+  const hasDatosPersonalesDigitados = () =>
+    Boolean(
+      primerNombre ||
+      segundoNombre ||
+      primerApellido ||
+      segundoApellido ||
+      fechaNacimiento ||
+      email ||
+      telefono ||
+      direccion ||
+      ciudad
+    );
+
+  const applyLookupData = (payload: CedulaLookupPayload, mode: 'empty_only' | 'replace_all') => {
+    const sugerido = payload.sugerido || {};
+    const resolveValue = (current: string, incoming?: string, sanitizer?: (value?: string | null) => string) => {
+      const normalizedIncoming = sanitizer ? sanitizer(incoming) : String(incoming || '').trim();
+      if (!normalizedIncoming) return current;
+      if (mode === 'replace_all') return normalizedIncoming;
+      return current.trim() ? current : normalizedIncoming;
+    };
+
+    setPrimerNombre((prev) => resolveValue(prev, sugerido.primer_nombre, sanitizeUpper));
+    setSegundoNombre((prev) => resolveValue(prev, sugerido.segundo_nombre, sanitizeUpper));
+    setPrimerApellido((prev) => resolveValue(prev, sugerido.primer_apellido, sanitizeUpper));
+    setSegundoApellido((prev) => resolveValue(prev, sugerido.segundo_apellido, sanitizeUpper));
+    setFechaNacimiento((prev) => resolveValue(prev, sugerido.fecha_nacimiento));
+    setEmail((prev) => resolveValue(prev, sugerido.email, sanitizeLower));
+    setTelefono((prev) => resolveValue(prev, sugerido.telefono, soloDigitos));
+    setDireccion((prev) => resolveValue(prev, sugerido.direccion, sanitizeUpper));
+    setCiudad((prev) => resolveValue(prev, sugerido.ciudad, sanitizeUpper));
+
+    setCedulaLookupSource(String(payload.fuente || '').trim().toLowerCase());
+    setCedulaLookupMessage(
+      mode === 'replace_all'
+        ? 'Se actualizaron los campos con la consulta externa. Verifica los datos con el cliente antes de guardar.'
+        : 'Se completaron los campos vacíos con datos externos. Puedes editarlos si el cliente reporta cambios.'
+    );
+  };
+
+  const handleConsultarCedula = async () => {
+    setError('');
+    setCedulaLookupMessage('');
+    const documento = formatDocumento(cedula);
+    if (tipoDocumento !== 'CEDULA') {
+      setError('La consulta externa está disponible solo para cédula de ciudadanía.');
+      return;
+    }
+    if (!documento || documento.length < 5) {
+      setError('Ingresa una cédula válida antes de consultar.');
+      return;
+    }
+    try {
+      setConsultandoCedula(true);
+      const lookup = await estudiantesAPI.lookupDatosPorCedula(documento);
+      const sugerido = lookup?.sugerido || {};
+      const hasSugerido = Boolean(
+        sugerido.primer_nombre ||
+        sugerido.segundo_nombre ||
+        sugerido.primer_apellido ||
+        sugerido.segundo_apellido ||
+        sugerido.fecha_nacimiento ||
+        sugerido.telefono ||
+        sugerido.direccion ||
+        sugerido.ciudad ||
+        sugerido.email
+      );
+      if (!hasSugerido) {
+        setCedulaLookupMessage('La consulta no devolvió datos aprovechables para autollenado.');
+        setCedulaLookupSource(String(lookup?.fuente || '').trim().toLowerCase());
+        return;
+      }
+      if (hasDatosPersonalesDigitados()) {
+        setCedulaLookupPending(lookup);
+        setShowCedulaMergeModal(true);
+        return;
+      }
+      applyLookupData(lookup, 'replace_all');
+    } catch (err: any) {
+      setError(parseApiError(err, 'No se pudo consultar la cédula en este momento.'));
+    } finally {
+      setConsultandoCedula(false);
+    }
   };
 
   useEffect(() => {
@@ -298,7 +418,7 @@ export const NuevoEstudiante = () => {
         }).join(', ');
         setError(`Errores de validación: ${mensajesError}`);
       } else {
-        setError(err.response?.data?.detail || 'No se pudo iniciar la validación OTP');
+        setError(parseApiError(err, 'No se pudo iniciar la validación OTP'));
       }
     } finally {
       setIsLoading(false);
@@ -341,6 +461,58 @@ export const NuevoEstudiante = () => {
   };
 
   const closeResultModal = () => setResultModal(null);
+
+  const resetFormulario = () => {
+    setPrimerNombre('');
+    setSegundoNombre('');
+    setPrimerApellido('');
+    setSegundoApellido('');
+    setTipoDocumento('CEDULA');
+    setCedula('');
+    setFechaNacimiento('');
+    setEmail('');
+    setTelefono('');
+    setDireccion('');
+    setCiudad('');
+    setBarrio('');
+    setTipoSangre('');
+    setEps('');
+    setOcupacion('');
+    setEstadoCivil('');
+    setNivelEducativo('');
+    setEstrato('');
+    setNivelSisben('');
+    setNecesidadesEspeciales('');
+    setContactoEmergenciaNombre('');
+    setContactoEmergenciaTelefono('');
+    setFotoCapturada(null);
+    setMostrarWebcam(false);
+    setCedulaLookupMessage('');
+    setCedulaLookupSource('');
+    setCedulaLookupPending(null);
+    setShowCedulaMergeModal(false);
+    setError('');
+    setOtpError('');
+    setOtpWarning('');
+    setOtpDebugCode('');
+    setOtpDeliveryStatus('');
+    setOtpCodeCopied(false);
+    setOtpCode('');
+    setOtpSessionToken('');
+    setOtpMaskedEmail('');
+    setOtpExpiresAt(null);
+    setOtpTimeLeft(0);
+    setOtpResendCooldown(0);
+    setOtpCancelConfirmOpen(false);
+    setAceptaHabeas(false);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const scrollToTopForm = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const tieneCambiosSinGuardar = () =>
     Boolean(
@@ -385,13 +557,15 @@ export const NuevoEstudiante = () => {
         ? 'Se envió la confirmación de Habeas Data con el PDF firmado adjunto.'
         : 'Estudiante creado, pero no se pudo enviar el correo de Habeas Data con PDF adjunto.';
       closeOtpModalConfirmed();
+      resetFormulario();
+      scrollToTopForm();
       setResultModal({
         kind: result?.habeas_email_sent ? 'success' : 'warning',
         title: result?.habeas_email_sent ? 'Registro completado' : 'Registro completado con advertencia',
         message: `Matrícula: ${matricula}.\n${correoMsg}`,
       });
     } catch (err: any) {
-      setOtpError(err?.response?.data?.detail || 'No se pudo validar el OTP');
+      setOtpError(parseApiError(err, 'No se pudo validar el OTP'));
     } finally {
       setOtpBusy(false);
     }
@@ -412,10 +586,42 @@ export const NuevoEstudiante = () => {
       setOtpDeliveryStatus(result.otp_sent ? 'sent' : 'fallback');
       setOtpCodeCopied(false);
     } catch (err: any) {
-      setOtpError(err?.response?.data?.detail || 'No se pudo reenviar el OTP');
+      setOtpError(parseApiError(err, 'No se pudo reenviar el OTP'));
     } finally {
       setOtpBusy(false);
     }
+  };
+
+  const cedulaActual = formatDocumento(cedula);
+  const identificacionCompleta =
+    tipoDocumento === 'PASAPORTE'
+      ? cedulaActual.length >= 5 && cedulaActual.length <= 20
+      : /^\d{5,20}$/.test(cedulaActual);
+  const telefonoPrincipalValido = /^\d{7,15}$/.test(soloDigitos(telefono));
+  const emailValido = /^\S+@\S+\.\S+$/.test(email.trim());
+  const infoPersonalCompleta = Boolean(
+    primerNombre.trim() &&
+    primerApellido.trim() &&
+    fechaNacimiento &&
+    emailValido &&
+    telefonoPrincipalValido
+  );
+  const fotoCompleta = Boolean(fotoCapturada);
+
+  const emergenciaNombre = contactoEmergenciaNombre.trim();
+  const emergenciaTelefono = soloDigitos(contactoEmergenciaTelefono);
+  const emergenciaVacia = !emergenciaNombre && !emergenciaTelefono;
+  const emergenciaCompleta = Boolean(emergenciaNombre && /^\d{7,15}$/.test(emergenciaTelefono));
+  const emergenciaEstado: 'completo' | 'pendiente' | 'opcional' = emergenciaVacia
+    ? 'opcional'
+    : emergenciaCompleta
+      ? 'completo'
+      : 'pendiente';
+
+  const estadoBloque = (estado: 'completo' | 'pendiente' | 'opcional') => {
+    if (estado === 'completo') return { text: 'Completo', className: 'block-status-complete' };
+    if (estado === 'opcional') return { text: 'Opcional', className: 'block-status-optional' };
+    return { text: 'Pendiente', className: 'block-status-pending' };
   };
 
   return (
@@ -428,8 +634,13 @@ export const NuevoEstudiante = () => {
 
       <form onSubmit={handleSubmit} className="estudiante-form">
         {/* Fotografía del Estudiante */}
-        <div className="form-section">
-          <h2>Fotografía del Estudiante *</h2>
+        <div className="form-section form-section-photo">
+          <div className="section-title-row">
+            <h2>Fotografía del Estudiante *</h2>
+            <span className={`block-status ${estadoBloque(fotoCompleta ? 'completo' : 'pendiente').className}`}>
+              {estadoBloque(fotoCompleta ? 'completo' : 'pendiente').text}
+            </span>
+          </div>
           <div className="foto-section">
             {!fotoCapturada && !mostrarWebcam ? (
               <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
@@ -499,9 +710,118 @@ export const NuevoEstudiante = () => {
         </div>
         
         {/* Datos Personales */}
-        <div className="form-section">
-          <h2>Datos Personales</h2>
-          <div className="form-grid">
+        <div className="form-section form-section-personal">
+          <div className="section-title-row">
+            <h2>Datos Personales</h2>
+            <span
+              className={`block-status ${
+                estadoBloque(identificacionCompleta && infoPersonalCompleta ? 'completo' : 'pendiente').className
+              }`}
+            >
+              {estadoBloque(identificacionCompleta && infoPersonalCompleta ? 'completo' : 'pendiente').text}
+            </span>
+          </div>
+          <div className="datos-panel datos-panel-lookup">
+            <div className="datos-panel-header">
+              <span className="panel-step">1</span>
+              <div>
+                <h3>Identificación y consulta</h3>
+                <p>Ingresa el documento y consulta datos para acelerar el registro.</p>
+              </div>
+              <span
+                className={`block-status block-status-inline ${
+                  estadoBloque(identificacionCompleta ? 'completo' : 'pendiente').className
+                }`}
+              >
+                {estadoBloque(identificacionCompleta ? 'completo' : 'pendiente').text}
+              </span>
+            </div>
+            <div className="documento-lookup-grid">
+              <div className="form-group">
+                <label htmlFor="tipoDocumento">Tipo de Documento *</label>
+                <select
+                  id="tipoDocumento"
+                  value={tipoDocumento}
+                  onChange={(e) => {
+                    setTipoDocumento(e.target.value);
+                    setCedula('');
+                    setCedulaLookupMessage('');
+                    setCedulaLookupSource('');
+                    setCedulaLookupPending(null);
+                  }}
+                  required
+                >
+                  <option value="CEDULA">Cédula</option>
+                  <option value="TARJETA_IDENTIDAD">Tarjeta de Identidad</option>
+                  <option value="PASAPORTE">Pasaporte</option>
+                  <option value="CEDULA_EXTRANJERIA">Cédula de Extranjería</option>
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="cedula">Número de Documento *</label>
+                <div className="cedula-lookup-row">
+                  <input
+                    id="cedula"
+                    type="text"
+                    value={cedula}
+                    onChange={(e) => {
+                      setCedula(formatDocumento(e.target.value));
+                      if (cedulaLookupMessage) setCedulaLookupMessage('');
+                      if (cedulaLookupSource) setCedulaLookupSource('');
+                    }}
+                    required
+                    inputMode={tipoDocumento === 'PASAPORTE' ? 'text' : 'numeric'}
+                    pattern={tipoDocumento === 'PASAPORTE' ? undefined : '[0-9]*'}
+                    maxLength={20}
+                  />
+                  <button
+                    type="button"
+                    className="btn-secondary cedula-lookup-button"
+                    onClick={() => void handleConsultarCedula()}
+                    disabled={
+                      consultandoCedula ||
+                      tipoDocumento !== 'CEDULA' ||
+                      !formatDocumento(cedula) ||
+                      isLoading
+                    }
+                  >
+                    <Search size={16} />
+                    {consultandoCedula ? 'Consultando...' : 'Consultar cédula'}
+                  </button>
+                </div>
+                <small className="cedula-lookup-help">
+                  Esta consulta es opcional y no bloquea el registro. Siempre puedes editar los datos.
+                </small>
+              </div>
+            </div>
+          </div>
+
+          {cedulaLookupMessage && (
+            <div className="cedula-lookup-banner" role="status" aria-live="polite">
+              <span className="cedula-lookup-pill">Autocompletado</span>
+              {cedulaLookupMessage}
+              {cedulaLookupSource && (
+                <span className="cedula-lookup-source"> Fuente: {cedulaLookupSource}.</span>
+              )}
+            </div>
+          )}
+          <div className="datos-panel datos-panel-main">
+            <div className="datos-panel-header">
+              <span className="panel-step">2</span>
+              <div>
+                <h3>Información personal</h3>
+                <p>Confirma con el cliente y ajusta cualquier dato desactualizado.</p>
+              </div>
+              <span
+                className={`block-status block-status-inline ${
+                  estadoBloque(infoPersonalCompleta ? 'completo' : 'pendiente').className
+                }`}
+              >
+                {estadoBloque(infoPersonalCompleta ? 'completo' : 'pendiente').text}
+              </span>
+            </div>
+            <div className="form-grid">
             <div className="form-group">
               <label htmlFor="primerNombre">Primer Nombre *</label>
               <input
@@ -542,38 +862,6 @@ export const NuevoEstudiante = () => {
                 value={segundoApellido}
                 onChange={(e) => setSegundoApellido(e.target.value.toUpperCase())}
                 style={{ textTransform: 'uppercase' }}
-              />
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="tipoDocumento">Tipo de Documento *</label>
-              <select
-                id="tipoDocumento"
-                value={tipoDocumento}
-                onChange={(e) => {
-                  setTipoDocumento(e.target.value);
-                  setCedula('');
-                }}
-                required
-              >
-                <option value="CEDULA">Cédula</option>
-                <option value="TARJETA_IDENTIDAD">Tarjeta de Identidad</option>
-                <option value="PASAPORTE">Pasaporte</option>
-                <option value="CEDULA_EXTRANJERIA">Cédula de Extranjería</option>
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="cedula">Número de Documento *</label>
-              <input
-                id="cedula"
-                type="text"
-                value={cedula}
-                onChange={(e) => setCedula(formatDocumento(e.target.value))}
-                required
-                inputMode={tipoDocumento === 'PASAPORTE' ? 'text' : 'numeric'}
-                pattern={tipoDocumento === 'PASAPORTE' ? undefined : '[0-9]*'}
-                maxLength={20}
               />
             </div>
 
@@ -678,13 +966,18 @@ export const NuevoEstudiante = () => {
 
             <div className="form-group">
               <label htmlFor="ocupacion">Ocupación</label>
-              <input
+              <select
                 id="ocupacion"
-                type="text"
                 value={ocupacion}
-                onChange={(e) => setOcupacion(e.target.value.toUpperCase())}
-                style={{ textTransform: 'uppercase' }}
-              />
+                onChange={(e) => setOcupacion(e.target.value)}
+              >
+                <option value="">Seleccione</option>
+                {ocupacionesDisponibles.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div className="form-group">
@@ -760,12 +1053,18 @@ export const NuevoEstudiante = () => {
                 style={{ textTransform: 'uppercase' }}
               />
             </div>
+            </div>
           </div>
         </div>
 
         {/* Contacto de Emergencia */}
-        <div className="form-section">
-          <h2>Contacto de Emergencia</h2>
+        <div className="form-section form-section-emergency">
+          <div className="section-title-row">
+            <h2>Contacto de Emergencia</h2>
+            <span className={`block-status ${estadoBloque(emergenciaEstado).className}`}>
+              {estadoBloque(emergenciaEstado).text}
+            </span>
+          </div>
           <div className="form-grid">
             <div className="form-group">
               <label htmlFor="contactoEmergenciaNombre">Nombre del Contacto</label>
@@ -848,6 +1147,52 @@ export const NuevoEstudiante = () => {
           navigate('/dashboard');
         }}
       />
+
+      {showCedulaMergeModal && cedulaLookupPending && (
+        <div className="otp-modal-backdrop" onClick={() => setShowCedulaMergeModal(false)}>
+          <div className="otp-modal result-modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Datos encontrados por cédula</h3>
+            <div className="otp-warning-box">
+              Ya hay información digitada en el formulario.
+              {'\n'}Confirma con el cliente cómo deseas aplicar los datos consultados.
+            </div>
+            <div className="form-actions otp-modal-actions">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  applyLookupData(cedulaLookupPending, 'empty_only');
+                  setShowCedulaMergeModal(false);
+                  setCedulaLookupPending(null);
+                }}
+              >
+                Completar vacíos
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={() => {
+                  applyLookupData(cedulaLookupPending, 'replace_all');
+                  setShowCedulaMergeModal(false);
+                  setCedulaLookupPending(null);
+                }}
+              >
+                Reemplazar todo
+              </button>
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  setShowCedulaMergeModal(false);
+                  setCedulaLookupPending(null);
+                }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {otpSessionToken && (
         <div className="otp-modal-backdrop" onClick={closeOtpModal}>

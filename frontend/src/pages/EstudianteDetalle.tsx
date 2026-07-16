@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import { ModalBase } from '../components/ui/ModalBase';
 import { ToastAlert } from '../components/ui/ToastAlert';
+import { parseApiError } from '../utils/errors';
+import { formatCurrencyCOP } from '../utils/formatters';
 import '../styles/EstudianteDetalle.css';
 import '../styles/DefinirServicioModal.css';
 
@@ -227,7 +229,7 @@ export const EstudianteDetalle = () => {
       });
     } catch (err: any) {
       console.error('Error al descargar Habeas firmado:', err);
-      setFeedback({ type: 'error', message: err?.response?.data?.detail || 'No se pudo cargar el Habeas firmado.' });
+      setFeedback({ type: 'error', message: parseApiError(err, 'No se pudo cargar el Habeas firmado.') });
     }
   };
 
@@ -258,7 +260,7 @@ export const EstudianteDetalle = () => {
       await abrirCertificadoPreview();
     } catch (err: any) {
       console.error('Error al generar certificado:', err);
-      setFeedback({ type: 'error', message: err?.response?.data?.detail || 'No se pudo generar el certificado.' });
+      setFeedback({ type: 'error', message: parseApiError(err, 'No se pudo generar el certificado.') });
     }
   };
 
@@ -278,7 +280,7 @@ export const EstudianteDetalle = () => {
       await abrirCertificadoPreview();
     } catch (err: any) {
       console.error('Error al guardar número RUNT:', err);
-      setRuntError(err?.response?.data?.detail || 'No se pudo guardar el número RUNT.');
+      setRuntError(parseApiError(err, 'No se pudo guardar el número RUNT.'));
     } finally {
       setRuntSaving(false);
     }
@@ -335,11 +337,7 @@ export const EstudianteDetalle = () => {
 
   const formatearMoneda = (valor?: number) => {
     if (!valor) return '$0';
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0
-    }).format(valor);
+    return formatCurrencyCOP(valor);
   };
 
   const calcularPrecioMinimo = (tipo: string) => {
@@ -437,7 +435,7 @@ export const EstudianteDetalle = () => {
       setEstudiante(actualizado);
       setShowCorregirModal(false);
     } catch (err: any) {
-      setCorregirError(err.response?.data?.detail || 'No se pudo corregir el servicio.');
+      setCorregirError(parseApiError(err, 'No se pudo corregir el servicio.'));
     } finally {
       setCorregirLoading(false);
     }
@@ -554,7 +552,7 @@ export const EstudianteDetalle = () => {
       setShowAmpliarModal(false);
     } catch (err: any) {
       console.error('Error al ampliar servicio:', err);
-      setAmpliarError(err.response?.data?.detail || 'No se pudo ampliar el servicio.');
+      setAmpliarError(parseApiError(err, 'No se pudo ampliar el servicio.'));
     } finally {
       setAmpliarSaving(false);
     }
@@ -656,7 +654,7 @@ export const EstudianteDetalle = () => {
       setShowEditModal(false);
     } catch (err: any) {
       console.error('Error al actualizar estudiante:', err);
-      setEditError(err.response?.data?.detail || 'No se pudo actualizar el estudiante');
+      setEditError(parseApiError(err, 'No se pudo actualizar el estudiante'));
     } finally {
       setIsSaving(false);
     }

@@ -45,6 +45,11 @@ const MODULE_PATHS: Record<string, string> = {
   tarifas: '/tarifas'
 };
 
+const getTenantLoginRoute = () => {
+  const tenantSlug = (localStorage.getItem('tenant_slug') || '').trim().toLowerCase();
+  return tenantSlug ? `/login?tenant=${encodeURIComponent(tenantSlug)}` : '/login';
+};
+
 const getHomeRoute = (user?: { rol?: RolUsuario; permisos_modulos?: string[]; must_change_password?: boolean }) => {
   const authMode = (localStorage.getItem('auth_mode') || 'tenant').toLowerCase();
   if (authMode === 'global' && user?.must_change_password) return '/saas-cambiar-password';
@@ -70,7 +75,7 @@ const RoleRoute = ({ children, roles, moduleId }: { children: React.ReactNode; r
     return <div className="loading-container">Cargando...</div>;
   }
   if (!isAuthenticated) {
-    return <Navigate to="/login" />;
+    return <Navigate to={getTenantLoginRoute()} />;
   }
   if (user?.must_change_password && (localStorage.getItem('auth_mode') || '').toLowerCase() === 'global') {
     return <Navigate to="/saas-cambiar-password" />;
@@ -95,7 +100,7 @@ const HomeRedirect = () => {
     return <div className="loading-container">Cargando...</div>;
   }
   if (!isAuthenticated) {
-    return <Navigate to="/login" />;
+    return <Navigate to={getTenantLoginRoute()} />;
   }
   return <Navigate to={getHomeRoute(user || undefined)} />;
 };
@@ -121,7 +126,7 @@ const SaasForcePasswordRoute = ({ children }: { children: React.ReactNode }) => 
 const TenantRoute = ({ children }: { children: React.ReactNode }) => {
   const { isAuthenticated, isLoading, user, getAuthMode } = useAuth();
   if (isLoading) return <div className="loading-container">Cargando...</div>;
-  if (!isAuthenticated) return <Navigate to="/login" />;
+  if (!isAuthenticated) return <Navigate to={getTenantLoginRoute()} />;
   if (getAuthMode() === 'global') return <Navigate to={getHomeRoute(user || undefined)} />;
   return <>{children}</>;
 };

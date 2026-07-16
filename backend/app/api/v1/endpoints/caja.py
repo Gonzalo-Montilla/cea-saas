@@ -136,7 +136,7 @@ def cerrar_caja(
     caja.observaciones_cierre = cierre_data.observaciones_cierre
     caja.estado = EstadoCaja.CERRADA
     
-    _registrar_ingresos_caja_fuerte_por_cierre(caja, cierre_data.efectivo_fisico, db, current_user)
+    _registrar_ingresos_digitales_caja_fuerte_por_cierre(caja, db, current_user)
 
     db.commit()
     db.refresh(caja)
@@ -172,9 +172,8 @@ def _apply_caja_fuerte_delta(caja_fuerte: CajaFuerte, metodo: MetodoPago, delta:
         caja_fuerte.saldo_sistecredito = Decimal(str(caja_fuerte.saldo_sistecredito)) + delta
 
 
-def _registrar_ingresos_caja_fuerte_por_cierre(
+def _registrar_ingresos_digitales_caja_fuerte_por_cierre(
     caja: Caja,
-    efectivo_entregado: Decimal,
     db: Session,
     current_user: Usuario
 ):
@@ -202,50 +201,31 @@ def _registrar_ingresos_caja_fuerte_por_cierre(
                 _apply_caja_fuerte_delta(caja_fuerte, metodo, Decimal(str(monto)))
                 db.add(mov)
 
-            registrar(MetodoPago.EFECTIVO, efectivo_entregado, f"CIERRE CAJA #{caja.id} - EFECTIVO")
+            # Regla operativa:
+            # - El efectivo del cierre NO entra automático a caja fuerte.
+            # - Solo se consolidan automáticamente los saldos digitales.
+            registrar(MetodoPago.NEQUI, caja.total_nequi or Decimal("0"), f"CIERRE CAJA #{caja.id} - NEQUI")
+            registrar(MetodoPago.DAVIPLATA, caja.total_daviplata or Decimal("0"), f"CIERRE CAJA #{caja.id} - DAVIPLATA")
+            registrar(
+                MetodoPago.TRANSFERENCIA_BANCARIA,
+                caja.total_transferencia_bancaria or Decimal("0"),
+                f"CIERRE CAJA #{caja.id} - TRANSFERENCIA",
+            )
+            registrar(
+                MetodoPago.TARJETA_DEBITO,
+                caja.total_tarjeta_debito or Decimal("0"),
+                f"CIERRE CAJA #{caja.id} - TARJETA DÉBITO",
+            )
+            registrar(
+                MetodoPago.TARJETA_CREDITO,
+                caja.total_tarjeta_credito or Decimal("0"),
+                f"CIERRE CAJA #{caja.id} - TARJETA CRÉDITO",
+            )
     except SQLAlchemyError:
         logger.exception(
-            "No se pudo registrar movimiento en caja_fuerte durante cierre de caja id=%s tenant=%s",
+            "No se pudo registrar saldos digitales en caja_fuerte durante cierre de caja id=%s tenant=%s",
             caja.id,
             caja.tenant_id,
-        )
-
-
-def _registrar_ingreso_caja_fuerte_por_pago(
-    pago: Pago,
-    metodo: MetodoPago,
-    monto: Decimal,
-    db: Session,
-    current_user: Usuario
-):
-    if metodo == MetodoPago.EFECTIVO:
-        return
-    try:
-        # Aisla caja_fuerte en SAVEPOINT para no bloquear pagos (incluido mixto)
-        # por problemas puntuales de esquema en producción.
-        with db.begin_nested():
-            caja_fuerte = _get_or_create_caja_fuerte(db, pago.tenant_id)
-            concepto = f"PAGO #{pago.id} - {metodo.value}"
-            mov = MovimientoCajaFuerte(
-                caja_fuerte_id=caja_fuerte.id,
-                caja_id=pago.caja_id,
-                tipo=TipoMovimiento.INGRESO,
-                metodo_pago=metodo,
-                concepto=concepto,
-                categoria="PAGO_ESTUDIANTE",
-                monto=Decimal(str(monto)),
-                fecha=datetime.utcnow(),
-                observaciones=f"Ingreso digital por pago estudiante #{pago.estudiante_id}",
-                usuario_id=current_user.id,
-            )
-            _apply_caja_fuerte_delta(caja_fuerte, metodo, Decimal(str(monto)))
-            db.add(mov)
-    except SQLAlchemyError:
-        logger.exception(
-            "No se pudo registrar movimiento en caja_fuerte para pago id=%s tenant=%s metodo=%s",
-            pago.id,
-            pago.tenant_id,
-            metodo.value if metodo else None,
         )
 
 
@@ -653,23 +633,9 @@ def registrar_pago(
                 
                 # Actualizar totales de caja según método
                 _actualizar_caja_por_metodo(caja_abierta, detalle.metodo_pago, detalle.monto)
-                _registrar_ingreso_caja_fuerte_por_pago(
-                    nuevo_pago,
-                    detalle.metodo_pago,
-                    detalle.monto,
-                    db,
-                    current_user
-                )
         else:
             # Pago simple - actualizar caja según método único
             _actualizar_caja_por_metodo(caja_abierta, pago_data.metodo_pago, pago_data.monto)
-            _registrar_ingreso_caja_fuerte_por_pago(
-                nuevo_pago,
-                pago_data.metodo_pago,
-                pago_data.monto,
-                db,
-                current_user
-            )
         
         # Actualizar saldo del estudiante
         if estudiante.saldo_pendiente:

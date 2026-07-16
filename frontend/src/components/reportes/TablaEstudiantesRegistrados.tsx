@@ -1,4 +1,5 @@
 import { UserPlus } from 'lucide-react';
+import { formatCurrencyCOP } from '../../utils/formatters';
 
 interface EstudianteRegistrado {
   id: number;
@@ -19,11 +20,7 @@ interface TablaEstudiantesRegistradosProps {
 export const TablaEstudiantesRegistrados = ({ estudiantes }: TablaEstudiantesRegistradosProps) => {
   const formatearMoneda = (valor: string | null) => {
     if (!valor) return 'N/A';
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0
-    }).format(parseFloat(valor));
+    return formatCurrencyCOP(parseFloat(valor));
   };
 
   const formatearFecha = (fecha: string) => {

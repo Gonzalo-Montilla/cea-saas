@@ -4,6 +4,7 @@ import { PageHeader } from '../components/PageHeader';
 import { cajaAPI } from '../services/api';
 import { ModalBase } from '../components/ui/ModalBase';
 import { ToastAlert } from '../components/ui/ToastAlert';
+import { formatCurrencyCOP } from '../utils/formatters';
 import '../styles/HistorialCajas.css';
 
 interface CajaHistorial {
@@ -125,11 +126,7 @@ export const HistorialCajas = () => {
 
   const formatearMoneda = (valor: number | null) => {
     if (valor === null) return '-';
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0
-    }).format(valor);
+    return formatCurrencyCOP(valor);
   };
 
   const getEstadoBadge = (estado: string) => {

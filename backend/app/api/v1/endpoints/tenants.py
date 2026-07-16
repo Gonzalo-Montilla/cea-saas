@@ -39,6 +39,8 @@ class SchoolOnboardingRequest(BaseModel):
     admin_nombre_completo: str = Field(min_length=3, max_length=255)
     admin_cedula: str = Field(min_length=5, max_length=20)
     admin_telefono: str | None = Field(default=None, max_length=20)
+    sucursales_adicionales: int = Field(default=0, ge=0, le=20)
+    sucursales_iniciales: list[str] | None = None
     send_welcome_email: bool = True
     activate_tenant: bool = True
 
@@ -102,7 +104,12 @@ def _send_onboarding_welcome_email(
         f"{settings.BRAND_SHORT_NAME}\n"
         f"{settings.BRAND_FULL_NAME}\n"
     )
-    return send_email(login_email, subject, body)
+    return send_email(
+        login_email,
+        subject,
+        body,
+        brand_name=school_name,
+    )
 
 
 def _ensure_primary_branch_for_tenant(db: Session, tenant: Tenant) -> TenantBranch:
@@ -142,6 +149,60 @@ def _ensure_user_branch_access(db: Session, tenant: Tenant, user: Usuario) -> No
         branch_id=primary.id,
         is_active=True,
     ))
+
+
+def _create_initial_branches(
+    db: Session,
+    tenant: Tenant,
+    user: Usuario,
+    branch_names: list[str] | None,
+    additional_count: int = 0,
+) -> None:
+    normalized_from_names: list[str] = []
+    if branch_names:
+        normalized_from_names = [str(name or "").strip() for name in branch_names if str(name or "").strip()]
+    if not normalized_from_names and additional_count > 0:
+        normalized_from_names = [f"Sucursal {idx + 2}" for idx in range(int(additional_count))]
+    if not normalized_from_names:
+        return
+    seen_names: set[str] = set()
+    used_codes = {
+        str(row.codigo or "").strip().upper()
+        for row in db.query(TenantBranch).filter(TenantBranch.tenant_id == tenant.id).all()
+    }
+    for raw_name in normalized_from_names[:20]:
+        name = _normalize_str(raw_name)
+        if not name:
+            continue
+        key = name.lower()
+        if key in seen_names:
+            continue
+        seen_names.add(key)
+        code_seed = _slugify(name).replace("-", "_").upper()[:12] or "SUCURSAL"
+        code = code_seed
+        suffix = 2
+        while code in used_codes:
+            candidate = f"{code_seed[:10]}{suffix}"
+            code = candidate[:12]
+            suffix += 1
+        used_codes.add(code)
+        branch = TenantBranch(
+            tenant_id=tenant.id,
+            nombre=name,
+            codigo=code,
+            is_active=True,
+            is_primary=False,
+            contacto_email=tenant.contacto_email,
+            contacto_telefono=tenant.contacto_telefono,
+        )
+        db.add(branch)
+        db.flush()
+        db.add(TenantUserBranch(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            branch_id=branch.id,
+            is_active=True,
+        ))
 
 
 def _create_school_and_admin(db: Session, payload: SchoolOnboardingRequest) -> tuple[Tenant, Usuario]:
@@ -217,6 +278,13 @@ def _create_school_and_admin(db: Session, payload: SchoolOnboardingRequest) -> t
     )
     db.add(membership)
     _ensure_user_branch_access(db, tenant, admin_user)
+    _create_initial_branches(
+        db,
+        tenant,
+        admin_user,
+        payload.sucursales_iniciales,
+        payload.sucursales_adicionales,
+    )
     db.commit()
     return tenant, admin_user
 

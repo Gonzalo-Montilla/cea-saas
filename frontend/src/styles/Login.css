@@ -42,6 +42,13 @@
   margin: 0;
 }
 
+.login-header small {
+  color: var(--text-secondary);
+  font-size: 13px;
+  margin-top: 6px;
+  display: block;
+}
+
 .login-form {
   display: flex;
   flex-direction: column;
@@ -96,6 +103,14 @@
 
 .toggle-password:hover {
   color: var(--primary);
+}
+
+.toggle-password:focus-visible,
+.login-button:focus-visible,
+.login-links a:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: 8px;
 }
 
 .toggle-password:disabled {
@@ -172,6 +187,18 @@
   color: var(--primary);
   text-decoration: none;
   font-size: 14px;
+}
+
+:root[data-theme='dark'] .form-group input:disabled {
+  background-color: #1e293b;
+  color: #cbd5e1;
+  border-color: #334155;
+}
+
+:root[data-theme='dark'] .error-message {
+  background-color: rgba(220, 38, 38, 0.18);
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.5);
 }
 
 .login-global-footer {

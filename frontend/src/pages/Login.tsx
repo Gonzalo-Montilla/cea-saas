@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { authAPI, tenantsAPI } from '../services/api';
 import { BRAND_LOGO_URL, BRAND_NAME, BRAND_TAGLINE } from '../config/branding';
+import { parseApiError } from '../utils/errors';
 import '../styles/Login.css';
 
 export const Login = () => {
@@ -67,7 +68,7 @@ export const Login = () => {
       navigate('/');
     } catch (err: any) {
       console.error('Error al iniciar sesión:', err);
-      setError(err.response?.data?.detail || 'No se pudo iniciar sesión. Verifica tus credenciales.');
+      setError(parseApiError(err, 'No se pudo iniciar sesión. Verifica tus credenciales.'));
     } finally {
       setIsLoading(false);
     }

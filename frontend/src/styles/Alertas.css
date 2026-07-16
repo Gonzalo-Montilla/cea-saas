@@ -56,6 +56,15 @@
   background: var(--surface-2);
 }
 
+.alerta-item--vencida {
+  border-color: color-mix(in oklab, var(--danger) 45%, var(--border) 55%);
+  background: color-mix(in oklab, var(--danger) 12%, var(--surface) 88%);
+}
+
+.alerta-item--vencida .alerta-meta {
+  color: color-mix(in oklab, var(--danger) 68%, var(--text-secondary) 32%);
+}
+
 .alerta-meta {
   font-size: 0.85rem;
   color: var(--text-secondary);

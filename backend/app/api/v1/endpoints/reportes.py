@@ -52,7 +52,6 @@ def get_dashboard_ejecutivo(
     fecha_inicio_date = fecha_inicio.date()
     fecha_fin_date = fecha_fin.date()
     
-    print(f"\n📅 REPORTES - Período (fecha local): {fecha_inicio_date} hasta {fecha_fin_date}")
     
     # Calcular KPIs
     kpis = _calcular_kpis(db, fecha_inicio_date, fecha_fin_date, comparar_periodo_anterior, current_tenant.id)
@@ -611,16 +610,12 @@ def _calcular_kpis(
         )
     ).all()
     
-    print(f"💼 Cajas encontradas en el período: {len(cajas_periodo)}")
     ingresos_cajas_periodo = Decimal('0')
     for caja in cajas_periodo:
         total_caja = _ingresos_caja(caja)
         ingresos_cajas_periodo += total_caja
-        print(f"  - Caja ID {caja.id} ({caja.fecha_apertura.date()}): Total=${total_caja}")
 
     ingresos_actual = _sumar_ingresos_periodo(db, fecha_inicio, fecha_fin, tenant_id)
-    print(f"💵 Total ingresos del período (por movimientos): ${ingresos_actual}")
-    
     ingresos_anterior = None
     cambio_ingresos = None
     tendencia_ingresos = "neutral"

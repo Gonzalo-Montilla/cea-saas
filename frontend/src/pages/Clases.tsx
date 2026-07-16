@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { Search, Clock, User, Calendar, Download, CheckCircle2, XCircle, CalendarClock } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { ModalBase } from '../components/ui/ModalBase';
+import { ToastAlert } from '../components/ui/ToastAlert';
 import { clasesAPI, estudiantesAPI, instructoresAPI, vehiculosAPI, type ClaseItem } from '../services/api';
+import { parseApiError } from '../utils/errors';
 import '../styles/Clases.css';
 
 interface Estudiante {
@@ -76,6 +78,7 @@ export const Clases = () => {
   const [checkingConflict, setCheckingConflict] = useState(false);
   const [conflictWarning, setConflictWarning] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
   const [servicioSeleccionado, setServicioSeleccionado] = useState<number | 'TODOS'>('TODOS');
 
   const sinPractica = new Set([
@@ -131,9 +134,7 @@ export const Clases = () => {
   };
 
   const getErrorMessage = (err: any, fallback: string) => {
-    const detail = err?.response?.data?.detail;
-    if (Array.isArray(detail)) return fallback;
-    return detail || fallback;
+    return parseApiError(err, fallback);
   };
 
   const toDateTimeLocal = (iso: string) => {
@@ -170,7 +171,9 @@ export const Clases = () => {
       });
       setAgenda(response.items || []);
     } catch (err: any) {
-      setError(getErrorMessage(err, 'No se pudo cargar la agenda de clases'));
+      const message = getErrorMessage(err, 'No se pudo cargar la agenda de clases');
+      setError(message);
+      setFeedback({ type: 'error', message });
       setAgenda([]);
     } finally {
       setLoadingAgenda(false);
@@ -249,8 +252,11 @@ export const Clases = () => {
       setVehiculoId('');
       setFechaProgramada('');
       await cargarAgenda();
+      setFeedback({ type: 'success', message: 'Clase programada correctamente.' });
     } catch (err: any) {
-      setError(getErrorMessage(err, 'No se pudo programar la clase'));
+      const message = getErrorMessage(err, 'No se pudo programar la clase');
+      setError(message);
+      setFeedback({ type: 'error', message });
     } finally {
       setLoading(false);
     }
@@ -273,8 +279,11 @@ export const Clases = () => {
       await clasesAPI.completar(clase.id, { acreditar_horas: acreditar, observaciones: obs });
       await cargarAgenda();
       await recargarEstudianteActual(clase.estudiante_id);
+      setFeedback({ type: 'success', message: 'Clase completada correctamente.' });
     } catch (err: any) {
-      setError(getErrorMessage(err, 'No se pudo completar la clase'));
+      const message = getErrorMessage(err, 'No se pudo completar la clase');
+      setError(message);
+      setFeedback({ type: 'error', message });
     } finally {
       setLoadingAgenda(false);
     }
@@ -285,8 +294,11 @@ export const Clases = () => {
       setLoadingAgenda(true);
       await clasesAPI.cancelar(clase.id, { motivo });
       await cargarAgenda();
+      setFeedback({ type: 'success', message: 'Clase cancelada correctamente.' });
     } catch (err: any) {
-      setError(getErrorMessage(err, 'No se pudo cancelar la clase'));
+      const message = getErrorMessage(err, 'No se pudo cancelar la clase');
+      setError(message);
+      setFeedback({ type: 'error', message });
     } finally {
       setLoadingAgenda(false);
     }
@@ -310,8 +322,11 @@ export const Clases = () => {
         observaciones: observ
       });
       await cargarAgenda();
+      setFeedback({ type: 'success', message: 'Clase reprogramada correctamente.' });
     } catch (err: any) {
-      setError(getErrorMessage(err, 'No se pudo reprogramar la clase'));
+      const message = getErrorMessage(err, 'No se pudo reprogramar la clase');
+      setError(message);
+      setFeedback({ type: 'error', message });
     } finally {
       setLoadingAgenda(false);
     }
@@ -523,6 +538,9 @@ export const Clases = () => {
 
   return (
     <div className="clases-container">
+      {feedback && (
+        <ToastAlert type={feedback.type} message={feedback.message} onClose={() => setFeedback(null)} />
+      )}
       <PageHeader
         title="Clases"
         subtitle="Programación, ejecución y control de clases"
@@ -547,6 +565,12 @@ export const Clases = () => {
             value={cedula}
             onChange={(e) => setCedula(formatDocumentoBusqueda(e.target.value))}
             className="search-input"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                void buscar();
+              }
+            }}
           />
         </div>
         <button className="btn-nuevo btn-search" onClick={buscar} disabled={loading}>

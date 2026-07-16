@@ -3,6 +3,7 @@ import { FileText, Download, Eye } from 'lucide-react';
 import { cajaAPI } from '../../services/api';
 import { ModalBase } from '../ui/ModalBase';
 import { ToastAlert } from '../ui/ToastAlert';
+import { formatCurrencyCOP } from '../../utils/formatters';
 
 interface PagoConcepto {
   pago_id: number;
@@ -29,11 +30,7 @@ export const TablaConceptosPagos = ({ pagos }: TablaConceptosPagosProps) => {
 
   const formatearMoneda = (valor: string | null) => {
     if (!valor) return 'N/A';
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0
-    }).format(parseFloat(valor));
+    return formatCurrencyCOP(parseFloat(valor));
   };
 
   const formatearFecha = (fecha: string) => {

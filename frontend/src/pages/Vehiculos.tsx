@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Car, Plus, Search, Pencil, Trash2, Eye } from 'lucide-react';
+import { Car, Plus, Search, Pencil, Trash2, Eye, ChevronDown } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { instructoresAPI, uploadsAPI, vehiculosAPI } from '../services/api';
 import '../styles/Vehiculos.css';
@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { ModalBase } from '../components/ui/ModalBase';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { ToastAlert } from '../components/ui/ToastAlert';
+import { parseApiError } from '../utils/errors';
 
 interface Vehiculo {
   id: number;
@@ -42,6 +43,7 @@ export const Vehiculos = () => {
   const [totalVehiculos, setTotalVehiculos] = useState(0);
   const vehiculosPorPagina = 12;
   const prevBusquedaRef = useRef('');
+  const [tarjetasExpandidas, setTarjetasExpandidas] = useState<Set<number>>(new Set());
 
   const [mostrarModal, setMostrarModal] = useState(false);
   const [vehiculoEditar, setVehiculoEditar] = useState<Vehiculo | null>(null);
@@ -67,10 +69,7 @@ export const Vehiculos = () => {
   const [instructores, setInstructores] = useState<any[]>([]);
 
   const getErrorMessage = (err: any, fallback: string) => {
-    const detail = err?.response?.data?.detail;
-    if (Array.isArray(detail)) return detail[0]?.msg || fallback;
-    if (typeof detail === 'string') return detail;
-    return fallback;
+    return parseApiError(err, fallback);
   };
 
   useEffect(() => {
@@ -245,6 +244,18 @@ export const Vehiculos = () => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const toggleTarjeta = (vehiculoId: number) => {
+    setTarjetasExpandidas((prev) => {
+      const next = new Set(prev);
+      if (next.has(vehiculoId)) {
+        next.delete(vehiculoId);
+      } else {
+        next.add(vehiculoId);
+      }
+      return next;
+    });
+  };
+
   return (
     <div className="vehiculos-container">
       <PageHeader
@@ -298,66 +309,114 @@ export const Vehiculos = () => {
               )}
             </div>
           ) : (
-            <div className="vehiculos-table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Placa</th>
-                    <th>Tipo</th>
-                    <th>Marca</th>
-                    <th>Modelo</th>
-                    <th>Año</th>
-                    <th>Responsable</th>
-                    <th>Estado</th>
-                    <th>Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {vehiculos.map((vehiculo) => (
-                    <tr key={vehiculo.id}>
-                      <td>{vehiculo.placa}</td>
-                      <td>{vehiculo.tipo || '-'}</td>
-                      <td>{vehiculo.marca || '-'}</td>
-                      <td>{vehiculo.modelo || '-'}</td>
-                      <td>{vehiculo.año || '-'}</td>
-                      <td>{vehiculo.responsable_nombre || '-'}</td>
-                      <td>
-                        <span className={`badge ${vehiculo.is_active ? 'badge-activo' : 'badge-inactivo'}`}>
-                          {vehiculo.is_active ? 'Activo' : 'Inactivo'}
-                        </span>
-                      </td>
-                      <td className="acciones">
-                        <button
-                          className="btn-icon"
-                          onClick={() => navigate(`/vehiculos/${vehiculo.id}`)}
-                          title="Ver hoja de vida"
-                          aria-label={`Ver hoja de vida de ${vehiculo.placa}`}
-                        >
-                          <Eye size={16} />
-                        </button>
-                        <button
-                          className="btn-icon"
-                          onClick={() => abrirModalEditar(vehiculo)}
-                          title="Editar vehículo"
-                          aria-label={`Editar vehículo ${vehiculo.placa}`}
-                        >
-                          <Pencil size={16} />
-                        </button>
-                        {vehiculo.is_active && (
-                          <button
-                            className="btn-icon danger"
-                            onClick={() => eliminarVehiculo(vehiculo)}
-                            title="Desactivar vehículo"
-                            aria-label={`Desactivar vehículo ${vehiculo.placa}`}
-                          >
-                            <Trash2 size={16} />
-                          </button>
+            <div className="vehiculos-grid">
+              {vehiculos.map((vehiculo) => {
+                const isExpanded = tarjetasExpandidas.has(vehiculo.id);
+                const panelId = `vehiculo-card-body-${vehiculo.id}`;
+
+                return (
+                  <div key={vehiculo.id} className={`vehiculo-card ${isExpanded ? 'expanded' : 'collapsed'}`}>
+                    <button
+                      type="button"
+                      className="vehiculo-card-header clickeable"
+                      onClick={() => toggleTarjeta(vehiculo.id)}
+                      aria-expanded={isExpanded}
+                      aria-controls={panelId}
+                    >
+                      <div className="vehiculo-foto">
+                        {vehiculo.foto_url ? (
+                          <img src={vehiculo.foto_url} alt={vehiculo.placa} />
+                        ) : (
+                          <div className="vehiculo-foto-placeholder">
+                            <span>{vehiculo.placa.charAt(0)}</span>
+                          </div>
                         )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </div>
+                      <div className="vehiculo-info">
+                        <h3>{vehiculo.placa}</h3>
+                        <p className="vehiculo-subline">
+                          {(vehiculo.tipo || 'SIN TIPO')} • {(vehiculo.marca || '-')} {(vehiculo.modelo || '')}
+                        </p>
+                        <p className="vehiculo-subline">
+                          Responsable: {vehiculo.responsable_nombre || 'Sin asignar'}
+                        </p>
+                      </div>
+                      <ChevronDown size={22} className={`chevron-toggle ${isExpanded ? '' : 'rotated'}`} />
+                    </button>
+
+                    {isExpanded && (
+                      <div id={panelId}>
+                        <div className="vehiculo-card-body">
+                          <div className="info-row">
+                            <span className="label">Año</span>
+                            <span className="value">{vehiculo.año || '-'}</span>
+                          </div>
+                          <div className="info-row">
+                            <span className="label">Color</span>
+                            <span className="value">{vehiculo.color || '-'}</span>
+                          </div>
+                          <div className="info-row">
+                            <span className="label">Cilindraje</span>
+                            <span className="value">{vehiculo.cilindraje || '-'}</span>
+                          </div>
+                          <div className="info-row">
+                            <span className="label">Kilometraje</span>
+                            <span className="value">
+                              {vehiculo.kilometraje_actual ? `${vehiculo.kilometraje_actual.toLocaleString('es-CO')} km` : '-'}
+                            </span>
+                          </div>
+                          <div className="info-row">
+                            <span className="label">VIN</span>
+                            <span className="value">{vehiculo.vin || '-'}</span>
+                          </div>
+                          <div className="info-row">
+                            <span className="label">N. Motor</span>
+                            <span className="value">{vehiculo.numero_motor || '-'}</span>
+                          </div>
+                          <div className="info-row">
+                            <span className="label">N. Chasis</span>
+                            <span className="value">{vehiculo.numero_chasis || '-'}</span>
+                          </div>
+                        </div>
+
+                        <div className="vehiculo-card-footer">
+                          <span className={`badge ${vehiculo.is_active ? 'badge-activo' : 'badge-inactivo'}`}>
+                            {vehiculo.is_active ? 'Activo' : 'Inactivo'}
+                          </span>
+                          <div className="card-actions">
+                            <button
+                              className="btn-icon"
+                              onClick={() => navigate(`/vehiculos/${vehiculo.id}`)}
+                              title="Ver hoja de vida"
+                              aria-label={`Ver hoja de vida de ${vehiculo.placa}`}
+                            >
+                              <Eye size={16} />
+                            </button>
+                            <button
+                              className="btn-icon"
+                              onClick={() => abrirModalEditar(vehiculo)}
+                              title="Editar vehículo"
+                              aria-label={`Editar vehículo ${vehiculo.placa}`}
+                            >
+                              <Pencil size={16} />
+                            </button>
+                            {vehiculo.is_active && (
+                              <button
+                                className="btn-icon danger"
+                                onClick={() => eliminarVehiculo(vehiculo)}
+                                title="Desactivar vehículo"
+                                aria-label={`Desactivar vehículo ${vehiculo.placa}`}
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Bell } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { reportesAPI } from '../services/api';
+import { parseApiError } from '../utils/errors';
+import { formatCurrencyCOP, formatDateCO } from '../utils/formatters';
 import '../styles/Alertas.css';
 
 type DocumentoAlerta = {
@@ -67,7 +69,7 @@ const Alertas = () => {
       setPagos(data.pagos_vencidos || []);
       setCompromisos(data.compromisos_por_vencer || []);
     } catch (e: any) {
-      setError(e?.response?.data?.detail || 'No se pudieron cargar las alertas');
+      setError(parseApiError(e, 'No se pudieron cargar las alertas'));
     } finally {
       setLoading(false);
     }
@@ -108,12 +110,15 @@ const Alertas = () => {
           ) : (
             <div className="alertas-list">
               {documentos.map((d) => (
-                <div key={`${d.vehiculo_id}-${d.documento}`} className="alerta-item">
+                <div
+                  key={`${d.vehiculo_id}-${d.documento}`}
+                  className={`alerta-item ${d.dias_restantes < 0 ? 'alerta-item--vencida' : ''}`}
+                >
                   <div>
                     <strong>{d.documento}</strong> • {d.placa}
                   </div>
                   <div className="alerta-meta">
-                    {new Date(d.fecha_vencimiento).toLocaleDateString('es-CO')} • {d.dias_restantes} días
+                    {formatDateCO(d.fecha_vencimiento)} • {d.dias_restantes} días
                   </div>
                 </div>
               ))}
@@ -128,12 +133,15 @@ const Alertas = () => {
           ) : (
             <div className="alertas-list">
               {documentosInstructor.map((d) => (
-                <div key={`${d.instructor_id}-${d.documento}`} className="alerta-item">
+                <div
+                  key={`${d.instructor_id}-${d.documento}`}
+                  className={`alerta-item ${d.dias_restantes < 0 ? 'alerta-item--vencida' : ''}`}
+                >
                   <div>
                     <strong>{d.documento}</strong> • {d.nombre_completo}
                   </div>
                   <div className="alerta-meta">
-                    {new Date(d.fecha_vencimiento).toLocaleDateString('es-CO')} • {d.dias_restantes} días
+                    {formatDateCO(d.fecha_vencimiento)} • {d.dias_restantes} días
                   </div>
                 </div>
               ))}
@@ -148,12 +156,15 @@ const Alertas = () => {
           ) : (
             <div className="alertas-list">
               {pins.map((p) => (
-                <div key={p.estudiante_id} className="alerta-item">
+                <div
+                  key={p.estudiante_id}
+                  className={`alerta-item ${p.dias_restantes < 0 ? 'alerta-item--vencida' : ''}`}
+                >
                   <div>
                     <strong>{p.nombre_completo}</strong> • {p.cedula}
                   </div>
                   <div className="alerta-meta">
-                    {new Date(p.fecha_vencimiento).toLocaleDateString('es-CO')} • {p.dias_restantes} días
+                    {formatDateCO(p.fecha_vencimiento)} • {p.dias_restantes} días
                   </div>
                 </div>
               ))}
@@ -168,12 +179,15 @@ const Alertas = () => {
           ) : (
             <div className="alertas-list">
               {pagos.map((p) => (
-                <div key={p.pago_id} className="alerta-item">
+                <div
+                  key={p.pago_id}
+                  className={`alerta-item ${p.dias_mora > 0 ? 'alerta-item--vencida' : ''}`}
+                >
                   <div>
-                    <strong>{p.nombre_completo}</strong> • ${Number(p.monto).toLocaleString('es-CO')}
+                    <strong>{p.nombre_completo}</strong> • {formatCurrencyCOP(p.monto)}
                   </div>
                   <div className="alerta-meta">
-                    Venció {new Date(p.fecha_vencimiento).toLocaleDateString('es-CO')} • {p.dias_mora} días de mora
+                    Venció {formatDateCO(p.fecha_vencimiento)} • {p.dias_mora} días de mora
                   </div>
                 </div>
               ))}
@@ -188,12 +202,15 @@ const Alertas = () => {
           ) : (
             <div className="alertas-list">
               {compromisos.map((c) => (
-                <div key={c.cuota_id} className="alerta-item">
+                <div
+                  key={c.cuota_id}
+                  className={`alerta-item ${c.dias_restantes < 0 ? 'alerta-item--vencida' : ''}`}
+                >
                   <div>
-                    <strong>{c.nombre_completo}</strong> • ${Number(c.saldo_cuota).toLocaleString('es-CO')}
+                    <strong>{c.nombre_completo}</strong> • {formatCurrencyCOP(c.saldo_cuota)}
                   </div>
                   <div className="alerta-meta">
-                    {new Date(c.fecha_vencimiento).toLocaleDateString('es-CO')} • {c.dias_restantes} días
+                    {formatDateCO(c.fecha_vencimiento)} • {c.dias_restantes} días
                   </div>
                 </div>
               ))}

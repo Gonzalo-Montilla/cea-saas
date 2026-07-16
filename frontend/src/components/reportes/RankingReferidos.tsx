@@ -1,5 +1,6 @@
 import { Trophy, Users, DollarSign, GraduationCap, Phone, ChevronDown, ChevronUp } from 'lucide-react';
 import { useState } from 'react';
+import { formatCurrencyCOP } from '../../utils/formatters';
 
 interface Referido {
   referido_nombre: string;
@@ -20,11 +21,7 @@ export const RankingReferidos = ({ referidos }: RankingReferidosProps) => {
   const panelId = 'ranking-referidos-panel';
   
   const formatearMoneda = (valor: string) => {
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0
-    }).format(parseFloat(valor));
+    return formatCurrencyCOP(parseFloat(valor));
   };
 
   const formatearFecha = (fecha: string | null) => {

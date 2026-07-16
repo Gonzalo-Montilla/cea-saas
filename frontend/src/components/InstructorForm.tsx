@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { X, User, Camera, RotateCcw, Check, Upload, FileText, AlertCircle, Award, ArrowRight, ArrowLeft } from 'lucide-react';
 import { instructoresAPI, authAPI, usuariosAPI } from '../services/api';
 import { ModalBase } from './ui/ModalBase';
+import { parseApiError } from '../utils/errors';
 import '../styles/InstructorForm.css';
 import '../styles/InstructorFormExtras.css';
 
@@ -240,7 +241,7 @@ export const InstructorForm = ({ instructor, onClose, onSuccess }: InstructorFor
       setUsuarioId(nuevoUsuario.id);
       setStep(2); // Ir a captura de foto
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'No se pudo crear el usuario.');
+      setError(parseApiError(err, 'No se pudo crear el usuario.'));
     } finally {
       setLoading(false);
     }
@@ -256,7 +257,7 @@ export const InstructorForm = ({ instructor, onClose, onSuccess }: InstructorFor
       const data = await usuariosAPI.getAll({ search: busquedaUsuario.trim() });
       setUsuariosEncontrados(data || []);
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'No se pudieron buscar los usuarios.');
+      setError(parseApiError(err, 'No se pudieron buscar los usuarios.'));
       setUsuariosEncontrados([]);
     } finally {
       setBuscandoUsuarios(false);
@@ -321,7 +322,7 @@ export const InstructorForm = ({ instructor, onClose, onSuccess }: InstructorFor
       
       onSuccess();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'No se pudo guardar el instructor.');
+      setError(parseApiError(err, 'No se pudo guardar el instructor.'));
     } finally {
       setLoading(false);
     }

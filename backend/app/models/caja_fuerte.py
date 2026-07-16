@@ -2,9 +2,15 @@ from sqlalchemy import Column, Integer, DateTime, ForeignKey, Numeric, String, T
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from decimal import Decimal
+import enum
 from app.core.database import Base
 from app.models.caja import TipoMovimiento
 from app.models.pago import MetodoPago
+
+
+class EstadoMovimientoCajaFuerte(str, enum.Enum):
+    ACTIVO = "ACTIVO"
+    ANULADO = "ANULADO"
 
 
 class CajaFuerte(Base):
@@ -12,6 +18,7 @@ class CajaFuerte(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True, index=True)
+    branch_id = Column(Integer, ForeignKey("tenant_branches.id"), nullable=True, index=True)
 
     saldo_efectivo = Column(Numeric(12, 2), default=0, nullable=False)
     saldo_nequi = Column(Numeric(12, 2), default=0, nullable=False)
@@ -48,6 +55,7 @@ class MovimientoCajaFuerte(Base):
     id = Column(Integer, primary_key=True, index=True)
     caja_fuerte_id = Column(Integer, ForeignKey("caja_fuerte.id"), nullable=False)
     caja_id = Column(Integer, ForeignKey("cajas.id"))
+    branch_id = Column(Integer, ForeignKey("tenant_branches.id"), nullable=True, index=True)
 
     tipo = Column(SQLEnum(TipoMovimiento), nullable=False)
     metodo_pago = Column(SQLEnum(MetodoPago), nullable=False)
@@ -57,12 +65,27 @@ class MovimientoCajaFuerte(Base):
     fecha = Column(DateTime, default=datetime.utcnow, nullable=False)
     observaciones = Column(Text)
     inventario_detalle = Column(Text)
+    estado = Column(SQLEnum(EstadoMovimientoCajaFuerte), default=EstadoMovimientoCajaFuerte.ACTIVO, nullable=False)
+    motivo_anulacion = Column(Text)
+    anulado_at = Column(DateTime)
+    anulado_por_id = Column(Integer, ForeignKey("usuarios.id"))
 
     usuario_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
     caja_fuerte = relationship("CajaFuerte", back_populates="movimientos")
-    usuario = relationship("Usuario")
+    usuario = relationship(
+        "Usuario",
+        foreign_keys=[usuario_id],
+        primaryjoin="MovimientoCajaFuerte.usuario_id == Usuario.id",
+        back_populates="movimientos_caja_fuerte",
+    )
+    anulado_por = relationship(
+        "Usuario",
+        foreign_keys=[anulado_por_id],
+        primaryjoin="MovimientoCajaFuerte.anulado_por_id == Usuario.id",
+        back_populates="movimientos_caja_fuerte_anulados",
+    )
 
 
 class InventarioEfectivo(Base):

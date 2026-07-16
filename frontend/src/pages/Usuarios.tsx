@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { Plus, Pencil, KeyRound, Shield, ChevronDown, Search, X } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { ModalBase } from '../components/ui/ModalBase';
+import { ToastAlert } from '../components/ui/ToastAlert';
 import { tenantsAPI, usuariosAPI } from '../services/api';
+import { parseApiError } from '../utils/errors';
 import { RolUsuario } from '../types';
 import '../styles/Usuarios.css';
 
@@ -108,6 +110,11 @@ export const Usuarios = () => {
   const [sucursales, setSucursales] = useState<BranchItem[]>([]);
   const [sucursalesLoading, setSucursalesLoading] = useState(false);
   const [selectedBranchIds, setSelectedBranchIds] = useState<number[]>([]);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+
+  const getErrorMessage = (err: any, fallback: string) => {
+    return parseApiError(err, fallback);
+  };
 
   const branchNameMap = useMemo(() => {
     const map = new Map<number, string>();
@@ -145,6 +152,7 @@ export const Usuarios = () => {
     } catch (err) {
       console.error('Error al cargar usuarios:', err);
       setError('No se pudieron cargar usuarios');
+      setFeedback({ type: 'error', message: 'No se pudieron cargar usuarios.' });
     } finally {
       setLoading(false);
     }
@@ -261,8 +269,11 @@ export const Usuarios = () => {
       setError('');
       setShowModal(false);
       await cargarUsuarios();
+      setFeedback({ type: 'success', message: editando ? 'Usuario actualizado correctamente.' : 'Usuario creado correctamente.' });
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'No se pudo guardar el usuario.');
+      const message = getErrorMessage(err, 'No se pudo guardar el usuario.');
+      setError(message);
+      setFeedback({ type: 'error', message });
     } finally {
       setGuardandoUsuario(false);
     }
@@ -279,8 +290,11 @@ export const Usuarios = () => {
       await usuariosAPI.resetPassword(passUsuario.id, newPassword);
       setError('');
       setShowPassModal(false);
+      setFeedback({ type: 'success', message: 'Contraseña restablecida correctamente.' });
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'No se pudo restablecer la contraseña.');
+      const message = getErrorMessage(err, 'No se pudo restablecer la contraseña.');
+      setError(message);
+      setFeedback({ type: 'error', message });
     } finally {
       setReseteandoPassword(false);
     }
@@ -290,6 +304,13 @@ export const Usuarios = () => {
 
   return (
     <div className="usuarios-container">
+      {feedback && (
+        <ToastAlert
+          type={feedback.type}
+          message={feedback.message}
+          onClose={() => setFeedback(null)}
+        />
+      )}
       <PageHeader
         title="Usuarios"
         subtitle="Operadores y permisos del sistema"

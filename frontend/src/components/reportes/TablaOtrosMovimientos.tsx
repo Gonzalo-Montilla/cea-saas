@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { formatCurrencyCOP, formatDateTimeCO } from '../../utils/formatters';
 import '../../styles/Reportes.css';
 
 interface MovimientoCajaItem {
@@ -22,15 +23,11 @@ export const TablaOtrosMovimientos = ({ movimientos }: Props) => {
   const rows = useMemo(() => movimientos || [], [movimientos]);
 
   const formatearMoneda = (valor: number) => {
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0
-    }).format(valor || 0);
+    return formatCurrencyCOP(valor || 0);
   };
 
   const formatearFecha = (fecha: string) => {
-    return new Date(fecha).toLocaleString('es-CO');
+    return formatDateTimeCO(fecha);
   };
 
   return (

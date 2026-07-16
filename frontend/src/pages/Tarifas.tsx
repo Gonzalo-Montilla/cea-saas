@@ -10,6 +10,8 @@ import {
   type ConceptoIngresoTenant,
   type TenantServiceRule
 } from '../services/api';
+import { parseApiError } from '../utils/errors';
+import { formatCurrencyCOP } from '../utils/formatters';
 import '../styles/Tarifas.css';
 
 interface Tarifa {
@@ -167,7 +169,7 @@ export const Tarifas = () => {
       setShowModal(false);
       await cargarTarifas();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'No se pudo guardar la tarifa.');
+      setError(parseApiError(err, 'No se pudo guardar la tarifa.'));
     } finally {
       setGuardandoTarifa(false);
     }
@@ -186,7 +188,7 @@ export const Tarifas = () => {
           setError('');
           await cargarTarifas();
         } catch (err: any) {
-          setError(err.response?.data?.detail || 'No se pudo desactivar la tarifa.');
+          setError(parseApiError(err, 'No se pudo desactivar la tarifa.'));
         }
       }
     });
@@ -267,7 +269,7 @@ export const Tarifas = () => {
       setShowConceptoModal(false);
       await cargarConceptosIngreso();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'No se pudo guardar el concepto.');
+      setError(parseApiError(err, 'No se pudo guardar el concepto.'));
     } finally {
       setGuardandoConcepto(false);
     }
@@ -285,7 +287,7 @@ export const Tarifas = () => {
           setError('');
           await cargarConceptosIngreso();
         } catch (err: any) {
-          setError(err.response?.data?.detail || 'No se pudo desactivar el concepto.');
+          setError(parseApiError(err, 'No se pudo desactivar el concepto.'));
         }
       }
     });
@@ -320,7 +322,7 @@ export const Tarifas = () => {
       setEditandoHoras(null);
       await cargarReglasHoras();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'No se pudieron guardar las horas');
+      setError(parseApiError(err, 'No se pudieron guardar las horas'));
     } finally {
       setGuardandoHoras(false);
     }
@@ -338,18 +340,10 @@ export const Tarifas = () => {
           setError('');
           await cargarReglasHoras();
         } catch (err: any) {
-          setError(err.response?.data?.detail || 'No se pudo reiniciar la configuración de horas.');
+          setError(parseApiError(err, 'No se pudo reiniciar la configuración de horas.'));
         }
       }
     });
-  };
-
-  const formatearMoneda = (valor: number) => {
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0
-    }).format(valor);
   };
 
   const categoriaLabelMap = useMemo(
@@ -425,8 +419,8 @@ export const Tarifas = () => {
                     {tarifas.map((t) => (
                       <tr key={t.id}>
                         <td>{tipoServicioLabelMap[t.tipo_servicio] || t.tipo_servicio}</td>
-                        <td>{formatearMoneda(Number(t.precio_base))}</td>
-                        <td>{formatearMoneda(Number(t.costo_practica || 0))}</td>
+                        <td>{formatCurrencyCOP(Number(t.precio_base))}</td>
+                        <td>{formatCurrencyCOP(Number(t.costo_practica || 0))}</td>
                         <td>{t.activo ? 'Activa' : 'Inactiva'}</td>
                         <td>
                           <button
@@ -504,7 +498,7 @@ export const Tarifas = () => {
                       <tr key={c.id}>
                         <td>{c.nombre}</td>
                         <td>{categoriaLabelMap[c.categoria] || c.categoria}</td>
-                        <td>{formatearMoneda(Number(c.valor_default || 0))}</td>
+                        <td>{formatCurrencyCOP(Number(c.valor_default || 0))}</td>
                         <td>{c.activo ? 'Activo' : 'Inactivo'}</td>
                         <td>
                           <button className="btn-icon" onClick={() => abrirEditarConcepto(c)} title="Editar concepto" aria-label={`Editar concepto ${c.nombre}`}>

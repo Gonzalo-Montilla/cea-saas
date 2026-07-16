@@ -19,8 +19,10 @@ const resolveApiUrl = (): string => {
 
 const RAW_API_URL = resolveApiUrl();
 const TENANT_HEADER_NAME = 'X-Tenant-Slug';
+const BRANCH_HEADER_NAME = 'X-Branch-Id';
 const ONBOARDING_HEADER_NAME = 'X-Onboarding-Key';
 const TENANT_SLUG_STORAGE_KEY = 'tenant_slug';
+const BRANCH_ID_STORAGE_KEY = 'branch_id';
 const ENV_TENANT_SLUG = import.meta.env.VITE_TENANT_SLUG?.trim() || '';
 const API_URL = RAW_API_URL.endsWith('/api/v1')
   ? RAW_API_URL
@@ -56,6 +58,19 @@ const resolveTenantSlug = (): string | null => {
   return null;
 };
 
+const resolveBranchId = (): string | null => {
+  const raw = localStorage.getItem(BRANCH_ID_STORAGE_KEY);
+  const normalized = String(raw || '').trim();
+  if (!normalized) return null;
+  if (!/^\d+$/.test(normalized)) return null;
+  return normalized;
+};
+
+const buildTenantLoginPath = (tenantSlug?: string | null): string => {
+  const normalized = String(tenantSlug || '').trim().toLowerCase();
+  return normalized ? `/login?tenant=${encodeURIComponent(normalized)}` : '/login';
+};
+
 const api = axios.create({
   baseURL: API_URL,
   headers: {
@@ -68,6 +83,7 @@ const api = axios.create({
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('access_token');
   const tenantSlug = resolveTenantSlug();
+  const branchId = resolveBranchId();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -76,6 +92,9 @@ api.interceptors.request.use((config) => {
     Boolean((config.headers as any)?.[TENANT_HEADER_NAME.toLowerCase()]);
   if (tenantSlug && !alreadyHasTenantHeader) {
     (config.headers as any)[TENANT_HEADER_NAME] = tenantSlug;
+  }
+  if (branchId) {
+    (config.headers as any)[BRANCH_HEADER_NAME] = branchId;
   }
   return config;
 });
@@ -93,7 +112,6 @@ api.interceptors.response.use(
       if (isGlobal) {
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
-        localStorage.removeItem('tenant_slug');
         if (window.location.pathname !== '/login-saas') {
           window.location.href = '/login-saas';
         }
@@ -133,8 +151,7 @@ api.interceptors.response.use(
           // Si falla el refresh, limpiar tokens y redirigir al login
           localStorage.removeItem('access_token');
           localStorage.removeItem('refresh_token');
-          localStorage.removeItem('tenant_slug');
-          window.location.href = '/login';
+          window.location.href = buildTenantLoginPath(tenantSlug);
         }
       }
     }
@@ -252,6 +269,8 @@ export interface SchoolOnboardingPayload {
   admin_nombre_completo: string;
   admin_cedula: string;
   admin_telefono?: string;
+  sucursales_adicionales?: number;
+  sucursales_iniciales?: string[];
   send_welcome_email: boolean;
   activate_tenant: boolean;
 }
@@ -375,6 +394,27 @@ export const estudiantesAPI = {
 
   getByCedula: async (cedula: string): Promise<any> => {
     const response = await api.get(`/estudiantes/cedula/${cedula}`);
+    return response.data;
+  },
+  lookupDatosPorCedula: async (documento: string): Promise<{
+    success: boolean;
+    documento: string;
+    fuente: string;
+    sugerido: {
+      primer_nombre?: string;
+      segundo_nombre?: string;
+      primer_apellido?: string;
+      segundo_apellido?: string;
+      nombre_completo?: string;
+      fecha_nacimiento?: string;
+      direccion?: string;
+      ciudad?: string;
+      telefono?: string;
+      email?: string;
+    };
+  }> => {
+    const query = new URLSearchParams({ documento }).toString();
+    const response = await api.get(`/estudiantes/lookup/cedula?${query}`);
     return response.data;
   },
 
@@ -654,12 +694,11 @@ export const cajaFuerteAPI = {
     return response.data;
   },
 
-  eliminarMovimiento: async (id: number, inventario?: any): Promise<any> => {
-    if (inventario) {
-      const response = await api.post(`/caja-fuerte/movimientos/${id}/eliminar`, inventario);
-      return response.data;
-    }
-    const response = await api.delete(`/caja-fuerte/movimientos/${id}`);
+  eliminarMovimiento: async (
+    id: number,
+    data: { motivo_anulacion: string; inventario_items?: Array<{ denominacion: number; cantidad: number }> }
+  ): Promise<any> => {
+    const response = await api.post(`/caja-fuerte/movimientos/${id}/anular`, data);
     return response.data;
   },
 
@@ -1055,6 +1094,7 @@ export const saasAdminAPI = {
     admin_nombre_completo: string;
     admin_cedula: string;
     admin_telefono?: string | null;
+    sucursales_adicionales?: number;
     send_welcome_email?: boolean;
     activate_tenant?: boolean;
   }): Promise<{
@@ -1068,6 +1108,7 @@ export const saasAdminAPI = {
     admin_email: string;
     temporary_password: string;
     welcome_email_sent: boolean;
+    sucursales_adicionales_creadas?: number;
   }> => {
     const response = await api.post('/saas-admin/tenants', data);
     return response.data;

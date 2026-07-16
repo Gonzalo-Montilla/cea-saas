@@ -65,7 +65,13 @@ def enviar_correo_clase_programada(clase: Clase, tenant: Optional[Tenant]) -> bo
         f"{settings.BRAND_SHORT_NAME}\n"
         f"{settings.BRAND_FULL_NAME}\n"
     )
-    return send_email(to_email=to_email, subject=subject, body=body)
+    return send_email(
+        to_email=to_email,
+        subject=subject,
+        body=body,
+        brand_name=tenant_name,
+        logo_url=(tenant.logo_url if tenant else None),
+    )
 
 
 def enviar_correo_clase_reprogramada(clase: Clase, tenant: Optional[Tenant], fecha_anterior: Optional[datetime]) -> bool:
@@ -87,7 +93,13 @@ def enviar_correo_clase_reprogramada(clase: Clase, tenant: Optional[Tenant], fec
         f"{settings.BRAND_SHORT_NAME}\n"
         f"{settings.BRAND_FULL_NAME}\n"
     )
-    return send_email(to_email=to_email, subject=subject, body=body)
+    return send_email(
+        to_email=to_email,
+        subject=subject,
+        body=body,
+        brand_name=tenant_name,
+        logo_url=(tenant.logo_url if tenant else None),
+    )
 
 
 def enviar_correo_recordatorio(clase: Clase, tenant: Optional[Tenant], horas_antes: int) -> bool:
@@ -108,7 +120,13 @@ def enviar_correo_recordatorio(clase: Clase, tenant: Optional[Tenant], horas_ant
         f"{settings.BRAND_SHORT_NAME}\n"
         f"{settings.BRAND_FULL_NAME}\n"
     )
-    return send_email(to_email=to_email, subject=subject, body=body)
+    return send_email(
+        to_email=to_email,
+        subject=subject,
+        body=body,
+        brand_name=tenant_name,
+        logo_url=(tenant.logo_url if tenant else None),
+    )
 
 
 def procesar_recordatorios_clases(db: Session, window_minutes: int = 10) -> dict:

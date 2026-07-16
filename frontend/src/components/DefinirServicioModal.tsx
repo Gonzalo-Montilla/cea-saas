@@ -5,6 +5,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { RolUsuario } from '../types';
 import { ModalBase } from './ui/ModalBase';
 import { ConfirmDialog } from './ui/ConfirmDialog';
+import { parseApiError } from '../utils/errors';
+import { formatCurrencyCOP } from '../utils/formatters';
 import '../styles/DefinirServicioModal.css';
 
 interface DefinirServicioModalProps {
@@ -237,7 +239,7 @@ export const DefinirServicioModal = ({ estudiante, onClose, onSuccess }: Definir
       setShowContratoDialog(true);
     } catch (err: any) {
       console.error('Error al definir servicio:', err);
-      setError(err.response?.data?.detail || 'No se pudo definir el servicio.');
+      setError(parseApiError(err, 'No se pudo definir el servicio.'));
     } finally {
       setIsLoading(false);
     }
@@ -271,11 +273,7 @@ export const DefinirServicioModal = ({ estudiante, onClose, onSuccess }: Definir
   const formatearMoneda = (valor: string) => {
     if (!valor) return '';
     const numero = parseInt(valor.replace(/\D/g, ''));
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0
-    }).format(numero);
+    return formatCurrencyCOP(numero);
   };
 
   return (

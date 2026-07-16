@@ -12,7 +12,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse, FileResponse
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from sqlalchemy import func, or_, text, and_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -152,6 +152,7 @@ class SaasTenantCreate(BaseModel):
     admin_nombre_completo: str
     admin_cedula: str
     admin_telefono: Optional[str] = None
+    sucursales_adicionales: int = Field(default=0, ge=0, le=20)
     send_welcome_email: bool = True
     activate_tenant: bool = True
 
@@ -556,6 +557,51 @@ def _ensure_user_primary_branch_access(
     db.add(access)
     db.flush()
     return access
+
+
+def _create_additional_branches_for_tenant(
+    db: Session,
+    tenant: Tenant,
+    user_id: int,
+    additional_count: int,
+) -> int:
+    count = max(0, int(additional_count or 0))
+    if count == 0:
+        return 0
+    existing_codes = {
+        str(row.codigo or "").strip().upper()
+        for row in db.query(TenantBranch).filter(TenantBranch.tenant_id == tenant.id).all()
+    }
+    created = 0
+    for index in range(1, count + 1):
+        suggested_name = f"Sede {index + 1}"
+        code_seed = _normalize_branch_code(suggested_name, suggested_name)
+        code = code_seed
+        suffix = 2
+        while code in existing_codes:
+            candidate = f"{code_seed[:47]}-{suffix}"
+            code = candidate[:50]
+            suffix += 1
+        existing_codes.add(code)
+        branch = TenantBranch(
+            tenant_id=tenant.id,
+            nombre=suggested_name,
+            codigo=code,
+            is_active=True,
+            is_primary=False,
+            contacto_telefono=tenant.contacto_telefono,
+            contacto_email=tenant.contacto_email,
+        )
+        db.add(branch)
+        db.flush()
+        db.add(TenantUserBranch(
+            tenant_id=tenant.id,
+            user_id=user_id,
+            branch_id=branch.id,
+            is_active=True,
+        ))
+        created += 1
+    return created
 
 
 def _slugify(value: str) -> str:
@@ -1704,6 +1750,12 @@ def create_tenant_admin(
     )
     db.add(membership)
     _ensure_user_primary_branch_access(db, tenant, tenant_admin_user.id)
+    created_additional_branches = _create_additional_branches_for_tenant(
+        db,
+        tenant,
+        tenant_admin_user.id,
+        payload.sucursales_adicionales,
+    )
 
     welcome_email_sent = False
     if payload.send_welcome_email:
@@ -1729,6 +1781,8 @@ def create_tenant_admin(
             "plan": _plan_public_label(tenant.plan),
             "admin_email": tenant_admin_user.email,
             "welcome_email_sent": bool(welcome_email_sent),
+            "sucursales_adicionales": int(payload.sucursales_adicionales or 0),
+            "sucursales_adicionales_creadas": int(created_additional_branches),
         },
     )
     db.commit()
@@ -1746,6 +1800,7 @@ def create_tenant_admin(
         "admin_email": tenant_admin_user.email,
         "temporary_password": temporary_password,
         "welcome_email_sent": bool(welcome_email_sent),
+        "sucursales_adicionales_creadas": int(created_additional_branches),
     }
 
 

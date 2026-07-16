@@ -5,6 +5,9 @@ import { Search, UserPlus, Eye, Settings, ChevronDown, Users } from 'lucide-reac
 import { PageHeader } from '../components/PageHeader';
 import { DefinirServicioModal } from '../components/DefinirServicioModal';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { ToastAlert } from '../components/ui/ToastAlert';
+import { parseApiError } from '../utils/errors';
+import { formatCurrencyCOP } from '../utils/formatters';
 import '../styles/Estudiantes.css';
 
 interface Estudiante {
@@ -35,6 +38,7 @@ export const Estudiantes = () => {
   const [mostrarModal, setMostrarModal] = useState(false);
   const [estudianteReactivar, setEstudianteReactivar] = useState<Estudiante | null>(null);
   const [reactivandoEstudiante, setReactivandoEstudiante] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
   
   // Paginación
   const [paginaActual, setPaginaActual] = useState(1);
@@ -78,7 +82,9 @@ export const Estudiantes = () => {
       setTotalEstudiantes(response.total || 0);
     } catch (err) {
       console.error('Error al cargar estudiantes:', err);
-      setError('No se pudo cargar la lista de estudiantes.');
+      const message = parseApiError(err, 'No se pudo cargar la lista de estudiantes.');
+      setError(message);
+      setFeedback({ type: 'error', message });
       setEstudiantes([]);
     } finally {
       setIsLoading(false);
@@ -128,11 +134,7 @@ export const Estudiantes = () => {
 
   const formatearMoneda = (valor?: number) => {
     if (!valor) return '$0';
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0
-    }).format(valor);
+    return formatCurrencyCOP(valor);
   };
 
   const getEstadoBadgeClass = (estado: string) => {
@@ -166,11 +168,14 @@ export const Estudiantes = () => {
         prev.map((item) => (item.id === estudianteReactivar.id ? actualizado : item))
       );
       setError('');
+      setFeedback({ type: 'success', message: 'Estudiante reactivado. Ahora puedes asignarle un nuevo servicio.' });
       setEstudianteSeleccionado(actualizado);
       setMostrarModal(true);
     } catch (err) {
       console.error('Error al reactivar estudiante:', err);
-      setError('No se pudo reactivar el estudiante.');
+      const message = parseApiError(err, 'No se pudo reactivar el estudiante.');
+      setError(message);
+      setFeedback({ type: 'error', message });
     } finally {
       setReactivandoEstudiante(false);
       setEstudianteReactivar(null);
@@ -209,6 +214,13 @@ export const Estudiantes = () => {
 
   return (
     <div className="estudiantes-container">
+      {feedback && (
+        <ToastAlert
+          type={feedback.type}
+          message={feedback.message}
+          onClose={() => setFeedback(null)}
+        />
+      )}
       <PageHeader
         title="Estudiantes"
         subtitle="Gestión de estudiantes y matrículas"

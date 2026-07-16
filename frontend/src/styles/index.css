@@ -215,21 +215,128 @@ select:focus-visible,
 
 table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
+  background: var(--surface);
+  border: 1px solid color-mix(in oklab, var(--border) 72%, var(--primary) 28%);
+  border-radius: 12px;
+  overflow: hidden;
 }
 
 th, td {
   text-align: left;
-  padding: 10px 12px;
+  padding: 11px 10px;
   border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+  font-size: 14px;
 }
 
 thead th {
   font-size: 12px;
   text-transform: uppercase;
-  letter-spacing: 0.4px;
-  color: var(--text-secondary);
-  background: var(--surface-2);
+  letter-spacing: 0.03em;
+  color: color-mix(in oklab, var(--text-secondary) 92%, #22324c 8%);
+  background: color-mix(in oklab, var(--surface-2) 58%, var(--primary) 42%);
+}
+
+tbody tr {
+  transition: background-color 0.18s ease;
+}
+
+tbody tr:hover {
+  background: color-mix(in oklab, var(--surface-2) 86%, var(--primary) 14%);
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Corporate list/table standardization across modules */
+:is(
+  .tabla-movimientos table,
+  .agenda-table,
+  .tabla-simple,
+  .tabla-estudiantes,
+  .ranking-table,
+  .tabla-historial,
+  .usuarios-table table,
+  .soporte-tenant-table,
+  .tabla-reportes,
+  .saas-table,
+  .bo-table
+) {
+  border: 1px solid color-mix(in oklab, var(--border) 72%, var(--primary) 28%) !important;
+  border-radius: 12px !important;
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  background: var(--surface) !important;
+  overflow: hidden !important;
+}
+
+:is(
+  .tabla-movimientos table,
+  .agenda-table,
+  .tabla-simple,
+  .tabla-estudiantes,
+  .ranking-table,
+  .tabla-historial,
+  .usuarios-table table,
+  .soporte-tenant-table,
+  .tabla-reportes,
+  .saas-table,
+  .bo-table
+) thead th {
+  background: color-mix(in oklab, var(--surface-2) 58%, var(--primary) 42%) !important;
+  color: color-mix(in oklab, var(--text-secondary) 92%, #22324c 8%) !important;
+  font-size: 12px !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.03em !important;
+}
+
+:is(
+  .tabla-movimientos table,
+  .agenda-table,
+  .tabla-simple,
+  .tabla-estudiantes,
+  .ranking-table,
+  .tabla-historial,
+  .usuarios-table table,
+  .soporte-tenant-table,
+  .tabla-reportes,
+  .saas-table,
+  .bo-table
+) th,
+:is(
+  .tabla-movimientos table,
+  .agenda-table,
+  .tabla-simple,
+  .tabla-estudiantes,
+  .ranking-table,
+  .tabla-historial,
+  .usuarios-table table,
+  .soporte-tenant-table,
+  .tabla-reportes,
+  .saas-table,
+  .bo-table
+) td {
+  padding: 11px 10px !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+
+:is(
+  .tabla-movimientos table,
+  .agenda-table,
+  .tabla-simple,
+  .tabla-estudiantes,
+  .ranking-table,
+  .tabla-historial,
+  .usuarios-table table,
+  .soporte-tenant-table,
+  .tabla-reportes,
+  .saas-table,
+  .bo-table
+) tbody tr:hover {
+  background: color-mix(in oklab, var(--surface-2) 86%, var(--primary) 14%) !important;
 }
 
 /* Helpers */

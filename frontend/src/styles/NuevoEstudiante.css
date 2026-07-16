@@ -47,6 +47,86 @@
   margin-bottom: 24px;
 }
 
+.section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.section-title-row h2 {
+  margin-bottom: 0;
+}
+
+.block-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.block-status-inline {
+  margin-left: auto;
+}
+
+.block-status-complete {
+  color: #166534;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.block-status-pending {
+  color: #9a3412;
+  background: #ffedd5;
+  border-color: #fdba74;
+}
+
+.block-status-optional {
+  color: var(--text-secondary);
+  background: color-mix(in oklab, var(--surface-2) 74%, var(--surface) 26%);
+  border-color: color-mix(in oklab, var(--border) 88%, #94a3b8 12%);
+}
+
+.form-section-photo {
+  border: 1px solid color-mix(in oklab, var(--border) 70%, var(--primary) 30%);
+  border-radius: 14px;
+  padding: 22px 20px;
+  background:
+    radial-gradient(circle at top right, color-mix(in oklab, var(--primary) 9%, transparent) 0%, transparent 48%),
+    linear-gradient(180deg, color-mix(in oklab, var(--surface-2) 55%, var(--surface) 45%) 0%, var(--surface) 100%);
+}
+
+.form-section-personal {
+  border: 1px solid color-mix(in oklab, var(--border) 70%, var(--primary) 30%);
+  border-radius: 14px;
+  padding: 22px 20px;
+  background:
+    radial-gradient(circle at top right, color-mix(in oklab, var(--primary) 9%, transparent) 0%, transparent 48%),
+    linear-gradient(180deg, color-mix(in oklab, var(--surface-2) 55%, var(--surface) 45%) 0%, var(--surface) 100%);
+}
+
+.form-section-emergency {
+  border: 1px solid color-mix(in oklab, var(--border) 70%, var(--primary) 30%);
+  border-radius: 14px;
+  padding: 22px 20px;
+  background:
+    radial-gradient(circle at top right, color-mix(in oklab, var(--primary) 8%, transparent) 0%, transparent 50%),
+    linear-gradient(180deg, color-mix(in oklab, var(--surface-2) 52%, var(--surface) 48%) 0%, var(--surface) 100%);
+}
+
+.form-section-personal h2 {
+  margin-bottom: 16px;
+  font-size: 21px;
+  letter-spacing: 0.01em;
+}
+
 /* Sección de foto */
 .foto-section {
   display: flex;
@@ -229,20 +309,167 @@
   font-weight: 600;
 }
 
-.form-grid {
+.nuevo-estudiante-container .form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 20px;
 }
 
-.form-group {
+.nuevo-estudiante-container .documento-lookup-grid {
+  display: grid;
+  grid-template-columns: minmax(220px, 320px) minmax(380px, 1fr);
+  gap: 20px;
+  margin-bottom: 14px;
+}
+
+.nuevo-estudiante-container .datos-panel {
+  border: 1px solid color-mix(in oklab, var(--border) 78%, var(--primary) 22%);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--surface) 85%, var(--surface-2) 15%);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
+  padding: 14px;
+}
+
+.nuevo-estudiante-container .datos-panel-lookup {
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--surface-2) 70%, var(--surface) 30%) 0%, var(--surface) 100%);
+}
+
+.nuevo-estudiante-container .datos-panel-main {
+  padding-top: 16px;
+}
+
+.datos-panel-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.datos-panel-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+}
+
+.datos-panel-header p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.panel-step {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, var(--primary) 0%, color-mix(in oklab, var(--primary) 70%, #1d4ed8 30%) 100%);
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3);
+  flex-shrink: 0;
+}
+
+.nuevo-estudiante-container .form-group {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.form-group.full-width {
+.form-section-personal .form-group {
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in oklab, var(--border) 82%, var(--primary) 18%);
+  background: color-mix(in oklab, var(--surface) 92%, white 8%);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.form-section-personal .form-group:focus-within {
+  border-color: color-mix(in oklab, var(--primary) 55%, var(--border) 45%);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 14%, transparent);
+  background: color-mix(in oklab, var(--surface) 94%, var(--primary) 6%);
+}
+
+.nuevo-estudiante-container .form-group.full-width {
   grid-column: 1 / -1;
+}
+
+.cedula-lookup-banner {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in oklab, var(--primary) 35%, var(--border) 65%);
+  background: color-mix(in oklab, var(--primary) 10%, var(--surface) 90%);
+  color: var(--text-primary);
+  font-size: 13px;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.08);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.cedula-lookup-source {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.cedula-lookup-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--primary);
+  border: 1px solid color-mix(in oklab, var(--primary) 42%, var(--border) 58%);
+  background: color-mix(in oklab, var(--surface) 55%, var(--primary) 45%);
+  white-space: nowrap;
+}
+
+.nuevo-estudiante-container .cedula-lookup-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+  width: 100%;
+}
+
+.nuevo-estudiante-container .cedula-lookup-row input {
+  min-width: 0;
+}
+
+.nuevo-estudiante-container .cedula-lookup-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 170px;
+  font-weight: 700;
+}
+
+.cedula-lookup-help {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+@media (max-width: 640px) {
+  .nuevo-estudiante-container .cedula-lookup-row {
+    grid-template-columns: 1fr;
+  }
+
+  .nuevo-estudiante-container .cedula-lookup-button {
+    justify-content: center;
+  }
 }
 
 .form-group label {
@@ -346,11 +573,12 @@
 
 /* Habeas data */
 .habeas-section {
-  margin-top: 8px;
+  margin-top: 12px;
   padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface-2);
+  border: 1px solid color-mix(in oklab, var(--border) 72%, var(--primary) 28%);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--surface) 88%, var(--surface-2) 12%);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
 }
 
 .habeas-text {
@@ -509,7 +737,39 @@
     padding: 20px;
   }
 
-  .form-grid {
+  .nuevo-estudiante-container .documento-lookup-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-section-personal {
+    padding: 16px 14px;
+  }
+
+  .form-section-photo {
+    padding: 16px 14px;
+  }
+
+  .form-section-emergency {
+    padding: 16px 14px;
+  }
+
+  .section-title-row {
+    align-items: flex-start;
+  }
+
+  .block-status-inline {
+    margin-left: 0;
+  }
+
+  .nuevo-estudiante-container .datos-panel {
+    padding: 12px;
+  }
+
+  .datos-panel-header {
+    margin-bottom: 10px;
+  }
+
+  .nuevo-estudiante-container .form-grid {
     grid-template-columns: 1fr;
   }
 

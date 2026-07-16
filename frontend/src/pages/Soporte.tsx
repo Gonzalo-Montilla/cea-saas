@@ -2,16 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { MessageSquare } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { SaasSupportTicketItem, tenantSupportAPI } from '../services/api';
+import { parseApiError } from '../utils/errors';
+import { formatDateTimeCO } from '../utils/formatters';
 import '../styles/Soporte.css';
 
 const STATUS_OPTIONS = ['', 'OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'];
 const PRIORITY_OPTIONS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 
 const formatDateTime = (value?: string | null) => {
-  if (!value) return '-';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '-';
-  return date.toLocaleString();
+  return formatDateTimeCO(value);
 };
 
 const statusClass = (value?: string | null) => `bo-status bo-status-${String(value || 'info').toLowerCase()}`;
@@ -42,7 +41,7 @@ export const Soporte = () => {
       });
       setTickets(response.items || []);
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudieron cargar los tickets');
+      setError(parseApiError(err, 'No se pudieron cargar los tickets'));
     } finally {
       setLoading(false);
     }
@@ -80,7 +79,7 @@ export const Soporte = () => {
       setInfoMessage('Ticket creado correctamente. Nuestro equipo lo revisará pronto.');
       await loadTickets();
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'No se pudo crear el ticket');
+      setError(parseApiError(err, 'No se pudo crear el ticket'));
     } finally {
       setCreating(false);
     }

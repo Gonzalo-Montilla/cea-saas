@@ -3,6 +3,7 @@ import { FilePlus, Eye, Download } from 'lucide-react';
 import { cajaAPI } from '../../services/api';
 import { ModalBase } from '../ui/ModalBase';
 import { ToastAlert } from '../ui/ToastAlert';
+import { formatCurrencyCOP } from '../../utils/formatters';
 
 interface OtrosIngresoItem {
   movimiento_id: number;
@@ -28,11 +29,7 @@ export const TablaOtrosIngresos = ({ ingresos }: TablaOtrosIngresosProps) => {
   const [feedback, setFeedback] = useState<string | null>(null);
 
   const formatearMoneda = (valor: number) => {
-    return new Intl.NumberFormat('es-CO', {
-      style: 'currency',
-      currency: 'COP',
-      minimumFractionDigits: 0
-    }).format(valor || 0);
+    return formatCurrencyCOP(valor || 0);
   };
 
   const formatearFecha = (fecha: string) => {

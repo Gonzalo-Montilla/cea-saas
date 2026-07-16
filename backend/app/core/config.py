@@ -67,6 +67,11 @@ class Settings(BaseSettings):
     HABEAS_CONTACTO: str = "+57 314 3005442"
     HABEAS_CORREO: str = "ceaeducardelcaucasas@gmail.com"
     HABEAS_POLITICA_URL: Optional[str] = None
+
+    # Integraciones externas
+    CORESOFT_API_BASE_URL: str = "https://coresoft.solutions/api"
+    CORESOFT_API_KEY: Optional[str] = None
+    CORESOFT_TIMEOUT_SECONDS: int = 12
     
     class Config:
         env_file = ".env"

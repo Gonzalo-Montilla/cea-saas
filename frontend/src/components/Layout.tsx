@@ -93,8 +93,13 @@ export const Layout = ({ children }: LayoutProps) => {
 
   const handleLogout = () => {
     const authMode = (localStorage.getItem('auth_mode') || 'tenant').toLowerCase();
+    const tenantSlug = (localStorage.getItem('tenant_slug') || '').trim().toLowerCase();
     logout();
-    navigate(authMode === 'global' ? '/login-saas' : '/login');
+    if (authMode === 'global') {
+      navigate('/login-saas');
+      return;
+    }
+    navigate(tenantSlug ? `/login?tenant=${encodeURIComponent(tenantSlug)}` : '/login');
   };
 
   const handleLogoutAllSessions = async () => {
