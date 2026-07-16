@@ -193,7 +193,7 @@ export const NuevoEstudiante = () => {
     }
   };
 
-  const soloDigitos = (value: string) => value.replace(/\D/g, '');
+  const soloDigitos = (value?: string | null) => String(value || '').replace(/\D/g, '');
   const formatDocumento = (value: string) => {
     if (tipoDocumento === 'PASAPORTE') {
       return value.toUpperCase().replace(/[^A-Z0-9\-]/g, '').slice(0, 20);

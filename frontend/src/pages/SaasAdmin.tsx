@@ -1236,7 +1236,7 @@ export const SaasAdmin = () => {
       if (editingBranchId) {
         await saasAdminAPI.updateTenantBranch(branchModalTenant.id, editingBranchId, {
           nombre: newBranchForm.nombre.trim(),
-          codigo: newBranchForm.codigo.trim() || null,
+          codigo: newBranchForm.codigo.trim() || undefined,
           ciudad: newBranchForm.ciudad.trim() || null,
           direccion: newBranchForm.direccion.trim() || null,
           contacto_email: newBranchForm.contacto_email.trim() || null,
@@ -1245,7 +1245,7 @@ export const SaasAdmin = () => {
       } else {
         await saasAdminAPI.createTenantBranch(branchModalTenant.id, {
           nombre: newBranchForm.nombre.trim(),
-          codigo: newBranchForm.codigo.trim() || null,
+          codigo: newBranchForm.codigo.trim() || undefined,
           ciudad: newBranchForm.ciudad.trim() || null,
           direccion: newBranchForm.direccion.trim() || null,
           contacto_email: newBranchForm.contacto_email.trim() || null,
